@@ -28,8 +28,8 @@ from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_mse_db
 from tests.common.signals import (
     make_test_psk_samples,
-    make_test_qam_samples,
     make_wiener_phase,
+    make_wiener_record,
 )
 
 # -----------------------------------------------------------------------------
@@ -42,14 +42,6 @@ def _qpsk_signal(n_sym=4000, snr_db=20.0, rng=None):
     seed = 0 if rng is None else int(rng.integers(0, 100000))
     return make_test_psk_samples(
         order=4, num_symbols=n_sym, sps=2, snr_db=snr_db, seed=seed
-    )
-
-
-def _qam16_signal(n_sym=4000, snr_db=25.0, rng=None):
-    """Return (samples_1sps, symbols) for 16-QAM at 1 SPS."""
-    seed = 1 if rng is None else int(rng.integers(0, 100000))
-    return make_test_qam_samples(
-        order=16, num_symbols=n_sym, sps=1, snr_db=snr_db, seed=seed
     )
 
 
@@ -74,20 +66,6 @@ def _wiener_phase_signal(n_sym=4000, snr_db=20.0, linewidth=1e4, fs=1.0, seed=42
 # -----------------------------------------------------------------------------
 # Test Classes
 # -----------------------------------------------------------------------------
-
-
-def _wiener_record(order, linewidth_ts, esn0_db, seed, n):
-    """16-QAM (or square ``order``) at 1 SPS under a Wiener phase with
-    increment variance ``2π Δν T`` and AWGN; returns ``(x, symbols, phase,
-    constellation)``."""
-    rng = np.random.default_rng(seed)
-    c = Constellation.qam(order)
-    syms = c.points.astype(np.complex64)[rng.integers(0, order, n)]
-    phase = np.cumsum(rng.standard_normal(n) * np.sqrt(2 * np.pi * linewidth_ts))
-    noise = np.sqrt(10 ** (-esn0_db / 10) / 2) * (
-        rng.standard_normal(n) + 1j * rng.standard_normal(n)
-    )
-    return (syms * np.exp(1j * phase) + noise).astype(np.complex64), syms, phase, c
 
 
 def _slips(y, syms, start, block=64):
@@ -136,7 +114,8 @@ class TestCPRPLLConvergence:
         counts = {"none": 0, "default": 0, "long": 0}
         repairs = {"none": None, "default": CycleSlip(), "long": CycleSlip(history=640)}
         for seed in range(4):
-            x, syms, _, c = _wiener_record(16, 1e-4, 16.0, seed, 20000)
+            c = Constellation.qam(16)
+            x, syms, _ = make_wiener_record(c, 1e-4, 16.0, n=20000, seed=seed)
             for name, cs in repairs.items():
                 res = lms(
                     xp.asarray(x),
@@ -158,7 +137,8 @@ class TestCPRPLLConvergence:
         the trajectory against the true phase."""
         counts = {"none": 0, "default": 0}
         for seed in range(4):
-            x, _, phase, c = _wiener_record(16, 1e-4, 16.0, seed, 20000)
+            c = Constellation.qam(16)
+            x, _, phase = make_wiener_record(c, 1e-4, 16.0, n=20000, seed=seed)
             for name, cs in (("none", None), ("default", CycleSlip())):
                 pll = PLL(normalized_bandwidth=2e-2, cycle_slip=cs)
                 v = to_numpy(estimate_carrier_phase(x, pll, constellation=c).value)
@@ -179,7 +159,8 @@ class TestCPRPLLConvergence:
         AWGN-only SER at 25 dB is ~1e-6).  The same record with B = 5e-3,
         whose phase-noise term alone is 0.13 rad, slips (baseline).
         """
-        x, syms, phase, c = _wiener_record(16, 1e-4, 25.0, 7, 5000)
+        c = Constellation.qam(16)
+        x, syms, phase = make_wiener_record(c, 1e-4, 25.0, n=5000, seed=7)
         sigma_d2, n0 = 2 * np.pi * 1e-4, 10 ** (-2.5)
 
         def run(bw):
@@ -376,7 +357,8 @@ class TestCPRBPSConvergence:
         frozen so that the trajectory carries the whole rotation (an adapting
         tap takes a share of it).  Without CPR the same equalizer loses the
         phase (baseline)."""
-        x, syms, phase, c = _wiener_record(16, 5e-5, 25.0, 11, 5000)
+        c = Constellation.qam(16)
+        x, syms, phase = make_wiener_record(c, 5e-5, 25.0, n=5000, seed=11)
         kw = dict(num_taps=1, sps=1, step_size=0.0, constellation=c)
         res = lms(
             xp.asarray(x), syms[:1000], **kw, cpr=BPS(test_phases=64, block_size=32)
@@ -393,7 +375,8 @@ class TestCPRBPSConvergence:
         """LMS + BPS with an 8- and a 32-symbol window tracks a Wiener phase
         without symbol errors against the reference.  (A one-symbol window
         fits many rotations of 16-QAM and slips: SER 0.83 on this record.)"""
-        x, syms, _, c = _wiener_record(16, 5e-5, 25.0, 13, 4000)
+        c = Constellation.qam(16)
+        x, syms, _ = make_wiener_record(c, 5e-5, 25.0, n=4000, seed=13)
         res = lms(
             xp.asarray(x),
             syms[:1000],
@@ -407,7 +390,8 @@ class TestCPRBPSConvergence:
     def test_rls_bps_convergence(self, xp):
         """RLS + BPS tracks a Wiener phase: no symbol errors against the
         reference after training (trajectory length is the record's)."""
-        x, syms, _, c = _wiener_record(16, 5e-5, 25.0, 17, 3000)
+        c = Constellation.qam(16)
+        x, syms, _ = make_wiener_record(c, 5e-5, 25.0, n=3000, seed=17)
         res = rls(
             xp.asarray(x),
             syms[:500],
@@ -697,7 +681,8 @@ class TestCPRBPSCycleSlip:
         with it), so the test fails if the repair does nothing."""
         counts = {True: 0, False: 0}
         for seed in range(2):
-            x, syms, _, c = _wiener_record(16, 1e-4, 12.0, seed, 20000)
+            c = Constellation.qam(16)
+            x, syms, _ = make_wiener_record(c, 1e-4, 12.0, n=20000, seed=seed)
             for repair in counts:
                 bps = BPS(
                     test_phases=32,

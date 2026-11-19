@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from types import ModuleType
 from typing import Any
 
 import numpy as np
@@ -18,6 +17,7 @@ from .._common import (
     _check_cma_kurtosis,
     _cma_profile,
     _godard_radius,
+    _numba,
     _rde_ring_radii,
     _rde_rings,
 )
@@ -34,23 +34,6 @@ from ._setup import (
     _run_resumable,
     _Snapshot,
 )
-
-
-def _loops() -> ModuleType:
-    """``equalization._numba_loops``, imported (with Numba) on first use."""
-    from .. import _numba_loops
-
-    return _numba_loops
-
-
-def _get_numba_cma() -> Any:
-    """CMA, blind or pilot-aided."""
-    return _loops().cma_loop
-
-
-def _get_numba_rde() -> Any:
-    """RDE, blind or pilot-aided."""
-    return _loops().rde_loop
 
 
 def _check_pilots(
@@ -134,12 +117,12 @@ def _blind_equalizer(
     if kind == "cma":
         r2 = _godard_radius(constellation)
         logger.debug("CMA R2: %.4f", r2)
-        target, kernel = np.float32(r2), _get_numba_cma()
+        target, kernel = np.float32(r2), _numba().cma_loop
     else:
         radii = _rde_ring_radii(constellation)
         logger.debug("RDE radii: %s", ", ".join(f"{r:.4f}" for r in radii))
         target = _rde_rings(radii)
-        kernel = _get_numba_rde()
+        kernel = _numba().rde_loop
 
     # RMS-normalize samples to unit symbol-rate power (no training)
     run = _prepare_sequential(

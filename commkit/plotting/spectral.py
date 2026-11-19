@@ -7,8 +7,9 @@ from typing import Any
 
 import numpy as np
 
+from .. import spectral
 from .._constants import SPEED_OF_LIGHT
-from ..backend import dispatch, to_device
+from ..backend import _to_host, dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..logger import logger
 from .theme import (
@@ -100,7 +101,6 @@ def plot_psd(
     center_frequency, domain = _resolve_band(signal_adapter, center_frequency, domain)
     logger.debug("Generating PSD plot (sampling_rate=%s Hz).", sampling_rate)
     x, _, _ = dispatch(x)
-    from .. import spectral
 
     def draw(ax: Any, row: Any, title: str | None) -> None:
         # Calculate PSD
@@ -265,7 +265,6 @@ def plot_spectrogram(
     center_frequency, domain = _resolve_band(signal_adapter, center_frequency, domain)
     logger.debug("Generating spectrogram plot (sampling_rate=%s Hz).", sampling_rate)
     x, _, _ = dispatch(x)
-    from .. import spectral
 
     def draw(ax: Any, row: Any, title: str | None) -> None:
         # Calculate spectrogram
@@ -284,8 +283,8 @@ def plot_spectrogram(
 
         # The axes are small: bring them over to pick the crop; the values are
         # cropped and converted on the device and transferred once.
-        f = np.asarray(to_device(spec.frequencies, "cpu"))
-        t = np.asarray(to_device(spec.times, "cpu"))
+        f = _to_host(spec.frequencies)
+        t = _to_host(spec.times)
         Sxx, xp, _ = dispatch(spec.values)
 
         # Shift frequency axis first
@@ -337,7 +336,7 @@ def plot_spectrogram(
             # Angle, phase, etc., plot linearly
             Sxx_plot = Sxx_slice
         # Time on the y-axis: (len(t_plot), len(f_plot)).
-        image = np.asarray(to_device(Sxx_plot.T, "cpu"))
+        image = _to_host(Sxx_plot.T)
 
         # The STFT grids are uniform, so an image with the cell edges as its
         # extent draws the same picture as pcolormesh, much faster.

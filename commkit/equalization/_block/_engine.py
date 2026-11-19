@@ -23,9 +23,10 @@ from ..._array import as_2d, warn_if_double
 from ..._cuda.graphs import GraphRunner
 from ...backend import ArrayType, dispatch, to_device
 from ...logger import logger
+from ...math import _next_pow2
 from .._common import (
     _build_padded_samples,
-    _init_butterfly_weights_numpy,
+    _init_butterfly_weights,
     _normalize_inputs,
     _validate_sps,
     _validate_w_init,
@@ -245,15 +246,14 @@ def _prepare_block(
         samples = samples.copy()
         samples[..., smask] /= amp
 
-    samples, training_symbols, eq_norm = _normalize_inputs(
+    samples, eq_norm = _normalize_inputs(
         samples,
-        training_symbols,
         input_norm_factor=None if state is None else state.input_norm_factor,
     )
 
     # Overlap-save FFT size: the next power of 2 >= block_size*sps + T - 1.
     ols_min = block_size * sps + num_taps - 1
-    fftsize = 1 << (ols_min - 1).bit_length()
+    fftsize = _next_pow2(ols_min)
 
     if state is None:
         c_tap = num_taps // 2
@@ -295,7 +295,7 @@ def _prepare_block(
         w_arr = np.ascontiguousarray(to_device(initial_taps, "cpu"), dtype=np.complex64)
         h = xp.asarray(_validate_w_init(w_arr, C, num_taps).copy())
     else:
-        h = xp.asarray(_init_butterfly_weights_numpy(C, num_taps))  # (C, C, T)
+        h = xp.asarray(_init_butterfly_weights(C, num_taps))  # (C, C, T)
 
     return _Block(
         xp=xp,

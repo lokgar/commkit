@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .._array import as_2d, restore_1d
-from ..backend import ArrayType, dispatch, to_device
+from ..backend import ArrayType, _to_host, dispatch, to_device
 
 __all__ = ["AllanDeviation", "allan_deviation"]
 
@@ -97,7 +97,7 @@ def allan_deviation(
         m_max = max(1, n // 4)
         ms = np.unique(np.round(np.geomspace(1, m_max, num_taus)).astype(int))
     else:
-        taus_cpu = np.asarray(to_device(taus, "cpu"), dtype=np.float64)
+        taus_cpu = _to_host(taus, np.float64)
         ms = np.unique(np.maximum(1, np.round(taus_cpu / tau0).astype(int)))
         ms = ms[ms <= max(1, (x.shape[-1] - 1) // 2)]
 

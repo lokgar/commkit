@@ -11,12 +11,15 @@ from typing import Any, Literal
 import numpy as np
 
 from .. import _fft
-from .._array import broadcast_channels
+from .._array import broadcast_channels, freeze_host
+from .._peaks import refine_tones
 from ..backend import ArrayType, dispatch, to_device
+from ..frequency import correct_frequency_offset
 from ..logger import logger
 from ..math import _remove_linear_trend
-from ._common import _Context, _Phase
+from ._common import _Context
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
+from .estimates import PilotInterpolationEstimate, PilotToneEstimate, PilotTonesEstimate
 
 __all__ = ["PilotInterpolation", "PilotTone", "PilotTones"]
 
@@ -53,8 +56,8 @@ class PilotInterpolation:
     cycle_slip: CycleSlip | None = None
 
     def __post_init__(self) -> None:
-        indices = np.array(to_device(self.indices, "cpu")).astype(np.intp)
-        values = np.array(to_device(self.values, "cpu"))
+        indices = freeze_host(self, "indices", self.indices, np.intp)
+        values = freeze_host(self, "values", self.values)
         if indices.ndim != 1 or indices.size < 1:
             raise ValueError("indices must be 1-D with at least one pilot.")
         if np.any(np.diff(indices) <= 0):
@@ -69,9 +72,6 @@ class PilotInterpolation:
                 f"Unknown interpolation method: {self.interpolation!r}. "
                 "Choose 'linear' or 'cubic'."
             )
-        for name, arr in (("indices", indices), ("values", values)):
-            arr.setflags(write=False)
-            object.__setattr__(self, name, arr)
 
     @classmethod
     def from_frame(
@@ -110,7 +110,7 @@ class PilotInterpolation:
 
 def _pilot_aided(
     symbols: ArrayType, method: PilotInterpolation, ctx: _Context
-) -> _Phase:
+) -> PilotInterpolationEstimate:
     """Pilot-aided phase of ``(C, N)`` symbols."""
     symbols, xp, _ = dispatch(symbols)
     C, N = symbols.shape
@@ -189,8 +189,8 @@ def _pilot_aided(
         "[P=%s pilots, C=%s]",
         (P, C),
     )
-    return _Phase(
-        phase=phi_full, pilot_indices=pilot_indices_np, pilot_phase=phi_pilots_u
+    return PilotInterpolationEstimate(
+        value=phi_full, pilot_indices=pilot_indices_np, pilot_phase=phi_pilots_u
     )
 
 
@@ -267,8 +267,6 @@ def _extract_pilot_phasor(
     _PilotPhasor
         The phasor, the tone centers and the signal and noise powers.
     """
-    from .._peaks import refine_tones
-    from ..frequency import correct_frequency_offset
 
     C, N = samples.shape
     df = sampling_rate / N
@@ -421,7 +419,9 @@ class PilotTone:
             raise ValueError(f"bandwidth must be > 0, got {self.bandwidth}.")
 
 
-def _pilot_tone(samples: ArrayType, method: PilotTone, ctx: _Context) -> _Phase:
+def _pilot_tone(
+    samples: ArrayType, method: PilotTone, ctx: _Context
+) -> PilotToneEstimate:
     """Pilot-tone phase of ``(C, N)`` samples."""
     sampling_rate = ctx.need_sampling_rate(method)
     tone_frequency = method.frequency
@@ -476,7 +476,7 @@ def _pilot_tone(samples: ArrayType, method: PilotTone, ctx: _Context) -> _Phase:
         "[f_p=%.3g Hz, B=%.3g Hz, refine=%s, remove_foe=%s, C=%s]",
         (tone_frequency, bandwidth, method.refine, method.remove_frequency_offset, C),
     )
-    return _Phase(phase=theta, tone_frequencies=np.asarray(f_centers))
+    return PilotToneEstimate(value=theta, tone_frequencies=np.asarray(f_centers))
 
 
 def _lowpass_fft(z: ArrayType, sampling_rate: float, cutoff: float, xp) -> ArrayType:
@@ -562,7 +562,9 @@ class PilotTones:
                 )
 
 
-def _pilot_tones(samples: ArrayType, method: PilotTones, ctx: _Context) -> _Phase:
+def _pilot_tones(
+    samples: ArrayType, method: PilotTones, ctx: _Context
+) -> PilotTonesEstimate:
     """MRC pilot-tones phase of ``(C, N)`` samples."""
     sampling_rate = ctx.need_sampling_rate(method)
     tone_frequencies = list(method.frequencies)
@@ -674,8 +676,8 @@ def _pilot_tones(samples: ArrayType, method: PilotTones, ctx: _Context) -> _Phas
             C,
         )
 
-    return _Phase(
-        phase=phi_full,
+    return PilotTonesEstimate(
+        value=phi_full,
         tone_frequencies=np.stack([np.asarray(fc) for fc in f_centers], axis=-1),
         tone_snr_db=10.0 * np.log10(snr),
         differential_phase=xp.stack(delta),

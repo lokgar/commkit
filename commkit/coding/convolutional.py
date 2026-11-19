@@ -22,12 +22,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from .base import _Code, _Codec, _Decoded, _register
+from .base import _CODECS, _Code, _Codec, _Decoded, _numba
 
 __all__ = ["BCJR", "ConvolutionalCode", "Viterbi"]
 
@@ -234,21 +234,6 @@ def _encode(code: ConvolutionalCode, bits: ArrayType) -> ArrayType:
     return xp.stack(outs, axis=2).reshape(rows, -1)
 
 
-def _get_numba_trellis(name: str) -> Any:
-    """Numba Viterbi and BCJR over a trellis's tables, parallel over blocks.
-
-    ``viterbi`` maximizes ``sum (1 - 2 c) L`` over paths from state 0 back
-    to state 0, or once per start state when ``tail_biting`` (start and end
-    equal).  ``bcjr`` is shared with the turbo decoder: per
-    step a channel LLR for each output and an a-priori LLR for the input,
-    ``forced[t]`` steps (termination tails) taking the tail input only;
-    it returns the a-posteriori LLRs of the inputs and of the outputs.
-    """
-    from . import _numba_loops
-
-    return getattr(_numba_loops, name)
-
-
 def _decode(
     code: ConvolutionalCode, llrs: ArrayType, method: Viterbi | BCJR
 ) -> _Decoded:
@@ -262,9 +247,7 @@ def _decode(
     tail_biting = not code._zero
     if isinstance(method, Viterbi):
         bits = np.empty((rows, code.k), dtype=np.int8)
-        _get_numba_trellis("viterbi")(
-            host, trellis.next, trellis.outputs, tail_biting, code.k, bits
-        )
+        _numba().viterbi(host, trellis.next, trellis.outputs, tail_biting, code.k, bits)
         soft = None
     else:
         if tail_biting:
@@ -275,7 +258,7 @@ def _decode(
         app_c = np.empty((rows, steps, r))
         forced = np.zeros(steps, dtype=np.bool_)
         forced[code.k :] = True
-        _get_numba_trellis("bcjr_blocks")(
+        _numba().bcjr_blocks(
             host, trellis.next, trellis.outputs, trellis.tail, forced, 0, 0, method.method == "exact",
             app_u, app_c,
         )  # fmt: skip
@@ -290,13 +273,10 @@ def _decode(
     )
 
 
-_register(
-    ConvolutionalCode,
-    _Codec(
-        encode=_encode,
-        decode=_decode,
-        default_method=lambda code: Viterbi(),
-        methods=(Viterbi, BCJR),
-        checked=lambda code, method: False,
-    ),
+_CODECS[ConvolutionalCode] = _Codec(
+    encode=_encode,
+    decode=_decode,
+    default_method=lambda code: Viterbi(),
+    methods=(Viterbi, BCJR),
+    checked=lambda code, method: False,
 )

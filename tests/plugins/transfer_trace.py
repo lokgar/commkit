@@ -47,7 +47,10 @@ _PAYLOAD = "transmitted payload drawn on the host"
 
 # "path/to/module.py::qualname" -> why the transfer is deliberate.
 _DOCUMENTED: dict[str, str] = {
+    "_array.py::freeze_host": "value object: host copy of an array field",
     "analysis/linewidth/phase.py::_beta_separation": _REPORT,
+    "analysis/linewidth/phase.py::_increment_subtract": _HOST_VALUE
+    + " (reference symbols)",
     "analysis/linewidth/dsh.py::_dsh_fm_psd": _REPORT,
     "analysis/linewidth/dsh.py::_dsh_lorentzian": _REPORT,
     "analysis/linewidth/dsh.py::_not_a_beat": _REPORT,
@@ -74,7 +77,7 @@ _DOCUMENTED: dict[str, str] = {
     "equalization/_block/_engine.py::_block_state": _STATE,
     "equalization/_block/_engine.py::_prepare_block": _HOST_VALUE
     + " (training symbols, pilot mask)",
-    "equalization/_common.py::_unpack_result_numpy": _RECURSION,
+    "equalization/_common.py::_unpack_result": _RECURSION,
     "equalization/polarization.py::_jones_at_grid_points": _HOST_VALUE + " (taps)",
     "equalization/_sequential/_setup.py::_assemble_sequential": _RECURSION,
     "equalization/_sequential/_setup.py::_prepare_sequential": _RECURSION,
@@ -86,11 +89,11 @@ _DOCUMENTED: dict[str, str] = {
     "filtering/fiber/estimation.py::_clock_tone": _REPORT
     + " (the dispersion scan, searched for its peak on the host)",
     "frequency.py::_mengali_morelli": _RECURSION + " (bootstrap over the lags)",
-    "_cuda/__init__.py::_iir_factory.<locals>.launch": _HOST_VALUE
+    "frequency.py::_pilot_slope": _HOST_VALUE + " (pilot symbols and indices)",
+    "_cuda/filters.py::_iir_factory.<locals>.launch": _HOST_VALUE
     + " (the IIR state transitions)",
     "metrics/_common.py::_paired": _HOST_VALUE + " (reference symbols)",
     "coding/performance.py::error_rate_curve": _PAYLOAD + " (per batch of blocks)",
-    "recovery/corrections.py::ConstantPhase.__post_init__": "value object: host copy",
     "recovery/corrections.py::_data_aided": _HOST_VALUE + " (reference symbols)",
     "recovery/corrections.py::correct_cycle_slips": _RECURSION,
     "recovery/pilots.py::_extract_pilot_phasor": _HOST_VALUE

@@ -19,6 +19,8 @@ import numpy as np
 
 from .._array import validate_array
 from ..backend import dispatch, to_device
+from ..coding import DecodeResult, ErrorRateCurve, ExitChart, LDPCCode, LinearBlockCode
+from ..core.signal import Reference, Signal
 from ..logger import logger
 from .theme import (
     _finish,
@@ -49,8 +51,6 @@ _DENSE_ENTRIES = 1_000_000
 
 def _decoded_llrs(llrs: Any, bits: Any) -> tuple[Any, Any]:
     """For a DecodeResult: its LLRs and the reference's transmitted bits."""
-    from ..coding import DecodeResult
-    from ..core.signal import Reference, Signal
 
     if not isinstance(llrs, DecodeResult):
         return llrs, bits
@@ -148,8 +148,6 @@ def plot_error_rate(
     Rates of zero are left out of the logarithmic axes.
     """
     from scipy import stats
-
-    from ..coding import ErrorRateCurve
 
     if x_axis not in ("esn0", "ebn0"):
         raise ValueError(
@@ -500,8 +498,6 @@ def plot_parity_check(
     if label is not None and quantity != "degrees":
         raise ValueError("label requires quantity='degrees'")
 
-    from ..coding import LDPCCode, LinearBlockCode
-
     punctured = 0
     if isinstance(code, LDPCCode):
         h = code.parity_check()
@@ -614,7 +610,6 @@ def plot_exit_chart(
     TypeError
         If ``chart`` is not an :class:`~commkit.coding.ExitChart`.
     """
-    from ..coding import ExitChart
 
     if not isinstance(chart, ExitChart):
         raise TypeError(

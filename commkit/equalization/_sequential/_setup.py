@@ -23,13 +23,15 @@ import numpy as np
 
 from ..._array import restore_1d, warn_if_double
 from ...backend import ArrayType, dispatch, to_device
+from ...core._signal_adapter import require_choice
+from ...recovery import BPS, PLL, CycleSlip
 from .._common import (
     _build_padded_samples,
     _cpr_symmetry,
-    _init_butterfly_weights_numpy,
+    _init_butterfly_weights,
     _normalize_inputs,
-    _prepare_training_numpy,
-    _unpack_result_numpy,
+    _prepare_training,
+    _unpack_result,
     _validate_sps,
     _validate_w_init,
 )
@@ -168,9 +170,8 @@ def _prepare_sequential(
         if training_symbols is not None
         else None
     )
-    samples_np, training_np, eq_norm = _normalize_inputs(
+    samples_np, eq_norm = _normalize_inputs(
         samples_np,
-        training_np,
         input_norm_factor=None if state is None else state.input_norm_factor,
     )
     if state is None:
@@ -196,7 +197,7 @@ def _prepare_sequential(
     # Symbol k's window is x[:, k*stride : k*stride + T]; it lies inside the
     # data while k*stride + T <= real_end.
     n_done = min(n_sym, max(0, (real_end - num_taps) // stride + 1))
-    train_full, n_train = _prepare_training_numpy(training_np, num_ch, n_sym)
+    train_full, n_train = _prepare_training(training_np, num_ch, n_sym)
 
     if state is not None:
         W = state.weights.copy()
@@ -204,7 +205,7 @@ def _prepare_sequential(
         w_arr = np.ascontiguousarray(to_device(initial_taps, "cpu"), dtype=np.complex64)
         W = _validate_w_init(w_arr, num_ch, num_taps).copy()
     else:
-        W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
+        W = _init_butterfly_weights(num_ch, num_taps, center_tap=center_tap)
 
     y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
     e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
@@ -262,11 +263,9 @@ def _dd_constellation(
     """
     if constellation is None and not decisions:
         return np.zeros(1, dtype=np.complex64)
-    if constellation is None:
-        raise ValueError(
-            f"{function_name} needs a constellation for its decisions (pass "
-            "constellation= or a Signal that has one)."
-        )
+    require_choice(
+        constellation, "constellation", function_name, purpose=" for its decisions"
+    )
     return np.ascontiguousarray(constellation.points, dtype=np.complex64)
 
 
@@ -358,7 +357,6 @@ class _InlineCpr:
 
 def _inline_cpr(cpr: Any, constellation: Any, function_name: str) -> _InlineCpr | None:
     """Resolve ``cpr=`` (``PLL``, ``BPS`` or ``None``) for the LMS/RLS kernels."""
-    from ...recovery import BPS, PLL, CycleSlip
 
     if cpr is None:
         return None
@@ -442,7 +440,7 @@ def _assemble_sequential(
         inverse_correlation=snapshot.inverse_correlation,
         carrier=snapshot.carrier,
     )
-    return _unpack_result_numpy(
+    return _unpack_result(
         run.y_out,
         run.e_out,
         run.W,

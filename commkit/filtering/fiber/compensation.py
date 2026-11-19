@@ -51,12 +51,13 @@ from ..._dispersion import (
     spread_samples,
 )
 from ..._fiber import Fiber, check_link, propagate, to_watts
-from ...backend import ArrayType, dispatch, to_device
+from ...backend import ArrayType, _to_host, dispatch
 from ...core._signal_adapter import (
     S,
     adapt_signal,
 )
 from ...logger import logger
+from ...math import _next_pow2
 from ..linear import fir_filter
 from .estimation import (
     ChromaticDispersionEstimate,
@@ -76,8 +77,7 @@ __all__ = [
 def _dispersion_value(value: Any, function_name: str) -> float:
     """One accumulated dispersion in ps/nm from a number or an estimate's
     value (0-d, or ``(C,)`` of one joint estimate)."""
-    v = np.asarray(to_device(value, "cpu") if hasattr(value, "shape") else value)
-    v = v.astype(np.float64).ravel()
+    v = _to_host(value, np.float64).ravel()
     if (
         v.size == 0
         or not np.all(np.isfinite(v))
@@ -620,7 +620,7 @@ def _overlap_save_blocks(
     aside, as the previous batch overwrites it.
     """
     C, N = field.shape
-    length = max(_MIN_BLOCK, 1 << (8 * guard - 1).bit_length())
+    length = max(_MIN_BLOCK, _next_pow2(max(8 * guard, 1)))
     hop = length - 2 * guard
     num_blocks = -(-N // hop)
     batch = _BATCH_SAMPLES_CPU if xp is np else _BATCH_SAMPLES_GPU

@@ -7,22 +7,17 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ..mapping._lattice import square_grid
-from ._common import _Context, _Phase, _resolve_pll_gains
+from ..math import normalize
+from ._common import _Context, _numba, _resolve_pll_gains
 from .corrections import (
     _HISTORY_SPAN,
     CycleSlip,
     _log_phase_summary,
     _repair_slips,
 )
+from .estimates import CarrierPhaseEstimate
 
 __all__ = ["PLL"]
-
-
-def _get_numba_dd_pll() -> Any:
-    """The PLL kernel: one loop per channel, or one shared by the channels."""
-    from . import _numba_loops
-
-    return _numba_loops.dd_pll
 
 
 @dataclass(frozen=True)
@@ -109,9 +104,8 @@ class PLL:
         return max(10, min(_HISTORY_SPAN, round(8.0 / mu)))
 
 
-def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
+def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> CarrierPhaseEstimate:
     """Decision-directed PLL phase of ``(C, N)`` symbols."""
-    from ..math import normalize
 
     constellation = ctx.need_constellation(method)
     mu, beta = method.gains
@@ -162,7 +156,7 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
     )
 
     joint = method.joint_channels and C > 1
-    phi = _get_numba_dd_pll()(symbols_cpu, joint, *loop_args)  # (1 or C, N)
+    phi = _numba().dd_pll(symbols_cpu, joint, *loop_args)  # (1 or C, N)
     phi = _repair_slips(
         phi,
         method.cycle_slip,
@@ -181,4 +175,4 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
         "[C=%s]",
         (C,),
     )
-    return _Phase(phase=phi_full)
+    return CarrierPhaseEstimate(value=phi_full)

@@ -27,7 +27,7 @@ import numpy as np
 
 from ..backend import ArrayType, _device_tables, dispatch
 from ._gf2 import matmul_mod2
-from .base import _Code, _Codec, _Decoded, _hard, _register
+from .base import _CODECS, _Code, _Codec, _Decoded, _hard
 
 __all__ = ["CRC"]
 
@@ -232,14 +232,11 @@ class _Check:
     """The only decoder of a CRC: compare the recomputed check bits."""
 
 
-_register(
-    CRC,
-    _Codec(
-        encode=_encode,
-        decode=_decode,
-        default_method=lambda code: _Check(),
-        methods=(_Check,),
-        checked=lambda code, method: True,
-        info_positions=lambda code: np.arange(code.k),
-    ),
+_CODECS[CRC] = _Codec(
+    encode=_encode,
+    decode=_decode,
+    default_method=lambda code: _Check(),
+    methods=(_Check,),
+    checked=lambda code, method: True,
+    info_positions=lambda code: np.arange(code.k),
 )

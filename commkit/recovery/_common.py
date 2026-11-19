@@ -6,33 +6,20 @@ PLL loop gains and block-phase estimation, used by the method modules.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any
 
 import numpy as np
 
 from ..backend import ArrayType, to_device
+from ..core._signal_adapter import require_choice
 
 
-def _pll_gains(bandwidth: float) -> tuple[np.float32, np.float32]:
-    """Convert normalized loop bandwidth to PI gains (mu, beta).
+def _numba() -> ModuleType:
+    """``recovery._numba_loops``, imported (with Numba) on first use."""
+    from . import _numba_loops
 
-    Uses the usual second-order loop approximation for a critically damped
-    (ζ = 1) PI loop:  μ ≈ 4·B_L,  β ≈ 4·B_L².  (With ``ωₙT = √β = 2B`` and
-    ``ζ = μ/(2√β) = 1``.)
-
-    Parameters
-    ----------
-    bandwidth : float
-        Normalized one-sided loop bandwidth as a fraction of the symbol rate,
-        e.g. ``1e-3`` for a narrow loop.
-
-    Returns
-    -------
-    mu, beta : float32
-    """
-    mu = np.float32(4.0 * bandwidth)
-    beta = np.float32(4.0 * bandwidth**2)
-    return mu, beta
+    return _numba_loops
 
 
 def _resolve_pll_gains(
@@ -49,7 +36,8 @@ def _resolve_pll_gains(
     * ``mu`` (the proportional gain) given: raw PI gains; ``beta`` (the
       integral gain) defaults to ``0.0`` (a first-order loop).
     * ``mu`` is ``None``: critically damped (ζ = 1) gains ``μ = 4B, β = 4B²``
-      from ``bandwidth`` via ``_pll_gains``.
+      from ``bandwidth`` (the second-order loop approximation of a
+      critically damped PI loop: ``ωₙT = √β = 2B``, ``ζ = μ/(2√β) = 1``).
 
     ``beta`` without ``mu`` is ambiguous and raises ``ValueError``.
 
@@ -63,7 +51,7 @@ def _resolve_pll_gains(
         raise ValueError(
             "integral_gain requires proportional_gain (or use normalized_bandwidth)."
         )
-    return _pll_gains(bandwidth)
+    return np.float32(4.0 * bandwidth), np.float32(4.0 * bandwidth**2)
 
 
 @dataclass(frozen=True)
@@ -76,12 +64,12 @@ class _Context:
 
     def need_constellation(self, method: object) -> Any:
         """The constellation, or raise naming the method that needs it."""
-        if self.constellation is None:
-            raise ValueError(
-                f"estimate_carrier_phase(): {type(method).__name__} needs a "
-                "constellation (pass constellation= or a Signal that has one)."
-            )
-        return self.constellation
+        return require_choice(
+            self.constellation,
+            "constellation",
+            "estimate_carrier_phase()",
+            purpose=f" for {type(method).__name__}",
+        )
 
     def need_sampling_rate(self, method: object) -> float:
         """The sampling rate, or raise naming the method that needs it."""
@@ -93,27 +81,7 @@ class _Context:
         return self.sampling_rate
 
 
-@dataclass(frozen=True)
-class _Phase:
-    """An estimator's (C, N) trajectory and diagnostics, before ``restore_1d``.
-
-    Field meanings are those of ``CarrierPhaseEstimate``; per-channel fields
-    keep their leading channel axis here.
-    """
-
-    phase: ArrayType
-    block_centers: np.ndarray | None = None
-    block_phase: ArrayType | None = None
-    pilot_indices: np.ndarray | None = None
-    pilot_phase: ArrayType | None = None
-    tone_frequencies: np.ndarray | None = None
-    tone_snr_db: np.ndarray | None = None
-    differential_phase: ArrayType | None = None
-    reference_tone: int | None = None
-    used_tones: tuple[int, ...] | None = None
-
-
-def _check_blocks(N: int, block_size: int) -> int:
+def _num_blocks(N: int, block_size: int) -> int:
     """Number of whole blocks; raises when there is none."""
     N_blocks = N // block_size
     if N_blocks == 0:
@@ -178,6 +146,17 @@ def _mth_power_geometry(constellation: Any) -> tuple[int, bool, float]:
     if quantum - bias < 1e-9:  # -0 rounds up to a full quantum
         bias = 0.0
     return M, project, bias
+
+
+def _mfold_unwrap(phi: ArrayType, M: int, xp: Any) -> ArrayType:
+    """Unwrap ``M``-fold phases along the last axis, in float64.
+
+    Scales into the 2π domain, unwraps and scales back, so steps of
+    ``2π/M`` count as wraps.  The float64 cast comes first: ``unwrap`` keeps
+    its input's dtype, and float32 rounding in the discontinuity test causes
+    spurious slips.
+    """
+    return xp.unwrap((phi * M).astype(xp.float64), axis=-1) / M
 
 
 def _vv_block_phase(
@@ -254,7 +233,7 @@ def _vv_block_phase(
         # Sum M-th-power phasors across channels -> single block-phase trajectory
         S_b_joint = xp.sum(S_b, axis=0)  # (N_blocks,)
         phi_raw_joint = xp.angle(S_b_joint) / M
-        phi_u_joint = xp.unwrap((phi_raw_joint * M).astype(xp.float64)) / M
+        phi_u_joint = _mfold_unwrap(phi_raw_joint, M, xp)
         if bias:
             phi_u_joint = phi_u_joint - bias
         phi_u = xp.broadcast_to(phi_u_joint, (C, N_blocks)).copy()
@@ -262,12 +241,7 @@ def _vv_block_phase(
         # Raw block phase in [-π/M, π/M)
         phi_raw = xp.angle(S_b) / M  # (C, N_blocks)
 
-        # M-fold unwrap: scale into 2π domain, unwrap, re-scale back.
-        # Cast to float64 before unwrap - cp.unwrap preserves input dtype so float32
-        # would lose precision during the discontinuity test (diff vs 2π threshold).
-        phi_u = (
-            xp.unwrap((phi_raw * M).astype(xp.float64), axis=-1) / M
-        )  # (C, N_blocks)
+        phi_u = _mfold_unwrap(phi_raw, M, xp)  # (C, N_blocks)
 
         if bias:
             phi_u = phi_u - bias

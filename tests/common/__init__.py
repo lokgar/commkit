@@ -11,7 +11,6 @@ from tests.common.metrics import (
     calc_freq_response,
     calc_mse_db,
     calc_rms_phase_error,
-    calc_tail_mse_db,
 )
 from tests.common.signals import (
     apply_phase_ramp,
@@ -36,7 +35,6 @@ __all__ = [
     "calc_freq_response",
     "calc_mse_db",
     "calc_rms_phase_error",
-    "calc_tail_mse_db",
     "device_of",
     "make_adapter_test_signal",
     "make_ambiguous_qam16",

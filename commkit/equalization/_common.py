@@ -6,25 +6,33 @@ sequential and the block equalizers.
 
 from __future__ import annotations
 
+from types import ModuleType
 from typing import Any
 
 import numpy as np
 
 from .._array import restore_1d
-from ..backend import dispatch, to_device
+from ..backend import _to_host, dispatch, to_device
 from ..core._signal_adapter import require_integer_sps
 from ..logger import logger
+from ..math import rms
 from .result import EqualizerResult, EqualizerState
+
+
+def _numba() -> ModuleType:
+    """``equalization._numba_loops``, imported (with Numba) on first use."""
+    from . import _numba_loops
+
+    return _numba_loops
+
 
 # -----------------------------------------------------------------------------
 # SHARED HELPERS
 # -----------------------------------------------------------------------------
 
 
-def _normalize_inputs(
-    samples: Any, training_symbols: Any, input_norm_factor: Any = None
-) -> tuple[Any, Any, Any]:
-    """Scale samples to unit mean power per channel; training symbols pass.
+def _normalize_inputs(samples: Any, input_norm_factor: Any = None) -> tuple[Any, Any]:
+    """Scale samples to unit mean power per channel.
 
     The automatic gain control in front of the equalizer: each channel is
     divided by its RMS over the whole record, so the regressor has unit
@@ -41,9 +49,8 @@ def _normalize_inputs(
     Parameters
     ----------
     samples : array_like
-        Complex samples, ``(N,)`` or ``(C, N)``, NumPy or CuPy.
-    training_symbols : array_like or None
-        Training symbols at one sample per symbol, ``(K,)`` or ``(C, K)``.
+        Complex samples, ``(N,)`` or ``(C, N)``, NumPy or CuPy.  Training
+        symbols are not scaled: they are already on the constellation's scale.
     input_norm_factor : float or numpy.ndarray, optional
         Factor to divide by instead of measuring the RMS: the
         ``EqualizerResult.input_norm_factor`` of an earlier call, to keep
@@ -54,8 +61,6 @@ def _normalize_inputs(
     -------
     samples : ndarray
         The samples at unit mean power, same shape and device.
-    training_symbols : ndarray or None
-        Unchanged: known symbols are already on the constellation's scale.
     input_norm_factor : float or numpy.ndarray
         Per-channel RMS ``sqrt(mean(|x_c|²))`` the samples were divided by:
         a ``float`` for SISO, ``(C,)`` for MIMO.  Stored in
@@ -78,13 +83,9 @@ def _normalize_inputs(
             _, xp_loc, _ = dispatch(samples)
             nf_dev = xp_loc.asarray(nf_arr)[..., None]  # (C, 1) on same device
             samples = samples / nf_dev
-        return samples, training_symbols, input_norm_factor
+        return samples, input_norm_factor
 
-    from commkit.math import rms as _rms
-
-    ref_samples = samples
-
-    norm_vec = _rms(ref_samples, axis=-1)
+    norm_vec = rms(samples, axis=-1)
     if samples.ndim == 1:
         input_norm_factor = float(norm_vec)
         samples = samples / float(norm_vec)
@@ -93,7 +94,7 @@ def _normalize_inputs(
         # Broadcast (C,) divisor over last axis
         samples = samples / norm_vec[..., None]
 
-    return samples, training_symbols, input_norm_factor
+    return samples, input_norm_factor
 
 
 def _build_padded_samples(
@@ -130,7 +131,7 @@ def _build_padded_samples(
                 f"pad_left={pad_left}. Provide at least pad_left samples."
             )
         if eq_norm is not None:
-            nf_arr = np.asarray(to_device(eq_norm, "cpu"), dtype=np.float64).ravel()
+            nf_arr = _to_host(eq_norm, np.float64).ravel()
             if prefix.shape[0] == 1:
                 prefix = prefix / float(nf_arr[0])
             else:
@@ -156,27 +157,12 @@ def _build_padded_samples(
     )
 
 
-def _init_butterfly_weights_numpy(
+def _init_butterfly_weights(
     num_ch: int, num_taps: int, center_tap: int | None = None
 ) -> np.ndarray:
-    """Build the identity butterfly weights: unit center taps, zeros elsewhere.
+    """Identity butterfly weights ``(C, C, T)``, complex64: ``W[i, i, center] = 1``.
 
-    ``W[i, i, center_tap] = 1`` for every channel ``i``, so at time 0 the
-    equalizer passes each channel straight through.
-
-    Parameters
-    ----------
-    num_ch : int
-        Number of input and output channels C.
-    num_taps : int
-        FIR length T.
-    center_tap : int, optional
-        Index of the unit tap; defaults to ``num_taps // 2``.
-
-    Returns
-    -------
-    numpy.ndarray
-        complex64 weights, ``(C, C, num_taps)``.
+    ``center_tap`` defaults to ``num_taps // 2``.
     """
     W = np.zeros((num_ch, num_ch, num_taps), dtype=np.complex64)
     center = center_tap if center_tap is not None else num_taps // 2
@@ -186,37 +172,14 @@ def _init_butterfly_weights_numpy(
 
 
 def _validate_w_init(w: np.ndarray, num_ch: int, num_taps: int) -> np.ndarray:
-    """Check ``initial_taps`` and return it in the butterfly layout ``(C, C, T)``.
+    """``initial_taps`` (on the host) in the butterfly layout ``(C, C, T)``, or raise.
 
-    ``EqualizerResult.weights`` squeezes SISO weights from ``(1, 1, T)`` to
-    ``(T,)``, so the weights of one SISO stage passed as ``initial_taps`` to
-    the next arrive as ``(T,)`` (or ``(1, T)``); both are accepted.
-
-    Parameters
-    ----------
-    w : numpy.ndarray
-        Candidate initial taps, already on the host.
-    num_ch : int
-        Expected number of channels C.
-    num_taps : int
-        Expected number of taps T.
-
-    Returns
-    -------
-    numpy.ndarray
-        ``w`` reshaped to ``(num_ch, num_ch, num_taps)`` where needed.
-
-    Raises
-    ------
-    ValueError
-        If the shape cannot be mapped to ``(num_ch, num_ch, num_taps)``.
+    SISO also accepts ``(T,)`` and ``(1, T)``: ``EqualizerResult.weights``
+    squeezes ``(1, 1, T)`` to ``(T,)``, so one stage's weights feed the next.
     """
     expected = (num_ch, num_ch, num_taps)
     if w.shape == expected:
         return w
-    # SISO: accept the squeezed shapes emitted by _unpack_result_*:
-    #   (T,)    - both channel dims collapsed  (_unpack: W[0, 0])
-    #   (1, T)  - one channel dim collapsed
     if num_ch == 1 and w.shape in ((num_taps,), (1, num_taps)):
         return w.reshape(1, 1, num_taps)
     raise ValueError(
@@ -225,32 +188,16 @@ def _validate_w_init(w: np.ndarray, num_ch: int, num_taps: int) -> np.ndarray:
     )
 
 
-def _prepare_training_numpy(
+def _prepare_training(
     training_symbols: Any,
     num_ch: int,
     n_sym: int,
 ) -> tuple[np.ndarray, int]:
-    """Build the training array of the Numba scan kernels.
+    """Training symbols for the Numba scan kernels, from host input.
 
-    NumPy only: the caller moves ``training_symbols`` to the host first
-    (``to_device(training_symbols, "cpu")``).
-
-    Parameters
-    ----------
-    training_symbols : array_like or None
-        Training symbols, ``(K,)`` (shared by all channels) or ``(C, K)``.
-    num_ch : int
-        Number of channels C.
-    n_sym : int
-        Number of output symbols, the columns of the result.
-
-    Returns
-    -------
-    train_full : numpy.ndarray
-        complex64 training symbols, ``(C, n_train_aligned)``, C-contiguous;
-        the kernels read symbol ``idx`` only while ``idx < n_train_aligned``.
-    n_train_aligned : int
-        Number of data-aided symbols, ``min(K, n_sym)``.
+    Returns ``(train_full, n_train)``: complex64 ``(C, n_train)``,
+    C-contiguous, with ``n_train = min(K, n_sym)`` for ``(K,)`` (shared) or
+    ``(C, K)`` input; ``None`` gives ``(C, 0)`` and 0.
     """
     if training_symbols is None:
         return np.zeros((num_ch, 0), dtype=np.complex64), 0
@@ -263,7 +210,7 @@ def _prepare_training_numpy(
     return train_full, n_train_aligned
 
 
-def _unpack_result_numpy(
+def _unpack_result(
     y_out: np.ndarray,
     e_out: np.ndarray,
     W_final: np.ndarray,

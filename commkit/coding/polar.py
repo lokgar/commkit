@@ -28,8 +28,9 @@ from typing import Any
 
 import numpy as np
 
-from ..backend import ArrayType, dispatch, to_device
-from .base import _Code, _Codec, _Decoded, _encode_blocks, _register
+from .._array import freeze_host
+from ..backend import ArrayType, _to_host, dispatch, to_device
+from .base import _CODECS, _Code, _Codec, _Decoded, _encode_blocks, _numba
 from .crc import CRC
 
 __all__ = ["PolarCode", "SC", "SCL"]
@@ -140,14 +141,13 @@ class PolarCode(_Code):
         n = self.length
         if isinstance(n, bool) or not isinstance(n, int) or n < 2 or n & (n - 1):
             raise ValueError(f"length must be a power of two >= 2, got {n!r}.")
-        p = np.unique(np.asarray(self.info_positions))
-        if p.size != np.size(self.info_positions) or p.size == 0:
+        raw = _to_host(self.info_positions)
+        p = np.unique(raw)
+        if p.size != raw.size or p.size == 0:
             raise ValueError("info_positions must be distinct and not empty.")
         if p.dtype.kind not in "iu" or p[0] < 0 or p[-1] >= n:
             raise ValueError(f"info_positions must be integers in [0, {n}).")
-        p = p.astype(np.int64)
-        p.setflags(write=False)
-        object.__setattr__(self, "info_positions", p)
+        freeze_host(self, "info_positions", p, np.int64)
         if self.crc is not None:
             if not isinstance(self.crc, CRC):
                 raise TypeError("crc must be a CRC or None.")
@@ -279,21 +279,6 @@ def _encode(code: PolarCode, bits: ArrayType) -> ArrayType:
     return _transform(u)
 
 
-def _get_numba_polar() -> Any:
-    """Numba SC list decoder over codewords (``list_size = 1`` is SC).
-
-    Per path: ``alpha`` (LLRs) and ``beta`` (partial sums of left children)
-    in level order, offset ``2^s`` for level ``s``; ``u`` the decisions and
-    ``pm`` the path metric.  Bit ``i`` recomputes the LLRs from level
-    ``ctz(i) + 1`` (``n`` for ``i = 0``) down: ``g`` with the left child's
-    partial sums where bit ``s - 1`` of ``i`` is 1, ``f`` (min-sum) where it
-    is 0.
-    """
-    from . import _numba_loops
-
-    return _numba_loops.polar_scl
-
-
 def _decode(code: PolarCode, llrs: ArrayType, method: SC | SCL) -> _Decoded:
     _, xp, _ = dispatch(llrs)
     host = np.ascontiguousarray(to_device(llrs, "cpu"), dtype=np.float32)
@@ -307,7 +292,7 @@ def _decode(code: PolarCode, llrs: ArrayType, method: SC | SCL) -> _Decoded:
         crc_g, crc_c = g.astype(np.int8), c.astype(np.int8)
     u = np.empty((rows, code.length), dtype=np.int8)
     valid = np.empty(rows, dtype=np.bool_)
-    _get_numba_polar()(
+    _numba().polar_scl(
         host, code._frozen, size, crc_g, crc_c, code.info_positions, code.k, u, valid
     )
     if code.crc is None:
@@ -322,13 +307,10 @@ def _decode(code: PolarCode, llrs: ArrayType, method: SC | SCL) -> _Decoded:
     )
 
 
-_register(
-    PolarCode,
-    _Codec(
-        encode=_encode,
-        decode=_decode,
-        default_method=lambda code: SCL(),
-        methods=(SC, SCL),
-        checked=lambda code, method: code.crc is not None,
-    ),
+_CODECS[PolarCode] = _Codec(
+    encode=_encode,
+    decode=_decode,
+    default_method=lambda code: SCL(),
+    methods=(SC, SCL),
+    checked=lambda code, method: code.crc is not None,
 )

@@ -4,38 +4,17 @@ from typing import Any
 
 import numpy as np
 
-try:
-    import cupy as cp
-
-    _CUPY_AVAILABLE = True
-except ImportError:
-    cp = None
-    _CUPY_AVAILABLE = False
+from commkit.backend import to_device
 
 
 def to_numpy(arr: Any) -> np.ndarray:
-    """Convert any array (NumPy or CuPy) to a host numpy.ndarray.
+    """``arr`` (NumPy, CuPy, a list or a scalar) as a host NumPy array.
 
-    Parameters
-    ----------
-    arr : Any
-        Array-like or scalar object.
-
-    Returns
-    -------
-    np.ndarray
-        NumPy array on CPU.
+    ``None`` passes through, for optional result fields.
     """
     if arr is None:
         return None  # type: ignore[return-value]
-    if _CUPY_AVAILABLE and isinstance(arr, cp.ndarray):
-        return cp.asnumpy(arr)
-    if hasattr(arr, "get") and callable(arr.get):
-        try:
-            return np.asarray(arr.get())
-        except Exception:
-            pass
-    return np.asarray(arr)
+    return np.asarray(to_device(arr, "cpu"))
 
 
 def device_of(xp: Any) -> str:

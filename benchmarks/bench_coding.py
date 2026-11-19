@@ -9,7 +9,7 @@ iterations of a failure.
 
 import numpy as np
 import pytest
-from workloads import coded_workload
+from workloads import coded_workload, hard_word_workload, random_bits
 
 from commkit.backend import to_device
 from commkit.coding import (
@@ -39,8 +39,7 @@ NUM_CODEWORDS = 64
 
 
 def bench_ldpc_encode(benchmark, backend_device, xp, sync):
-    rng = np.random.default_rng(0)
-    bits = xp.asarray(rng.integers(0, 2, NUM_CODEWORDS * CODE.k, dtype=np.int8))
+    bits = xp.asarray(random_bits(NUM_CODEWORDS * CODE.k))
 
     def run():
         out = encode(bits, code=CODE)
@@ -54,26 +53,15 @@ def bench_ldpc_encode(benchmark, backend_device, xp, sync):
     "method", [MinSum(), SumProduct()], ids=["min_sum", "sum_product"]
 )
 def bench_ldpc_decode(benchmark, backend_device, xp, sync, method):
-    llrs_np, info = coded_workload(CODE, NUM_CODEWORDS, esn0_db=1.5)
-    llrs = xp.asarray(llrs_np)
-
-    def run():
-        out = decode(llrs, code=CODE, method=method)
-        sync()
-        return out
-
-    res = benchmark.pedantic(run, **ROUNDS)
-    assert np.array_equal(to_device(res.bits, "cpu"), info), "decoder did not converge"
+    _bench_decode(benchmark, xp, sync, CODE, method, NUM_CODEWORDS, 1.5)
 
 
 def bench_kp4_decode(benchmark, backend_device, xp, sync):
     """RS(544, 514) over GF(2^10), 2048 codewords at a pre-FEC BER of 1e-3
     (about 5 symbol errors per codeword, all correctable)."""
     code = ReedSolomonCode.kp4()
-    rng = np.random.default_rng(0)
-    bits = rng.integers(0, 2, (2048, code.k), dtype=np.int8)
-    words = np.asarray(encode(bits, code=code))
-    received = xp.asarray(words ^ (rng.random(words.shape) < 1e-3).astype(np.int8))
+    received_np, bits = hard_word_workload(code, 2048, ber=1e-3)
+    received = xp.asarray(received_np)
 
     def run():
         out = decode(received, code=code)
@@ -132,8 +120,7 @@ def bench_chase_decode(benchmark, backend_device, xp, sync):
 def bench_ccdm_decode(benchmark, backend_device, xp, sync):
     """Dematching of 8 blocks of 20000 PS-64-QAM symbols (labels, no noise)."""
     code = CCDM(Constellation.qam(64).shaped(entropy=5.0), num_symbols=20_000)
-    rng = np.random.default_rng(0)
-    bits = rng.integers(0, 2, 8 * code.k, dtype=np.int8)
+    bits = random_bits(8 * code.k)
     labels = xp.asarray(np.asarray(encode(bits, code=code)))
 
     def run():

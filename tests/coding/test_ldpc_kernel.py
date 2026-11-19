@@ -62,9 +62,9 @@ def test_wrapper_checks(backend_device: str, xp: Any) -> None:
     row_ptr, cols, layer_ptr = (xp.asarray(a) for a in code._schedule)
     launch = _cuda.get_kernel("ldpc_layered")
     kw = dict(scale=1.0, offset=0.0, max_iterations=1, early_stop=True)
-    with pytest.raises(ValueError, match="float32"):
+    with pytest.raises(TypeError, match="float32"):
         launch(xp.zeros((1, code.num_variables)), row_ptr, cols, layer_ptr, **kw)
-    with pytest.raises(ValueError, match="int32"):
+    with pytest.raises(TypeError, match="int32"):
         launch(
             xp.zeros((1, code.num_variables), xp.float32), row_ptr.astype(xp.int64), cols,
             layer_ptr, **kw,

@@ -124,10 +124,17 @@ class TestConstruction:
         with pytest.raises(ValueError, match=match):
             Constellation(**kwargs)
 
-    @pytest.mark.gpu_only
-    def test_device_points_rejected(self, xp: Any) -> None:
-        with pytest.raises(TypeError, match="points"):
-            Constellation(xp.asarray([-1.0, 1.0]))
+    def test_device_arrays_become_host_copies(self, xp: Any) -> None:
+        """Points, labels and pmf given on the device are copied to the host:
+        the constellation equals the host-built one and holds read-only
+        NumPy arrays."""
+        q = Constellation.qam(16).shaped(nu=0.1)
+        c = Constellation(
+            xp.asarray(q.points), xp.asarray(q.bit_labels), xp.asarray(q.pmf)
+        )
+        assert c == q
+        for field in (c.points, c.bit_labels, c.pmf):
+            assert isinstance(field, np.ndarray) and not field.flags.writeable
 
 
 class TestValueSemantics:

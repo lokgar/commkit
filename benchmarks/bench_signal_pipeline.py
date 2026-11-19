@@ -6,44 +6,12 @@ import gc
 import tracemalloc
 
 import pytest
+from workloads import pipeline_signal
 
-from commkit import equalization, filtering, generate, multirate
-from commkit.core import Preamble, Reference, SingleCarrierFrame
-from commkit.filtering import RRC
+from commkit import equalization, filtering, multirate
 from commkit.impairments import apply_awgn
-from commkit.mapping import Constellation
 
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
-
-
-def _plain_signal():
-    return generate(
-        Constellation.qam(16),
-        num_symbols=32_768,
-        symbol_rate=1e6,
-        sps=4,
-        pulse=RRC(0.35, span=8),
-        rng=42,
-    )
-
-
-def _frame_signal():
-    frame = SingleCarrierFrame(
-        # 1057 pilot periods of 31 payload symbols: the length the 1.x frame
-        # snapped 32_768 up to, so the workload matches the 0002 baseline.
-        payload_num_symbols=32_798,
-        payload_constellation=Constellation.qam(16),
-        payload_rng=42,
-        preamble=Preamble(sequence_type="barker", num_symbols=13),
-        pilot_pattern="comb",
-        pilot_period=32,
-    )
-    # Materialize all lazy provenance arrays so deep-copy overhead is visible.
-    payload_bits = frame.payload_bits
-    payload_symbols = frame.payload_symbols
-    _ = frame.pilot_bits, frame.pilot_symbols
-    sig = frame.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.35, span=8))
-    return sig.replace(reference=Reference(symbols=payload_symbols, bits=payload_bits))
 
 
 def _pipeline(sig, xp, sync):
@@ -74,24 +42,8 @@ def _gpu_peak(call, xp, sync):
     return peak
 
 
-def _profile_peak_memory(run, backend_device, xp, sync):
-    """Return incremental allocator high-water memory for one pipeline run."""
-    gc.collect()
-    if backend_device == "gpu":
-        return {"peak_gpu_pool_bytes": _gpu_peak(run, xp, sync)}
-
-    tracemalloc.start()
-    try:
-        result = run()
-        _, peak = tracemalloc.get_traced_memory()
-        del result
-    finally:
-        tracemalloc.stop()
-    return {"peak_cpu_tracemalloc_bytes": peak}
-
-
 def _allocator_peak(call, backend_device, xp, sync):
-    """Measure incremental allocator peak for one container replacement."""
+    """Incremental allocator high-water memory of one call of ``call``."""
     gc.collect()
     if backend_device == "gpu":
         return _gpu_peak(call, xp, sync)
@@ -132,12 +84,17 @@ def _profile_rewrap_copy_cost(sig, backend_device, xp, sync):
 @pytest.mark.parametrize("case", ["plain", "frame"], ids=["plain", "frame-backed"])
 def bench_signal_pipeline(benchmark, backend_device, xp, sync, case):
     """Track wall time and peak CPU/GPU allocation for representative composition."""
-    sig = (_plain_signal() if case == "plain" else _frame_signal()).to(backend_device)
+    sig = pipeline_signal(frame=case == "frame").to(backend_device)
 
     def run():
         return _pipeline(sig, xp, sync)
 
-    benchmark.extra_info.update(_profile_peak_memory(run, backend_device, xp, sync))
+    key = (
+        "peak_gpu_pool_bytes"
+        if backend_device == "gpu"
+        else "peak_cpu_tracemalloc_bytes"
+    )
+    benchmark.extra_info[key] = _allocator_peak(run, backend_device, xp, sync)
     benchmark.extra_info.update(
         _profile_rewrap_copy_cost(sig, backend_device, xp, sync)
     )

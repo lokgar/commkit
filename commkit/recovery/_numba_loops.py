@@ -6,9 +6,8 @@ metrics of :class:`~commkit.recovery.BPS` (a search over the table, or the
 O(1) slicer of square QAM), the Rauch-Tung-Striebel smoother of
 :class:`~commkit.recovery.Tikhonov` and the cycle-slip repair of
 :func:`~commkit.recovery.correct_cycle_slips`.  Imported on first use
-through the ``_get_numba_*`` getters of ``recovery/pll.py``,
-``recovery/bps.py``, ``recovery/tikhonov.py`` and
-``recovery/corrections.py``, so ``import commkit`` does not load Numba.
+through ``recovery._common._numba()``, so ``import commkit`` does not load
+Numba.
 
 Phases, loop state and smoother state are float64; symbols are read in
 their own precision and widened as they are read.
@@ -225,6 +224,10 @@ def bps_grid(x_re, x_im, ph_re, ph_im, lev_min, d_grid, side, block_size, out):
 @_fast
 def rts_smoother(phi_obs, sigma_p2, sigma_v2):
     """Run the Rauch-Tung-Striebel smoother over the block phases (Numba).
+
+    State model: ``x[k+1] = x[k] + w[k]``, ``w ~ N(0, sigma_p2)`` (the Wiener
+    phase increment per block).  Observation: ``y[k] = x[k] + v[k]``,
+    ``v ~ N(0, sigma_v2)`` (the Viterbi-Viterbi estimator variance).
 
     Parameters
     ----------

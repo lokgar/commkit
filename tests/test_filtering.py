@@ -12,6 +12,7 @@ from tests.common.conversions import to_numpy
 from tests.common.kernel_utils import skip_unless_gpu
 from tests.common.metrics import calc_freq_response
 from tests.common.periodic import middle_period
+from tests.common.signals import make_band_limited_field
 
 
 class TestFilterTapGenerators:
@@ -1075,14 +1076,6 @@ class TestDispersionCompensationTaps:
 class TestCorrectFiberPropagation:
     """Digital backpropagation: the inverse of apply_fiber_propagation."""
 
-    @staticmethod
-    def _field(n=4096, seed=1, dtype=np.complex64):
-        rng = np.random.default_rng(seed)
-        x = rng.standard_normal((2, n)) + 1j * rng.standard_normal((2, n))
-        spectrum = np.fft.fft(x, axis=-1)
-        spectrum[:, np.abs(np.fft.fftfreq(n)) > 0.25] = 0.0
-        return np.fft.ifft(spectrum, axis=-1).astype(dtype)
-
     LINK = dict(
         span_length_km=80.0,
         num_spans=4,
@@ -1096,7 +1089,7 @@ class TestCorrectFiberPropagation:
         from commkit.impairments import Fiber, apply_fiber_propagation
 
         for dtype, tol in ((np.complex128, 1e-11), (np.complex64, 1e-4)):
-            x = xp.asarray(self._field(dtype=dtype))
+            x = xp.asarray(make_band_limited_field(2, 4096, dtype=dtype))
             kw = dict(fiber=Fiber(), steps_per_span=40, sampling_rate=64e9, **self.LINK)
             y = apply_fiber_propagation(x, **kw)
             z = filtering.correct_fiber_propagation(y, method="whole_record", **kw)
@@ -1109,7 +1102,7 @@ class TestCorrectFiberPropagation:
         over the whole link (the amplifiers cancel the loss)."""
         from commkit.impairments import Fiber
 
-        x = xp.asarray(self._field())
+        x = xp.asarray(make_band_limited_field(2, 4096))
         z = filtering.correct_fiber_propagation(
             x,
             method="whole_record",
@@ -1136,7 +1129,7 @@ class TestCorrectFiberPropagation:
         gains about 2 dB, but only with ξ near 0.5 (ξ = 1 overshoots)."""
         from commkit.impairments import Fiber, apply_fiber_propagation
 
-        x = xp.asarray(self._field(n=1 << 14))
+        x = xp.asarray(make_band_limited_field(2, 1 << 14))
         y = apply_fiber_propagation(
             x,
             fiber=Fiber(),
@@ -1185,7 +1178,7 @@ class TestCorrectFiberPropagation:
         from commkit.impairments import Fiber, apply_fiber_propagation
 
         n, start, width = 1 << 15, 1 << 13, 1 << 14
-        x = xp.asarray(self._field(n=n))
+        x = xp.asarray(make_band_limited_field(2, n))
         kw = dict(fiber=Fiber(), steps_per_span=10, sampling_rate=64e9, **self.LINK)
         y = apply_fiber_propagation(x, **kw)
         window = y[..., start : start + width]
@@ -1220,7 +1213,7 @@ class TestCorrectFiberPropagation:
         complex128, so not rounding)."""
         from commkit.impairments import Fiber
 
-        x = xp.asarray(self._field(n=1 << 14))
+        x = xp.asarray(make_band_limited_field(2, 1 << 14))
         kw = dict(fiber=Fiber(), steps_per_span=5, sampling_rate=64e9, **self.LINK)
         blocks = filtering.correct_fiber_propagation(x, **kw)
         whole = filtering.correct_fiber_propagation(x, method="whole_record", **kw)
@@ -1241,7 +1234,7 @@ class TestCorrectFiberPropagation:
         from commkit.filtering.fiber import compensation as fiber_module
         from commkit.impairments import Fiber
 
-        x = xp.asarray(self._field(n=n))
+        x = xp.asarray(make_band_limited_field(2, n))
         kw = dict(fiber=Fiber(), steps_per_span=2, sampling_rate=64e9, **self.LINK)
         monkeypatch.setattr(fiber_module, "_BATCH_SAMPLES_CPU", 1 << 30)
         monkeypatch.setattr(fiber_module, "_BATCH_SAMPLES_GPU", 1 << 30)
@@ -1264,7 +1257,7 @@ class TestCorrectFiberPropagation:
         from commkit.filtering.fiber import compensation as fiber_module
         from commkit.impairments import Fiber
 
-        x = self._field(n=1 << 19)
+        x = make_band_limited_field(2, 1 << 19)
         kw = dict(fiber=Fiber(), steps_per_span=1, sampling_rate=64e9, **self.LINK)
         monkeypatch.setattr(fiber_module, "_BATCH_SAMPLES_CPU", 1 << 15)
         filtering.correct_fiber_propagation(x, **kw)
@@ -1281,7 +1274,7 @@ class TestCorrectFiberPropagation:
 
         with pytest.raises(ValueError, match="nonlinear_scale"):
             filtering.correct_fiber_propagation(
-                xp.asarray(self._field()),
+                xp.asarray(make_band_limited_field(2, 4096)),
                 fiber=Fiber(),
                 nonlinear_scale=float("nan"),
                 sampling_rate=64e9,

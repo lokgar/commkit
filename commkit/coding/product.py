@@ -37,8 +37,9 @@ import numpy as np
 from ..backend import ArrayType, _device_tables, dispatch
 from ._galois import _Field
 from ._gf2 import matmul_mod2
-from .algebraic import _Algebraic, _correct
+from .algebraic import ReedSolomonCode, _Algebraic, _correct
 from .base import (
+    _CODECS,
     _checked,
     _Code,
     _Codec,
@@ -48,7 +49,6 @@ from .base import (
     _encode_blocks,
     _hard,
     _info_positions,
-    _register,
     _resolve_method,
 )
 from .interleaving import Interleaver, deinterleave, interleave
@@ -101,22 +101,22 @@ class _StaircaseComponent(_Algebraic):
         return self.n - _PARITY
 
     @property
-    def t(self) -> int:  # type: ignore[override]
+    def t(self) -> int:
         """Correctable errors of the BCH part."""
         return 3
 
     @property
-    def first_root(self) -> int:  # type: ignore[override]
+    def first_root(self) -> int:
         """``b = 1``: roots ``beta, beta^3, beta^5``."""
         return 1
 
     @property
-    def binary(self) -> bool:  # type: ignore[override]
+    def binary(self) -> bool:
         """True: the symbols are bits."""
         return True
 
     @cached_property
-    def field(self) -> _Field:  # type: ignore[override]
+    def field(self) -> _Field:
         """GF(2^10) of the locators."""
         return _Field(10, 0x409)  # p(x) = 1 + x^3 + x^10, clause A.6
 
@@ -464,7 +464,6 @@ class Concatenated(_Code):
         codewords: ``k = 3 x 5140 = 15420``, ``n = 136 x 128 = 17408``,
         rate 0.886.
         """
-        from .algebraic import ReedSolomonCode
 
         kp4 = ReedSolomonCode.kp4()
         triple = _Repeat(kp4, 3)
@@ -547,34 +546,25 @@ def _decode_repeat(code: _Repeat, llrs: ArrayType, method: Any) -> _Decoded:
     )
 
 
-_register(
-    StaircaseCode,
-    _Codec(
-        encode=_encode_staircase,
-        decode=_decode_staircase,
-        default_method=lambda code: HardIterations(),
-        methods=(HardIterations,),
-        checked=lambda code, method: True,
-    ),
+_CODECS[StaircaseCode] = _Codec(
+    encode=_encode_staircase,
+    decode=_decode_staircase,
+    default_method=lambda code: HardIterations(),
+    methods=(HardIterations,),
+    checked=lambda code, method: True,
 )
-_register(
-    Concatenated,
-    _Codec(
-        encode=_encode_concatenated,
-        decode=_decode_concatenated,
-        default_method=lambda code: StageDecoders(),
-        methods=(StageDecoders,),
-        # valid is the outer decoder's.
-        checked=lambda code, method: _checked(code.outer, method.outer),
-    ),
+_CODECS[Concatenated] = _Codec(
+    encode=_encode_concatenated,
+    decode=_decode_concatenated,
+    default_method=lambda code: StageDecoders(),
+    methods=(StageDecoders,),
+    # valid is the outer decoder's.
+    checked=lambda code, method: _checked(code.outer, method.outer),
 )
-_register(
-    _Repeat,
-    _Codec(
-        encode=_encode_repeat,
-        decode=_decode_repeat,
-        default_method=lambda code: _resolve_method(code.code, None, "decode()"),
-        methods=(object,),
-        checked=lambda code, method: _checked(code.code, method),
-    ),
+_CODECS[_Repeat] = _Codec(
+    encode=_encode_repeat,
+    decode=_decode_repeat,
+    default_method=lambda code: _resolve_method(code.code, None, "decode()"),
+    methods=(object,),
+    checked=lambda code, method: _checked(code.code, method),
 )

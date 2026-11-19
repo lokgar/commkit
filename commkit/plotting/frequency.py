@@ -10,13 +10,18 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..backend import get_array_module, to_device
+from ..backend import _to_host, get_array_module
+from ..frequency import (
+    BlockwiseFrequencyEstimate,
+    MengaliMorelliEstimate,
+    MthPowerEstimate,
+    correct_frequency_offset,
+)
 from .theme import (
     _decimate_minmax,
     _device_channels,
     _finish,
     _grid_figsize,
-    _host,
     _panel_grid,
     _require,
     _select,
@@ -88,18 +93,18 @@ def plot_mm_autocorrelation(
     panels = _select(
         quantity, ("magnitude", "phase"), label=label, xlim=xlim, ylim=ylim
     )
-    r = _require(
-        estimate, "autocorrelation", "plot_mm_autocorrelation()", "MengaliMorelli"
+    estimate = _require(
+        estimate, MengaliMorelliEstimate, "plot_mm_autocorrelation()", "MengaliMorelli"
     )
-    R = _device_channels(r)
+    R = _device_channels(estimate.autocorrelation)
     xp = get_array_module(R)
-    f_ests = [float(f) for f in np.atleast_1d(_host(estimate.value))]
+    f_ests = [float(f) for f in np.atleast_1d(_to_host(estimate.value))]
     M = estimate.power
     C, L = R.shape
     # Phase at evenly spaced lags: a wrapped angle has no envelope.
     step = 1 if max_points <= 0 or L <= max_points else -(-L // max_points)
     lags = np.arange(1, L + 1, step)
-    theta_all = _host(xp.angle(R[:, ::step]))
+    theta_all = _to_host(xp.angle(R[:, ::step]))
     amp_all = xp.abs(R)
 
     fig, raw_axes = _panel_grid(ax, C, len(panels))
@@ -199,13 +204,13 @@ def plot_frequency_offset_spectrum(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    spectrum = _require(
-        estimate, "spectrum", "plot_frequency_offset_spectrum()", "MthPower"
+    estimate = _require(
+        estimate, MthPowerEstimate, "plot_frequency_offset_spectrum()", "MthPower"
     )
-    mag_spectrum = _device_channels(spectrum)
+    mag_spectrum = _device_channels(estimate.spectrum)
     freqs = np.asarray(estimate.spectrum_frequencies, dtype=float)
     M = estimate.power
-    f_estimates = [float(f) for f in np.atleast_1d(_host(estimate.value))]
+    f_estimates = [float(f) for f in np.atleast_1d(_to_host(estimate.value))]
     C = mag_spectrum.shape[0]
     # Evenly spaced bins in ascending frequency: the axis is f0 + k·df.
     f0 = float(freqs[0]) / M
@@ -310,18 +315,18 @@ def plot_frequency_offset_blockwise_result(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    from ..frequency import correct_frequency_offset
 
     panels = _select(
         quantity, ("frequency", "phase"), label=label, xlim=xlim, ylim=ylim
     )
 
-    centers = _require(
+    estimate = _require(
         estimate,
-        "block_centers",
+        BlockwiseFrequencyEstimate,
         "plot_frequency_offset_blockwise_result()",
         "a blockwise method (block_size=)",
     )
+    centers = estimate.block_centers
     # The probe lives on the estimate's device, as the samples it was made from.
     xp = get_array_module(estimate.block_values)
     rotation = correct_frequency_offset(
@@ -329,18 +334,18 @@ def plot_frequency_offset_blockwise_result(
         estimate,
         sampling_rate=sampling_rate,
     )
-    phase = -np.unwrap(np.angle(np.atleast_2d(_host(rotation))[0]))
+    phase = -np.unwrap(np.angle(np.atleast_2d(_to_host(rotation))[0]))
     df_dense = np.gradient(phase) * sampling_rate / (2.0 * np.pi)
-    block_values = np.atleast_2d(_host(estimate.block_values))[0]
+    block_values = np.atleast_2d(_to_host(estimate.block_values))[0]
     t_centers = centers
     df_estimates = block_values
     n_grid = np.arange(num_samples)
     phase_trajectory = phase
-    t_centers = np.asarray(to_device(t_centers, "cpu"), dtype=np.float64)
-    df_estimates = np.asarray(to_device(df_estimates, "cpu"), dtype=np.float64)
-    n_grid = np.asarray(to_device(n_grid, "cpu"), dtype=np.float64)
-    df_dense = np.asarray(to_device(df_dense, "cpu"), dtype=np.float64)
-    phase_trajectory = np.asarray(to_device(phase_trajectory, "cpu"), dtype=np.float64)
+    t_centers = _to_host(t_centers, np.float64)
+    df_estimates = _to_host(df_estimates, np.float64)
+    n_grid = _to_host(n_grid, np.float64)
+    df_dense = _to_host(df_dense, np.float64)
+    phase_trajectory = _to_host(phase_trajectory, np.float64)
 
     fig, grid = _panel_grid(ax, 1, len(panels))
     axes = grid[0]

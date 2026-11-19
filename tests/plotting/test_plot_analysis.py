@@ -29,6 +29,7 @@ from commkit.plotting.analysis import (
     plot_frequency_noise_psd,
     plot_increment_variance,
 )
+from tests.common.conversions import to_numpy
 from tests.common.signals import make_dsh_beat, make_wiener_phase
 
 R = 1e9
@@ -129,9 +130,9 @@ class TestPlotAnalysis:
         # of the floor, and none where it is not.
         span = [p for p in ax.patches if "Plateau" in p.get_label()][0]
         x0, x1 = span.get_x(), span.get_x() + span.get_width()
-        f = np.asarray(to_device(est.frequencies, "cpu"))
-        model = np.asarray(to_device(est.fm_psd_model, "cpu"))
-        used = np.asarray(to_device(est.used, "cpu"))
+        f = to_numpy(est.frequencies)
+        model = to_numpy(est.fm_psd_model)
+        used = to_numpy(est.used)
         flat = used & (f > 0) & (model <= 1.1 * est.value / np.pi)
         assert x0 == pytest.approx(f[flat].min())
         assert x1 == pytest.approx(f[flat].max())

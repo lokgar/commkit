@@ -11,12 +11,20 @@ from typing import Any
 import numpy as np
 
 from .. import _fft
-from ..backend import get_array_module, to_device
+from ..backend import _to_host, get_array_module, to_device
+from ..core._signal_adapter import adapt_signal
+from ..frequency import PilotSlopeEstimate
+from ..recovery import (
+    BlockPhaseEstimate,
+    CarrierPhaseEstimate,
+    PilotInterpolationEstimate,
+    PilotToneEstimate,
+    PilotTonesEstimate,
+)
 from .theme import (
     _device_channels,
     _finish,
     _get_axis,
-    _host,
     _panel_grid,
     _require,
     _select,
@@ -78,12 +86,12 @@ def plot_carrier_phase_trajectory(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    from ..recovery import CarrierPhaseEstimate
 
     if isinstance(phase, CarrierPhaseEstimate):
-        # Block methods only.
         phi_full = phase.value
-        block_centers = getattr(phase, "block_centers", None)
+        block_centers = (
+            phase.block_centers if isinstance(phase, BlockPhaseEstimate) else None
+        )
     else:
         phi_full, block_centers = phase, None
     phi_deg = _device_channels(phi_full) * (180.0 / np.pi)
@@ -96,7 +104,7 @@ def plot_carrier_phase_trajectory(
         axi.plot(*_trace(phi_deg[i], max_points), label=curve_label)
 
     if block_centers is not None:
-        for tc in np.asarray(to_device(block_centers, "cpu")):
+        for tc in _to_host(block_centers):
             axi.axvline(tc, color="gray", alpha=0.4)
 
     if num_train_symbols > 0:
@@ -171,18 +179,21 @@ def plot_pilot_phase_estimate(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    from ..recovery import CarrierPhaseEstimate
 
     panels = _select(
         quantity, ("pilots", "trajectory"), label=label, xlim=xlim, ylim=ylim
     )
     name = "plot_pilot_phase_estimate()"
-    pilot_phase = _require(estimate, "pilot_phase", name, "a pilot method")
+    if not isinstance(estimate, PilotInterpolationEstimate | PilotSlopeEstimate):
+        raise ValueError(
+            f"{name} needs a pilot method (got {type(estimate).__name__})."
+        )
+    pilot_phase = estimate.pilot_phase
     is_phase = isinstance(estimate, CarrierPhaseEstimate)
-    pilot_indices = _host(estimate.pilot_indices)
-    phi_pilots_u = _host(pilot_phase)
+    pilot_indices = _to_host(estimate.pilot_indices)
+    phi_pilots_u = _to_host(pilot_phase)
     phi_full = _device_channels(estimate.value) if is_phase else None
-    f_est = None if is_phase else np.atleast_1d(_host(estimate.value))
+    f_est = None if is_phase else np.atleast_1d(_to_host(estimate.value))
     pilot_indices = to_device(pilot_indices, "cpu").astype(float)
     if phi_pilots_u.ndim == 1:
         phi_pilots_u = phi_pilots_u[None, :]
@@ -192,9 +203,9 @@ def plot_pilot_phase_estimate(
     if f_est is None:
         f_ests = None  # label the fitted slope instead
     elif isinstance(f_est, (np.ndarray, list, tuple)):
-        f_ests = [float(f) for f in f_est]  # type: ignore[union-attr]
+        f_ests = [float(f) for f in f_est]
     else:
-        f_ests = [float(f_est)] * C  # type: ignore[arg-type]
+        f_ests = [float(f_est)] * C
 
     has_full = phi_full is not None
     if quantity == "trajectory" and not has_full:
@@ -327,11 +338,11 @@ def plot_pilot_tone_phase_estimate(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    from ..core._signal_adapter import adapt_signal
 
     _select(quantity, ("spectrum", "phase"), label=label, xlim=xlim, ylim=ylim)
     name = "plot_pilot_tone_phase_estimate()"
-    tones = _require(estimate, "tone_frequencies", name, "PilotTone")
+    estimate = _require(estimate, PilotToneEstimate, name, "PilotTone")
+    tones = estimate.tone_frequencies
     adapter = adapt_signal(samples, function_name=name)
     fs = float(adapter.resolve_fact("sampling_rate", sampling_rate))
     theta_deg = _device_channels(estimate.value) * (180.0 / np.pi)
@@ -356,7 +367,7 @@ def plot_pilot_tone_phase_estimate(
     mag = xp.fft.fftshift(xp.abs(_fft.fft(x, axis=-1)), axes=-1)
     mag_db = 20.0 * xp.log10(xp.maximum(mag, xp.finfo(mag.dtype).tiny))
     f_sorted = xp.fft.fftshift(xp.fft.fftfreq(N, d=1.0 / fs))
-    f_tones = np.atleast_1d(_host(tones)).astype(float)
+    f_tones = np.atleast_1d(_to_host(tones)).astype(float)
     tone_frequency = method.frequency
     bandwidth = method.bandwidth
 
@@ -475,12 +486,10 @@ def plot_pilot_tones_phase_estimate(
     panels = _select(
         quantity, ("differential", "phase"), label=label, xlim=xlim, ylim=ylim
     )
-    delta = _require(
-        estimate,
-        "differential_phase",
-        "plot_pilot_tones_phase_estimate()",
-        "PilotTones",
+    estimate = _require(
+        estimate, PilotTonesEstimate, "plot_pilot_tones_phase_estimate()", "PilotTones"
     )
+    delta = estimate.differential_phase
     phi_deg = _device_channels(estimate.value)[0] * (180.0 / np.pi)
     ref = int(estimate.reference_tone)
     used = tuple(estimate.used_tones)

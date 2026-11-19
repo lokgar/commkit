@@ -24,6 +24,7 @@ from commkit.analysis import (
 from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.impairments import apply_awgn, generate_phase_noise
+from commkit.mapping import Constellation
 from tests.common.signals import (
     make_dsh_beat,
     make_dual_pol_dsh_beat,
@@ -275,6 +276,46 @@ class TestLinewidthEstimation:
                 IncrementSubtract(noise_var=[1e-3, 1e-3, 1e-3]),
                 sampling_rate=R,
             )
+
+    def test_increment_subtract_reference_weights_by_amplitude(self, xp):
+        """With ``reference``, the subtracted term is ``σ²·E[1/|d|²]``.
+
+        A 16-QAM symbol ``d`` under complex noise of variance σ² carries angle
+        noise of variance ``σ²/(2|d|²)``, so the lag-1 increment gains
+        ``σ²/2·(1/|d_k|² + 1/|d_{k+1}|²)``; its mean is the expected term,
+        computed here from the unit-power symbols.  The flat correction
+        (no ``reference``) subtracts only σ², which leaves the inner rings'
+        excess (``E[1/|d|²] ≈ 1.89`` for 16-QAM) in the linewidth: about
+        ``0.89σ² / (2πΔνT) ≈ 2.3`` times the true value on top of it.
+
+        At 30 dB the increment variance (``2πΔνT ≈ 3.9e-4`` plus ``1.9e-3``
+        of angle noise) is estimated from 2^18 increments to a relative
+        standard deviation of about ``sqrt(2/n)·2.3e-3 / 3.9e-4 ≈ 1.6 %``
+        of the linewidth (doubled for the lag-1 correlation of the angle
+        noise), so 10 % is three standard deviations or more (measured:
+        -2.7 % here, a spread of 2.4 % over 20 seeds; the flat correction
+        gives 3.2 times the linewidth).
+        """
+        n, dnu, sigma2 = 1 << 18, 2e6, 10 ** (-30 / 10)
+        rng = np.random.default_rng(11)
+        points = Constellation.qam(16).points
+        d = points[rng.integers(0, 16, n)]
+        d = d / np.sqrt(np.mean(np.abs(d) ** 2))
+        inv = 1.0 / np.abs(d) ** 2
+        phi = _wiener_phase(dnu, n, seed=12) + rng.normal(0, np.sqrt(sigma2 * inv / 2))
+        expected = sigma2 * float(np.mean(0.5 * (inv[1:] + inv[:-1])))
+
+        res = analysis.estimate_linewidth(
+            xp.asarray(phi),
+            IncrementSubtract(noise_var=sigma2, reference=d),
+            sampling_rate=R,
+        )
+        assert res.angle_noise_var == pytest.approx(expected, rel=1e-4)
+        assert res.value == pytest.approx(dnu, rel=0.10)
+        flat = analysis.estimate_linewidth(
+            xp.asarray(phi), IncrementSubtract(noise_var=sigma2), sampling_rate=R
+        )
+        assert flat.value > 1.5 * dnu
 
 
 class TestDshLinewidth:

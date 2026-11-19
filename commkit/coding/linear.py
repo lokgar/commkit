@@ -24,10 +24,12 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
+from .._array import freeze_host
 from .._bits import pack_bits, unpack_bits
-from ..backend import ArrayType, _device_tables, dispatch
+from ..backend import ArrayType, _device_tables, _to_host, dispatch
 from ._gf2 import matmul_mod2, null_space, row_reduce
 from .base import (
+    _CODECS,
     _checked,
     _Code,
     _Codec,
@@ -35,7 +37,7 @@ from .base import (
     _Decoded,
     _encode_blocks,
     _hard,
-    _register,
+    _numba,
     _resolve_method,
 )
 
@@ -75,7 +77,7 @@ class LinearBlockCode(_Code):
     generator: np.ndarray
 
     def __post_init__(self) -> None:
-        g = np.array(self.generator, copy=True)
+        g = _to_host(self.generator)
         if g.ndim != 2 or g.shape[0] < 1 or g.shape[1] < g.shape[0]:
             raise ValueError(
                 f"generator must have shape (k, n) with 1 <= k <= n, got {g.shape}."
@@ -85,8 +87,7 @@ class LinearBlockCode(_Code):
         g = g.astype(np.int8)
         if row_reduce(g)[1].size != g.shape[0]:
             raise ValueError("generator must have full row rank over GF(2).")
-        g.setflags(write=False)
-        object.__setattr__(self, "generator", g)
+        freeze_host(self, "generator", g)
 
     @property
     def n(self) -> int:
@@ -426,7 +427,7 @@ def _decode_ml(
         for w0 in range(0, num_words, words_chunk):
             u = unpack_bits(np.arange(w0, min(w0 + words_chunk, num_words)), k)
             words = matmul_mod2(u, g)
-            _get_numba_ml()(
+            _numba().ml_search(
                 x, 1.0 - 2.0 * words.astype(np.float32), words.astype(np.bool_), w0,
                 method.soft, best_metric, best, m0, m1,
             )  # fmt: skip
@@ -439,15 +440,6 @@ def _decode_ml(
         xp.ones(rows, dtype=bool),
         xp.ones(rows, dtype=np.int32),
     )
-
-
-def _get_numba_ml() -> Any:
-    """Numba maximum-likelihood search over a chunk of codewords, parallel over
-    rows: each row's correlations with the chunk, its best codeword, and per
-    bit the best correlation with the bit 0 and with it 1."""
-    from . import _numba_loops
-
-    return _numba_loops.ml_search
 
 
 def _ml_gemm(
@@ -646,14 +638,11 @@ def _linear_checked(code: LinearBlockCode, method: object) -> bool:
     return False
 
 
-_register(
-    LinearBlockCode,
-    _Codec(
-        encode=_encode,
-        decode=_decode,
-        default_method=lambda code: Syndrome(),
-        methods=(Syndrome, MaximumLikelihood, Chase),
-        checked=_linear_checked,
-        info_positions=lambda code: code._unmix[0] if code._unmix[1] is None else None,
-    ),
+_CODECS[LinearBlockCode] = _Codec(
+    encode=_encode,
+    decode=_decode,
+    default_method=lambda code: Syndrome(),
+    methods=(Syndrome, MaximumLikelihood, Chase),
+    checked=_linear_checked,
+    info_positions=lambda code: code._unmix[0] if code._unmix[1] is None else None,
 )

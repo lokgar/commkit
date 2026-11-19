@@ -1,17 +1,14 @@
 """Carrier-phase estimation and correction.
 
 :func:`estimate_carrier_phase` and :func:`correct_carrier_phase`.  The method
-object selects the algorithm; each lives next to its kernel in this package and
-is dispatched through ``_ESTIMATORS``.  The estimate is a
-:class:`CarrierPhaseEstimate`, as the subclass holding the method's
-diagnostics: :class:`BlockPhaseEstimate` (BPS, Viterbi-Viterbi, Tikhonov),
-:class:`PilotInterpolationEstimate`, :class:`PilotToneEstimate` and
-:class:`PilotTonesEstimate`; ``PLL`` and ``ConstantPhase`` return the base.
+object selects the algorithm; each lives next to its kernel in this package,
+is dispatched through ``_ESTIMATORS`` and returns its estimate (see
+:mod:`.estimates`) with a leading channel axis, which the verb drops for
+``(N,)`` input.
 """
 
 import dataclasses
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -22,9 +19,10 @@ from ..core._signal_adapter import S, SignalAdapter, adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
 from ..math import _derotate
-from ._common import _Context, _Phase
+from ._common import _Context
 from .bps import BPS, _bps
 from .corrections import ConstantPhase, _data_aided
+from .estimates import CarrierPhaseEstimate
 from .pilots import (
     PilotInterpolation,
     PilotTone,
@@ -37,15 +35,7 @@ from .pll import PLL, _pll
 from .tikhonov import Tikhonov, _tikhonov
 from .viterbi_viterbi import ViterbiViterbi, _viterbi_viterbi
 
-__all__ = [
-    "BlockPhaseEstimate",
-    "CarrierPhaseEstimate",
-    "PilotTonesEstimate",
-    "PilotInterpolationEstimate",
-    "PilotToneEstimate",
-    "correct_carrier_phase",
-    "estimate_carrier_phase",
-]
+__all__ = ["correct_carrier_phase", "estimate_carrier_phase"]
 
 CarrierPhaseMethod = (
     BPS
@@ -58,7 +48,7 @@ CarrierPhaseMethod = (
     | ConstantPhase
 )
 
-_ESTIMATORS: dict[type, Callable[[ArrayType, Any, _Context], _Phase]] = {
+_ESTIMATORS: dict[type, Callable[[ArrayType, Any, _Context], CarrierPhaseEstimate]] = {
     BPS: _bps,
     ViterbiViterbi: _viterbi_viterbi,
     Tikhonov: _tikhonov,
@@ -74,124 +64,6 @@ _ESTIMATORS: dict[type, Callable[[ArrayType, Any, _Context], _Phase]] = {
 _SYMBOL_RATE = (BPS, ViterbiViterbi, Tikhonov, PLL, PilotInterpolation, ConstantPhase)
 
 
-@dataclass(frozen=True)
-class CarrierPhaseEstimate:
-    """Result of :func:`estimate_carrier_phase`: the result of ``PLL`` and
-    ``ConstantPhase``, and the field every method gives.
-
-    The constructor takes the same fields.  The other methods return a
-    subclass with their diagnostics: :class:`BlockPhaseEstimate` (BPS,
-    Viterbi-Viterbi, Tikhonov), :class:`PilotInterpolationEstimate`
-    (``PilotInterpolation``), :class:`PilotToneEstimate` (``PilotTone``) and
-    :class:`PilotTonesEstimate` (``PilotTones``).  Per-channel fields
-    drop their channel axis for ``(N,)`` input and stay on the input's
-    device.
-
-    Attributes
-    ----------
-    value : ndarray
-        Phase trajectory in radians, ``float64``, the shape of the samples.
-        :func:`correct_carrier_phase` rotates by ``exp(-j·value)``.
-    """
-
-    value: ArrayType
-
-
-@dataclass(frozen=True)
-class BlockPhaseEstimate(CarrierPhaseEstimate):
-    """Result of the block methods: BPS, Viterbi-Viterbi, Tikhonov.
-
-    The constructor takes the same fields.
-
-    Attributes
-    ----------
-    value : ndarray
-        Phase trajectory in radians, as in :class:`CarrierPhaseEstimate`.
-    block_centers : numpy.ndarray
-        Block center positions in symbols, ``(B,)``.
-    block_phase : ndarray
-        The block phases after unwrapping, smoothing and cycle-slip repair,
-        ``(B,)`` or ``(C, B)``.
-    """
-
-    block_centers: np.ndarray
-    block_phase: ArrayType
-
-
-@dataclass(frozen=True)
-class PilotInterpolationEstimate(CarrierPhaseEstimate):
-    """Result of ``PilotInterpolation``.
-
-    The constructor takes the same fields.
-
-    Attributes
-    ----------
-    value : ndarray
-        Phase trajectory in radians, as in :class:`CarrierPhaseEstimate`.
-    pilot_indices : numpy.ndarray
-        The pilot symbol indices, ``(P,)``.
-    pilot_phase : ndarray
-        Unwrapped pilot phases, ``(P,)`` or ``(C, P)``.
-    """
-
-    pilot_indices: np.ndarray
-    pilot_phase: ArrayType
-
-
-@dataclass(frozen=True)
-class PilotToneEstimate(CarrierPhaseEstimate):
-    """Result of ``PilotTone``.
-
-    The constructor takes the same fields.
-
-    Attributes
-    ----------
-    value : ndarray
-        Phase trajectory in radians, as in :class:`CarrierPhaseEstimate`.
-    tone_frequencies : numpy.ndarray
-        Measured tone centers in Hz on the host: per channel (0-d or
-        ``(C,)``) for ``PilotTone``, per channel and tone (``(K,)`` or
-        ``(C, K)``) for ``PilotTones``.
-    """
-
-    tone_frequencies: np.ndarray
-
-
-@dataclass(frozen=True)
-class PilotTonesEstimate(PilotToneEstimate):
-    """Result of ``PilotTones``.
-
-    The constructor takes the same fields: those of
-    :class:`PilotToneEstimate`, then the attributes below.
-
-    Attributes
-    ----------
-    tone_snr_db : numpy.ndarray
-        In-band SNR of each tone in dB, ``(K,)``.
-    differential_phase : ndarray
-        Tracked inter-tone phase ``δ_k[n]`` in radians, ``(K, N)`` (zero for
-        the reference tone).
-    reference_tone : int
-        Index of the reference (strongest) tone.
-    used_tones : tuple of int
-        Tones that passed the gates and were combined.
-    """
-
-    tone_snr_db: np.ndarray
-    differential_phase: ArrayType
-    reference_tone: int
-    used_tones: tuple[int, ...]
-
-
-#: Result class by method type (CarrierPhaseEstimate for the rest).
-_RESULTS: dict[type, type[CarrierPhaseEstimate]] = {
-    BPS: BlockPhaseEstimate,
-    ViterbiViterbi: BlockPhaseEstimate,
-    Tikhonov: BlockPhaseEstimate,
-    PilotInterpolation: PilotInterpolationEstimate,
-    PilotTone: PilotToneEstimate,
-    PilotTones: PilotTonesEstimate,
-}
 #: Fields with a channel axis, dropped for (N,) input.
 _PER_CHANNEL = ("value", "block_phase", "pilot_phase", "tone_frequencies")
 
@@ -270,7 +142,7 @@ def _estimate_carrier_phase(
             f"estimate_carrier_phase(): {type(method).__name__} needs one "
             f"sample per symbol; the Signal has sps={sig.sps:g}."
         )
-    reference = getattr(method, "symbols", None)
+    reference = method.symbols if isinstance(method, ConstantPhase) else None
     if reference is None and sig is not None and sig.reference is not None:
         reference = sig.reference.symbols
     ctx = _Context(
@@ -281,14 +153,17 @@ def _estimate_carrier_phase(
 
     x, _, _ = dispatch(signal_adapter.array)
     x, was_1d = as_2d(x, name="samples")
-    res = estimator(x, method, ctx)
-
-    cls = _RESULTS.get(type(method), CarrierPhaseEstimate)
-    fields = {}
-    for f in dataclasses.fields(cls):
-        a = res.phase if f.name == "value" else getattr(res, f.name)
-        fields[f.name] = restore_1d(was_1d, a) if f.name in _PER_CHANNEL else a
-    return cls(**fields)
+    est = estimator(x, method, ctx)  # (C, ...) layout
+    if not was_1d:
+        return est
+    return dataclasses.replace(
+        est,
+        **{
+            f.name: restore_1d(True, getattr(est, f.name))
+            for f in dataclasses.fields(est)
+            if f.name in _PER_CHANNEL
+        },
+    )
 
 
 def correct_carrier_phase(

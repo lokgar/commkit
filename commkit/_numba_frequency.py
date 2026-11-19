@@ -2,8 +2,8 @@
 
 The iterative bootstrap over the autocorrelation lags behind
 :class:`commkit.frequency.MengaliMorelli`.  Imported on first use through
-``_get_numba_mm_bootstrap`` in ``frequency.py``, so ``import commkit``
-does not load Numba.
+the ``_numba()`` of ``frequency.py``, so ``import commkit`` does not load
+Numba.
 """
 
 import numba
@@ -42,7 +42,7 @@ def mm_bootstrap(
     rows, L = theta.shape
     out = np.empty(rows, dtype=np.float64)
 
-    for r in numba.prange(rows):  # type: ignore[attr-defined,no-untyped-call]
+    for r in numba.prange(rows):  # type: ignore[attr-defined]
         # Lag 1 initialization (m=1, m²=1)
         Theta_0 = theta[r, 0]
         w0 = amp[r, 0] * amp[r, 0]  # m² · |R|² at m=1

@@ -2,9 +2,9 @@
 
 The compiled CPU loop behind :func:`commkit.timing.estimate_sampling_clock_offset`
 and :func:`commkit.timing.correct_sampling_clock_offset` with a
-:class:`~commkit.timing.Gardner`.  Imported on first use through
-``_get_numba_gardner`` and ``_get_numba_ted_curve`` in
-``timing/clock_recovery.py``, so ``import commkit`` does not load Numba.
+:class:`~commkit.timing.Gardner`.  Imported on first use through the
+``_numba()`` of ``timing/clock_recovery.py``, so ``import commkit`` does
+not load Numba.
 
 Conventions: ``x`` ``(C, N)`` complex64, normalized to unit mean power and
 zero-padded by ``pad`` samples at both ends (at least ``2 · sps + 10``:

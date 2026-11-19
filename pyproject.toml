@@ -149,6 +149,7 @@ logger-objects = ["commkit.logger.logger"]
 
 [tool.mypy]
 ignore_missing_imports = true
+warn_unused_ignores = true
 # Strictness is ratcheted per-module via overrides below as modules are
 # cleaned up; the default stays lenient so the whole tree type-checks today.
 
@@ -188,6 +189,7 @@ warn_return_any = true
 # annotated.
 module = [
     "commkit.equalization._numba_loops",
+    "commkit.mapping._numba_llr",
     "commkit.recovery._numba_loops",
 ]
 disallow_untyped_defs = false

@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..backend import ArrayType, to_device
+from ..backend import ArrayType, _to_host
 
 if TYPE_CHECKING:
     from .constellation import Constellation
@@ -71,11 +71,11 @@ def _constellation_power(
         If ``pmf`` is supplied and its length does not match the
         constellation.
     """
-    const = np.asarray(to_device(constellation, "cpu"))
+    const = _to_host(constellation)
     energies = np.abs(const).astype(np.float64) ** 2
     if pmf is None:
         return float(np.mean(energies))
-    pmf_arr = np.asarray(to_device(pmf, "cpu"), dtype=np.float64).ravel()
+    pmf_arr = _to_host(pmf, np.float64).ravel()
     if pmf_arr.shape[0] != energies.shape[0]:
         raise ValueError(
             f"pmf length {pmf_arr.shape[0]} does not match constellation "

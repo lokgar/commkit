@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from commkit import _cuda
-from commkit.equalization._block._dd import _get_numba_cs_block
+from commkit.equalization._common import _numba
 from tests.common.conversions import to_numpy
 from tests.common.kernel_utils import (
     reference_cs_block,
@@ -80,7 +80,7 @@ class TestCSBlockKernel:
         """One thread block per channel: wider than one block's thread limit,
         the kernel matches the Numba path that the CPU runs."""
         skip_unless_gpu(backend_device)
-        cs_numba = _get_numba_cs_block()
+        cs_numba = _numba().cs_block
 
         C, H = 1100, 100
         phi = slip_workload(C=C, n_total=400)
@@ -133,7 +133,7 @@ class TestCSBlockKernel:
             bind(xp.asfortranarray(xp.zeros((C, H))), ptr, n, st, **kw)
 
         launch = bind(buf_y, ptr, n, st, **kw)
-        with pytest.raises(ValueError, match="phi_blk"):
+        with pytest.raises(TypeError, match="phi_blk"):
             launch(phi.astype(xp.float32), corr)
         with pytest.raises(ValueError, match="phi_blk"):
             launch(xp.zeros((C, B + 1)), xp.zeros((C, B + 1)))  # beyond max_block
@@ -175,7 +175,7 @@ class TestWarmupMatchesCorrectCycleSlips:
                 max_block=200,
             )  # fmt: skip
         else:
-            numba_kernel = _get_numba_cs_block()
+            numba_kernel = _numba().cs_block
         out = []
         for a, b in ((0, 3), (3, 11), (11, 200), (200, 400)):
             blk = xp.asarray(np.ascontiguousarray(phi[:, a:b]))

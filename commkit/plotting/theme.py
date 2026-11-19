@@ -6,14 +6,14 @@ decimation of long traces) are shared by the plot modules.
 """
 
 import re
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import matplotlib as mpl
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..backend import get_array_module, to_device
+from ..backend import _to_host, get_array_module
 from ..logger import logger
 
 __all__ = ["apply_default_theme"]
@@ -439,7 +439,7 @@ def _trace(
     if x is None:
         x = xp.arange(y.shape[-1], dtype=np.float64) * dx + x0
     x, y = _decimate_minmax(x, y, max_points)
-    return _host(x), _host(y)
+    return _to_host(x), _to_host(y)
 
 
 _SI_PREFIXES = {
@@ -549,20 +549,15 @@ def _set_eng_formatter(ax, which: str) -> None:
 
 def _as_channels(arr) -> np.ndarray:
     """Bring to CPU and promote ``(N,)`` -> ``(1, N)``."""
-    arr = np.atleast_2d(np.asarray(to_device(arr, "cpu")))
-    return arr
+    return np.atleast_2d(_to_host(arr))
 
 
-def _host(a: Any) -> np.ndarray:
-    """``a`` as a host NumPy array (one transfer for device input)."""
-    return np.asarray(to_device(a, "cpu"))
+_R = TypeVar("_R")
 
 
-def _require(result: Any, field: str, name: str, what: str) -> Any:
-    """``result.<field>``; a result without it raises, naming what is needed."""
-    value = getattr(result, field, None)
-    if value is None:
-        raise ValueError(
-            f"{name} needs {what} (got {type(result).__name__} without {field})."
-        )
-    return value
+def _require(result: Any, kind: type[_R], name: str, what: str) -> _R:
+    """``result`` if it is a ``kind``; another result raises, naming what is
+    needed (a plot of one method's diagnostics given another's estimate)."""
+    if not isinstance(result, kind):
+        raise ValueError(f"{name} needs {what} (got {type(result).__name__}).")
+    return result

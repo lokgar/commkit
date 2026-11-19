@@ -1,7 +1,7 @@
 """Numba windowed-sinc interpolation (private).
 
 The CPU kernels of :mod:`commkit._interpolation`, imported on first use
-through its ``_get_numba_interpolation``, and the inline helper
+through its ``_numba()``, and the inline helper
 :func:`interp` that the Gardner loop (``timing/_numba_loops.py``) calls with
 its own half-width.  Numba caches a kernel against its own source file
 only: after editing :func:`interp`, clear the ``__pycache__`` of

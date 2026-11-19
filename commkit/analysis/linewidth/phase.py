@@ -5,15 +5,17 @@ They read a real phase trajectory in radians, e.g. the output of
 ``carrier_phase_trajectory`` or ``separate_drift_phase_noise``.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 from scipy.stats import chi2
 
-from ..._array import as_2d, broadcast_channels, to_report_scalar
-from ...backend import ArrayType, dispatch, to_device
+from ..._array import as_2d, broadcast_channels, freeze_host, to_report_scalar
+from ...backend import ArrayType, _to_host, dispatch, to_device
 from ...logger import logger
+from ...math import _next_pow2, normalize
 from .._common import (
     _BETA_SLOPE,
     _FWHM_FROM_AREA,
@@ -145,22 +147,19 @@ class IncrementSubtract:
 
     def __post_init__(self) -> None:
         if self.noise_var is not None:
-            nv = np.atleast_1d(np.asarray(to_device(self.noise_var, "cpu"), float))
+            nv = np.atleast_1d(_to_host(self.noise_var, float))
             if nv.ndim != 1 or np.any(nv < 0):
                 raise ValueError(
                     "noise_var must be a non-negative scalar or (C,) array, "
                     f"got {self.noise_var!r}."
                 )
-            nv.setflags(write=False)
-            object.__setattr__(self, "noise_var", nv)
+            freeze_host(self, "noise_var", nv)
         if self.reference is not None:
-            ref = np.array(to_device(self.reference, "cpu"))
+            ref = freeze_host(self, "reference", self.reference)
             if ref.ndim not in (1, 2):
                 raise ValueError(
                     f"reference must have shape (N,) or (C, N), got {ref.shape}."
                 )
-            ref.setflags(write=False)
-            object.__setattr__(self, "reference", ref)
         _check_edge_trim(self.edge_trim)
 
 
@@ -313,8 +312,6 @@ def _increment_subtract(
     sigma_n2 = xp.asarray(sigma_host)
 
     if method.reference is not None and bool(np.any(sigma_host)):
-        from ..math import normalize
-
         d2 = broadcast_channels(xp.asarray(method.reference), c, xp, name="reference")
         d2 = d2[:, :n_full][:, sl]
         d2 = normalize(d2, mode="average_power", axis=-1)
@@ -348,8 +345,8 @@ def _beta_separation(
 
     # Transfer the plot-sized spectrum once, up front: every fence, mask,
     # fit and the area below are host-side arithmetic on these arrays.
-    f_cpu = np.asarray(to_device(f, "cpu"), dtype=np.float64)
-    S_cpu = np.asarray(to_device(S_f, "cpu"), dtype=np.float64)
+    f_cpu = _to_host(f, np.float64)
+    S_cpu = _to_host(S_f, np.float64)
     S2c = S_cpu[None, :] if S_cpu.ndim == 1 else S_cpu
     n_ch = S2c.shape[0]
 
@@ -435,7 +432,7 @@ def _beta_separation(
                 f_cross,
                 c,
                 fmin,
-                int(2 ** np.ceil(np.log2(_BETA_MIN_BINS * fs / max(f_cross, 1e-300)))),
+                _next_pow2(math.ceil(_BETA_MIN_BINS * fs / max(f_cross, 1e-300))),
                 _BETA_MIN_BINS,
             )
 

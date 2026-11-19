@@ -19,19 +19,12 @@ from tests.common.signals import make_offset_qpsk
 FS = 1e6
 
 
-def _qpsk(xp: Any, n: int = 4096, channels: int = 1, df: float = 0.0, seed: int = 0):
-    """QPSK at 1 sample per symbol with a frequency offset ``df`` (Hz at FS)."""
-    return make_offset_qpsk(
-        xp, n=n, channels=channels, df=df, seed=seed, sampling_rate=FS
-    )
-
-
 class TestPlotCarrierPhase:
     """Carrier-phase diagnostics from CarrierPhaseEstimates."""
 
     def test_carrier_phase_trajectory_estimate(self, xp: Any) -> None:
         """A block estimate marks its block centres."""
-        x, _ = _qpsk(xp, n=1024)
+        x, _ = make_offset_qpsk(xp, sampling_rate=FS, n=1024)
         est = recovery.estimate_carrier_phase(
             x,
             recovery.ViterbiViterbi(block_size=64),
@@ -47,7 +40,7 @@ class TestPlotCarrierPhase:
 
     def test_pilot_phase_carrier_estimate(self, xp: Any) -> None:
         """PilotInterpolation: pilot panel plus the interpolated trajectory."""
-        x, s = _qpsk(xp, df=1e3)
+        x, s = make_offset_qpsk(xp, sampling_rate=FS, df=1e3)
         idx = np.arange(0, 4096, 32)
         est = recovery.estimate_carrier_phase(
             x, recovery.PilotInterpolation(idx, s[0, idx])
@@ -72,7 +65,7 @@ class TestPlotCarrierPhase:
         assert ax.get_xlim() == (0, 100)
 
     def test_pilot_tone_phase_estimate(self, xp: Any) -> None:
-        x, _ = _qpsk(xp, n=8192)
+        x, _ = make_offset_qpsk(xp, sampling_rate=FS, n=8192)
         method = recovery.PilotTone(frequency=3e5, bandwidth=2e4)
         x = add_pilot_tone(x, frequency=3e5, sampling_rate=FS)
         est = recovery.estimate_carrier_phase(x, method, sampling_rate=FS)
@@ -127,7 +120,7 @@ class TestPlotCarrierPhase:
         assert [line.get_label() for line in ax.lines] == ["first", "second"]
 
     def test_pilot_tones_phase_estimate(self, xp: Any) -> None:
-        x, _ = _qpsk(xp, n=8192)
+        x, _ = make_offset_qpsk(xp, sampling_rate=FS, n=8192)
         tones = (2.5e5, 3.5e5)
         for f in tones:
             x = add_pilot_tone(x, frequency=f, sampling_rate=FS)
@@ -147,7 +140,7 @@ class TestPlotCarrierPhase:
         assert any("test" in line.get_label() for line in ax.lines)
 
     def test_wrong_estimate_raises(self, xp: Any) -> None:
-        x, _ = _qpsk(xp, n=1024)
+        x, _ = make_offset_qpsk(xp, sampling_rate=FS, n=1024)
         est = recovery.estimate_carrier_phase(
             x,
             recovery.ViterbiViterbi(block_size=64),

@@ -4,13 +4,9 @@ import numpy as np
 import pytest
 
 from commkit.analysis import fm_noise_psd
-from commkit.backend import to_device
+from tests.common.conversions import to_numpy
 
 FS = 1e9
-
-
-def _host(f, s):
-    return np.asarray(to_device(f, "cpu")), np.asarray(to_device(s, "cpu"))
 
 
 class TestFmNoisePsdLevels:
@@ -22,7 +18,7 @@ class TestFmNoisePsdLevels:
         dnu, n = 1e6, 1 << 21
         steps = np.random.default_rng(0).standard_normal(n)
         phi = xp.asarray(np.cumsum(steps * np.sqrt(2 * np.pi * dnu / FS)))
-        f, s = _host(*fm_noise_psd(phi, sampling_rate=FS, nperseg=1 << 12))
+        f, s = map(to_numpy, fm_noise_psd(phi, sampling_rate=FS, nperseg=1 << 12))
         low = (f > 0.01 * FS) & (f < 0.1 * FS)
         high = f > 0.4 * FS
         assert np.mean(s[low]) == pytest.approx(dnu / np.pi, rel=0.02)
@@ -33,7 +29,7 @@ class TestFmNoisePsdLevels:
         (2σ²·f_s/π²)·sin²(πf/f_s)."""
         sigma2, n = 1e-3, 1 << 21
         phi = xp.asarray(np.random.default_rng(1).standard_normal(n) * np.sqrt(sigma2))
-        f, s = _host(*fm_noise_psd(phi, sampling_rate=FS, nperseg=1 << 12))
+        f, s = map(to_numpy, fm_noise_psd(phi, sampling_rate=FS, nperseg=1 << 12))
         sel = f > 0.05 * FS
         expected = 2 * sigma2 * FS / np.pi**2 * np.sin(np.pi * f[sel] / FS) ** 2
         np.testing.assert_allclose(
@@ -50,8 +46,8 @@ class TestFmNoisePsdLevels:
         # Phase of a sinusoidal frequency deviation dev·cos(2π f_mod t).
         phi = xp.asarray(dev / f_mod * np.sin(2 * np.pi * f_mod * t))
         kw = dict(sampling_rate=FS, nperseg=1 << 12, detrend=False)
-        f, raw = _host(*fm_noise_psd(phi, **kw))
-        _, corr = _host(*fm_noise_psd(phi, bias_correction=True, **kw))
+        f, raw = map(to_numpy, fm_noise_psd(phi, **kw))
+        _, corr = map(to_numpy, fm_noise_psd(phi, bias_correction=True, **kw))
         df = f[1] - f[0]
         # A tone of amplitude dev carries dev²/2 of frequency variance.
         assert np.sum(corr) * df == pytest.approx(dev**2 / 2, rel=0.02)

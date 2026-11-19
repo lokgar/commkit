@@ -17,9 +17,7 @@ class TestValidationHelpers:
     """Array validation and input coercion _array."""
 
     def test_validate_array(self, xp):
-        """Verify array validation: None passthrough, list conversion, complex_only, error paths."""
-        assert _array.validate_array(None) is None
-
+        """Verify array validation: list conversion, complex_only, error paths."""
         arr = _array.validate_array([1, 2, 3])
         assert isinstance(arr, (xp.ndarray, np.ndarray))
 
@@ -31,6 +29,9 @@ class TestValidationHelpers:
 
         with pytest.raises(ValueError, match="Expected numeric array"):
             _array.validate_array(np.array(["a", "b"]))
+
+        with pytest.raises(ValueError, match="Expected numeric array for x"):
+            _array.validate_array(None, name="x")
 
     def test_validate_array_complex_only(self, xp, xpt):
         """Verify complex_only flag zero-extends the imaginary part."""

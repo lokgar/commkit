@@ -7,8 +7,11 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch
 from ..logger import logger
-from ._common import _check_blocks, _Context, _interp_block_phases, _Phase
+from ..mapping._lattice import slicer_params
+from ..math import normalize
+from ._common import _Context, _interp_block_phases, _mfold_unwrap, _num_blocks, _numba
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
+from .estimates import BlockPhaseEstimate
 
 __all__ = ["BPS"]
 
@@ -65,24 +68,8 @@ class BPS:
             raise ValueError(f"BPS: block_size must be >= 1, got {self.block_size}.")
 
 
-def _get_numba_bps_table() -> Any:
-    """The BPS block metric, nearest point by a search over the table."""
-    from . import _numba_loops
-
-    return _numba_loops.bps_table
-
-
-def _get_numba_bps_grid() -> Any:
-    """The BPS block metric of square QAM, nearest point by the O(1) slicer."""
-    from . import _numba_loops
-
-    return _numba_loops.bps_grid
-
-
-def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
+def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> BlockPhaseEstimate:
     """BPS phase of ``(C, N)`` symbols."""
-    from ..mapping._lattice import slicer_params
-    from ..math import normalize
 
     constellation = ctx.need_constellation(method)
     num_test_phases = method.test_phases
@@ -97,17 +84,12 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     # amplitude-agnostic.
     symbols = normalize(symbols, mode="average_power", axis=-1)
 
-    # Reference constellation (unit power; a shaped constellation is already
-    # on the {s_m/sqrt(E_PS)} grid of the unit-power input).
-    const_np = np.asarray(constellation.points, dtype=np.complex128)
-
     # Candidate test phases over one ambiguity interval [0, 2π/M).
     M = int(constellation.rotational_symmetry)
     B = num_test_phases
     candidates = xp.arange(B, dtype=symbols.real.dtype) * (2.0 * np.pi / M / B)
 
-    N_blocks = _check_blocks(N, block_size)
-    N_trunc = N_blocks * block_size
+    N_blocks = _num_blocks(N, block_size)
 
     # Very small block_size makes the M-fold phase unwrap unreliable: with only
     # one or two symbols per block the noise on the distance-metric argmin causes
@@ -123,130 +105,11 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
             block_size,
         )
 
-    # Pre-compute phasors for all B candidates once (avoid redundant exp per channel)
+    # Phasors of the B candidates, computed once in float64 and cast to the
+    # symbols' precision.
     dtype_c = xp.complex64 if symbols.dtype == xp.complex64 else xp.complex128
     phasors = xp.exp(-1j * candidates.astype(xp.float64)).astype(dtype_c)  # (B,)
-    const_xp = xp.asarray(const_np.astype(dtype_c))  # (M_const,), the data's precision
-
-    # For square QAM (order a perfect square): the nearest constellation point
-    # can be found in O(1) per symbol via per-component rounding, eliminating
-    # the (CHUNK, B, M_const) distance tensor entirely.
-    side, lev_min_f32, d_grid_f32 = slicer_params(constellation)
-    is_sq_qam = side > 0
-    lev_min = float(lev_min_f32)
-    d_grid = float(d_grid_f32)
-
-    float_dtype = xp.float32 if symbols.dtype == xp.complex64 else xp.float64
-
-    # Fused CUDA kernel (CuPy + complex64 only): computes the per-symbol
-    # min-distance metric for all B candidate phases and all C channels in a
-    # single pass, avoiding the materialized (CHUNK, B[, M]) intermediates of
-    # the xp path.  Input outside its limits (complex128, more than 128
-    # phases, a table of more than 1024 points) takes the xp path below, the
-    # CPU's implementation.
-    _kern = None
-    if xp is not np and symbols.dtype == xp.complex64 and B <= 128:
-        if is_sq_qam or const_xp.size <= 1024:
-            from .. import _cuda
-
-            _kern = _cuda.get_kernel(
-                "bps_min_d2", mode="grid" if is_sq_qam else "table"
-            )
-
-    # Symbols per chunk of the array path (the GPU beyond its kernel's
-    # limits): its (CHUNK, B) arrays, or (CHUNK, B, M) for a table, stay
-    # within about 2^22 elements; a whole number of blocks.
-    per_symbol = B * (1 if is_sq_qam else const_xp.size)
-    CHUNK_N = max(block_size, (2**22 // per_symbol) // block_size * block_size)
-
-    # Accumulate per-channel distance metrics (N_blocks, B) for all channels.
-    metrics_all = xp.zeros((C, N_blocks, B), dtype=float_dtype)
-
-    if _kern is not None:
-        # One kernel call per chunk covering all C channels; output (B, C, n)
-        # is block-summed and transposed into metrics_all's (C, n_b, B)
-        # layout.  The kernel writes only the minima, so the chunk can be far
-        # larger than the tensor-bounded CHUNK_N of the xp path.
-        chunk_gpu = ((131072 + block_size - 1) // block_size) * block_size
-        const_c64 = None if is_sq_qam else const_xp
-        for n0 in range(0, N_trunc, chunk_gpu):
-            n1 = min(n0 + chunk_gpu, N_trunc)
-            if is_sq_qam:
-                md = _kern(
-                    symbols[:, n0:n1],
-                    phasors,
-                    lev_min=lev_min,
-                    d_grid=d_grid,
-                    side=side,
-                )
-            else:
-                md = _kern(symbols[:, n0:n1], phasors, constellation=const_c64)
-            b0 = n0 // block_size
-            n_b = (n1 - n0) // block_size
-            metrics_all[:, b0 : b0 + n_b] = (
-                md.reshape(B, C, n_b, block_size).sum(axis=3).transpose(1, 2, 0)
-            )
-
-    elif xp is np:
-        # The CPU: a Numba kernel over channels and blocks, with an O(1)
-        # per-axis slicer for square QAM or a scan of the table otherwise.
-        real = np.float32 if symbols.dtype == np.complex64 else np.float64
-        metrics_f64 = np.empty((C, N_blocks, B), dtype=np.float64)
-        data = (
-            np.ascontiguousarray(symbols[:, :N_trunc].real, dtype=real),
-            np.ascontiguousarray(symbols[:, :N_trunc].imag, dtype=real),
-            np.ascontiguousarray(phasors.real, dtype=real),
-            np.ascontiguousarray(phasors.imag, dtype=real),
-        )
-        if is_sq_qam:
-            _get_numba_bps_grid()(
-                *data, real(lev_min), real(d_grid), side, block_size, metrics_f64
-            )
-        else:
-            _get_numba_bps_table()(
-                *data,
-                np.ascontiguousarray(const_np.real, dtype=real),
-                np.ascontiguousarray(const_np.imag, dtype=real),
-                block_size,
-                metrics_f64,
-            )
-        metrics_all = metrics_f64.astype(float_dtype)
-
-    else:
-        for ch in range(C):
-            sym = symbols[ch, :N_trunc]  # (N_trunc,)
-
-            for n0 in range(0, N_trunc, CHUNK_N):
-                n1 = min(n0 + CHUNK_N, N_trunc)
-                x_rot = sym[n0:n1, None] * phasors[None, :]  # (CHUNK, B)
-
-                if is_sq_qam:
-                    # O(1) nearest-point: round each component to the nearest grid level
-                    r_idx = xp.clip(
-                        xp.round((x_rot.real - lev_min) / d_grid).astype(xp.int64),
-                        0,
-                        side - 1,
-                    )
-                    i_idx = xp.clip(
-                        xp.round((x_rot.imag - lev_min) / d_grid).astype(xp.int64),
-                        0,
-                        side - 1,
-                    )
-                    r_near = lev_min + r_idx.astype(float_dtype) * d_grid  # (CHUNK, B)
-                    i_near = lev_min + i_idx.astype(float_dtype) * d_grid  # (CHUNK, B)
-                    chunk_min_d = (
-                        (x_rot.real - r_near) ** 2 + (x_rot.imag - i_near) ** 2
-                    ).astype(float_dtype)
-                else:
-                    # General: (CHUNK, B, M_const) - bounded by CHUNK_N
-                    d_sq = xp.abs(x_rot[:, :, None] - const_xp[None, None, :]) ** 2
-                    chunk_min_d = xp.min(d_sq, axis=-1).astype(float_dtype)
-
-                b0 = n0 // block_size
-                n_b = (n1 - n0) // block_size
-                metrics_all[ch, b0 : b0 + n_b] = chunk_min_d.reshape(
-                    n_b, block_size, B
-                ).sum(axis=1)
+    metrics_all = _bps_metrics(symbols, phasors, constellation, block_size, N_blocks)
 
     # Phase estimation: joint (sum metrics across channels) or independent per channel.
     if joint_channels and C > 1:
@@ -257,7 +120,7 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     # unwrap ignores 2π/M steps, so this only puts the first block on the
     # branch nearest zero instead of the edge of the candidate range.
     phi_b = xp.where(phi_b >= np.pi / M, phi_b - 2.0 * np.pi / M, phi_b)
-    phi_u = xp.unwrap(phi_b * M, axis=-1) / M
+    phi_u = _mfold_unwrap(phi_b, M, xp)
     phi_u = _repair_slips(phi_u, method.cycle_slip, M, block_size)
     phi_full = _interp_block_phases(phi_u, N, block_size, xp)
     if phi_u.shape[0] != C:  # joint: one trajectory for every channel
@@ -273,9 +136,173 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
         (N_blocks, block_size, C, method.cycle_slip is not None),
     )
 
-    return _Phase(
-        phase=phi_full,
+    return BlockPhaseEstimate(
+        value=phi_full,
         block_centers=np.arange(N_blocks, dtype=np.float64) * block_size
         + block_size / 2,
         block_phase=phi_u,
     )
+
+
+def _bps_metrics(
+    symbols: ArrayType,
+    phasors: ArrayType,
+    constellation: Any,
+    block_size: int,
+    n_blocks: int,
+) -> ArrayType:
+    """Block metric of each candidate phase, ``(C, n_blocks, B)``.
+
+    The sum over a block of each symbol's squared distance to the nearest
+    point of the unit-power constellation after rotation by a candidate, in
+    the symbols' real precision.  The nearest point comes from the O(1)
+    per-axis slicer for square QAM and from a scan of the points otherwise.
+    The GPU runs the fused kernel within its limits (complex64, at most 128
+    phases, a table of at most 1024 points) and the chunked array path
+    beyond them; the CPU runs the Numba kernels.
+    """
+    xp = dispatch(symbols)[1]
+    grid = slicer_params(constellation)
+    B = phasors.size
+    if xp is np:
+        return _bps_metrics_numba(
+            symbols, phasors, constellation, grid, block_size, n_blocks
+        )
+    if symbols.dtype == xp.complex64 and B <= 128:
+        if grid[0] > 0 or constellation.order <= 1024:
+            return _bps_metrics_kernel(
+                symbols, phasors, constellation, grid, block_size, n_blocks
+            )
+    return _bps_metrics_array(
+        symbols, phasors, constellation, grid, block_size, n_blocks
+    )
+
+
+def _bps_metrics_kernel(
+    symbols: ArrayType,
+    phasors: ArrayType,
+    constellation: Any,
+    grid: tuple[int, Any, Any],
+    block_size: int,
+    n_blocks: int,
+) -> ArrayType:
+    """:func:`_bps_metrics` by the fused CUDA kernel (CuPy, complex64).
+
+    One call per chunk covers all channels and writes only the minima, so
+    the chunk can be far larger than the array path's; its ``(B, C, n)``
+    output is block-summed into the ``(C, n_blocks, B)`` layout.
+    """
+    from .. import _cuda
+
+    xp = dispatch(symbols)[1]
+    side, lev_min, d_grid = grid
+    C, B = symbols.shape[0], phasors.size
+    kern = _cuda.get_kernel("bps_min_d2", mode="grid" if side > 0 else "table")
+    points = None if side > 0 else xp.asarray(constellation.points.astype(np.complex64))
+    metrics = xp.empty((C, n_blocks, B), dtype=xp.float32)
+    chunk = ((131072 + block_size - 1) // block_size) * block_size
+    n_trunc = n_blocks * block_size
+    for n0 in range(0, n_trunc, chunk):
+        n1 = min(n0 + chunk, n_trunc)
+        if side > 0:
+            md = kern(
+                symbols[:, n0:n1],
+                phasors,
+                lev_min=float(lev_min),
+                d_grid=float(d_grid),
+                side=side,
+            )
+        else:
+            md = kern(symbols[:, n0:n1], phasors, constellation=points)
+        b0, n_b = n0 // block_size, (n1 - n0) // block_size
+        metrics[:, b0 : b0 + n_b] = (
+            md.reshape(B, C, n_b, block_size).sum(axis=3).transpose(1, 2, 0)
+        )
+    return metrics
+
+
+def _bps_metrics_numba(
+    symbols: np.ndarray,
+    phasors: np.ndarray,
+    constellation: Any,
+    grid: tuple[int, Any, Any],
+    block_size: int,
+    n_blocks: int,
+) -> np.ndarray:
+    """:func:`_bps_metrics` by the Numba kernels, over channels and blocks."""
+    side, lev_min, d_grid = grid
+    C, B = symbols.shape[0], phasors.size
+    n_trunc = n_blocks * block_size
+    real = np.float32 if symbols.dtype == np.complex64 else np.float64
+    metrics = np.empty((C, n_blocks, B), dtype=np.float64)
+    data = (
+        np.ascontiguousarray(symbols[:, :n_trunc].real, dtype=real),
+        np.ascontiguousarray(symbols[:, :n_trunc].imag, dtype=real),
+        np.ascontiguousarray(phasors.real, dtype=real),
+        np.ascontiguousarray(phasors.imag, dtype=real),
+    )
+    if side > 0:
+        _numba().bps_grid(*data, real(lev_min), real(d_grid), side, block_size, metrics)
+    else:
+        points = np.asarray(constellation.points, dtype=np.complex128)
+        _numba().bps_table(
+            *data,
+            np.ascontiguousarray(points.real, dtype=real),
+            np.ascontiguousarray(points.imag, dtype=real),
+            block_size,
+            metrics,
+        )
+    return metrics.astype(real)
+
+
+def _bps_metrics_array(
+    symbols: ArrayType,
+    phasors: ArrayType,
+    constellation: Any,
+    grid: tuple[int, Any, Any],
+    block_size: int,
+    n_blocks: int,
+) -> ArrayType:
+    """:func:`_bps_metrics` with array operations: the GPU beyond its kernel.
+
+    Chunks of whole blocks keep the ``(chunk, B)`` arrays, or
+    ``(chunk, B, M)`` for a table, within about 2^22 elements.
+    """
+    xp = dispatch(symbols)[1]
+    side, lev_min_f32, d_grid_f32 = grid
+    lev_min, d_grid = float(lev_min_f32), float(d_grid_f32)
+    C, B = symbols.shape[0], phasors.size
+    real = xp.float32 if symbols.dtype == xp.complex64 else xp.float64
+    points = xp.asarray(constellation.points.astype(phasors.dtype))
+    per_symbol = B * (1 if side > 0 else points.size)
+    chunk = max(block_size, (2**22 // per_symbol) // block_size * block_size)
+    n_trunc = n_blocks * block_size
+    metrics = xp.zeros((C, n_blocks, B), dtype=real)
+    for ch in range(C):
+        sym = symbols[ch, :n_trunc]
+        for n0 in range(0, n_trunc, chunk):
+            n1 = min(n0 + chunk, n_trunc)
+            x_rot = sym[n0:n1, None] * phasors[None, :]  # (chunk, B)
+            if side > 0:
+                # Nearest grid level per component.
+                r_idx = xp.clip(
+                    xp.round((x_rot.real - lev_min) / d_grid).astype(xp.int64),
+                    0,
+                    side - 1,
+                )
+                i_idx = xp.clip(
+                    xp.round((x_rot.imag - lev_min) / d_grid).astype(xp.int64),
+                    0,
+                    side - 1,
+                )
+                r_near = lev_min + r_idx.astype(real) * d_grid
+                i_near = lev_min + i_idx.astype(real) * d_grid
+                min_d = (
+                    (x_rot.real - r_near) ** 2 + (x_rot.imag - i_near) ** 2
+                ).astype(real)
+            else:
+                d_sq = xp.abs(x_rot[:, :, None] - points[None, None, :]) ** 2
+                min_d = xp.min(d_sq, axis=-1).astype(real)
+            b0, n_b = n0 // block_size, (n1 - n0) // block_size
+            metrics[ch, b0 : b0 + n_b] = min_d.reshape(n_b, block_size, B).sum(axis=1)
+    return metrics

@@ -4,22 +4,26 @@ Indexing, broadcasting and coercion operations on NumPy/CuPy arrays, used by
 every module: :func:`validate_array`, the SISO/MIMO shape pair
 :func:`as_2d` / :func:`restore_1d`, :func:`broadcast_channels`,
 :func:`require_channels`, :func:`to_report_scalar` (host values of the
-metrics and summaries) and :func:`warn_if_double` (the
+metrics and summaries), :func:`freeze_host` (the read-only host fields of
+value objects) and :func:`warn_if_double` (the
 :class:`~commkit.PrecisionWarning` of the fixed-precision blocks).  This
 module imports only ``backend``: nothing from ``core``, DSP modules or
 plotting.
 """
 
+import sys
+import warnings
 from typing import Any, overload
 
 import numpy as np
 
 from .backend import (
     ArrayType,
+    PrecisionWarning,
     _is_cupy_array,
     _reject_foreign_array,
+    _to_host,
     get_array_module,
-    to_device,
 )
 
 # ---------------------------------------------------------------------------
@@ -39,8 +43,8 @@ def validate_array(
 
     Parameters
     ----------
-    v : array_like or any
-        Input data to validate.
+    v : array_like
+        Input data to validate (``None`` is not an array and raises).
     name : str, default "array"
         Variable name used in error messages.
     complex_only : bool, default False
@@ -56,9 +60,6 @@ def validate_array(
     ValueError
         If the input cannot be converted to a supported array type.
     """
-    if v is None:
-        return None
-
     # Coerce lists/tuples and scalars to NumPy; arrays from other frameworks
     # (JAX, PyTorch, ...) are rejected rather than silently copied.
     if not (isinstance(v, np.ndarray) or _is_cupy_array(v)):
@@ -85,20 +86,26 @@ def validate_array(
     return v
 
 
+def freeze_host(obj: Any, name: str, value: Any, dtype: Any = None) -> np.ndarray:
+    """Store ``value`` as field ``name`` of the frozen dataclass ``obj``.
+
+    The field becomes a read-only host copy (one transfer for device input),
+    so the caller's array stays writable and a value object never holds
+    device memory.  Returns the stored array.
+    """
+    arr = np.array(_to_host(value), dtype=dtype)
+    arr.setflags(write=False)
+    object.__setattr__(obj, name, arr)
+    return arr
+
+
 # ---------------------------------------------------------------------------
 # Array shape helpers
 # ---------------------------------------------------------------------------
 #
-# CommKit's SISO/MIMO convention is ``(N,)`` / ``(C, N)`` with time on the last
-# axis.  Nearly every DSP entry point therefore
-# promotes a 1-D input to ``(1, N)``, runs one vectorized channel-batched
-# implementation, and squeezes the leading axis back off on the way out.  These
-# helpers are that idiom, defined once, so the promotion is validated the same
-# way everywhere instead of silently passing 3-D (or 0-d) input through to a
-# confusing downstream broadcast error.
-#
-# They are pure indexing/broadcast operations and therefore correct on every
-# array type the library sees - NumPy and CuPy - without dispatching.
+# Promote ``(N,)`` to ``(1, N)``, run the channel-batched code, squeeze back:
+# validated here so 3-D or 0-d input raises instead of broadcasting.  Pure
+# indexing, so they work on NumPy and CuPy without dispatching.
 
 
 def as_2d(arr: ArrayType, *, name: str = "array") -> tuple[ArrayType, bool]:
@@ -180,9 +187,8 @@ def broadcast_channels(
 ) -> ArrayType:
     """Broadcast a shared reference sequence across ``num_channels`` channels.
 
-    Replaces the ad-hoc ``if ref.ndim == 1: ref = ref[None, :]`` promotion used
-    at every reference/pilot input, adding the channel-count check that the
-    bare promotion leaves to a later, far more opaque broadcast failure.
+    Unlike a bare ``ref[None, :]`` it checks the channel count, so a mismatch
+    raises here, naming ``name``, instead of failing later in a broadcast.
 
     Parameters
     ----------
@@ -294,7 +300,7 @@ def to_report_scalar(values: Any, *, was_1d: bool | None = None) -> float | np.n
     float or numpy.ndarray
         A Python float for ``(N,)`` input, otherwise a ``float64`` NumPy array.
     """
-    arr = np.asarray(to_device(values, "cpu"), dtype=np.float64)
+    arr = _to_host(values, np.float64)
     if was_1d is None:
         was_1d = arr.ndim == 0
     if not was_1d:
@@ -314,10 +320,6 @@ def warn_if_double(arr: Any, function_name: str, working: str = "complex64") -> 
     dtype = getattr(arr, "dtype", None)
     if dtype is None or dtype not in (np.complex128, np.float64):
         return
-    import sys
-    import warnings
-
-    from .backend import PrecisionWarning
 
     # Point the warning at the first frame outside commkit.
     frame: Any = sys._getframe(1)  # the caller: stacklevel 2

@@ -19,8 +19,10 @@ from typing import Any
 
 import numpy as np
 
-from ..backend import ArrayType, _device_tables, dispatch
+from .._array import freeze_host
+from ..backend import ArrayType, _device_tables, _to_host, dispatch
 from .base import (
+    _CODECS,
     _checked,
     _Code,
     _Codec,
@@ -29,7 +31,6 @@ from .base import (
     _Decoded,
     _encode_blocks,
     _info_positions,
-    _register,
     _resolve_method,
 )
 
@@ -63,16 +64,15 @@ class Punctured(_Code):
 
     def __post_init__(self) -> None:
         _codec(self.code, "Punctured()")
-        p = np.unique(np.asarray(self.positions))
-        if p.size != np.size(self.positions) or p.size == 0:
+        raw = _to_host(self.positions)
+        p = np.unique(raw)
+        if p.size != raw.size or p.size == 0:
             raise ValueError("positions must be distinct and not empty.")
         if p.dtype.kind not in "iu" or p[0] < 0 or p[-1] >= self.code.n:
             raise ValueError(f"positions must be integers in [0, {self.code.n}).")
         if p.size >= self.code.n:
             raise ValueError("positions cannot cover the whole codeword.")
-        p = p.astype(np.int64)
-        p.setflags(write=False)
-        object.__setattr__(self, "positions", p)
+        freeze_host(self, "positions", p, np.int64)
 
     @property
     def n(self) -> int:
@@ -200,15 +200,12 @@ for _cls, _enc, _dec, _info in (
     (Punctured, _encode_punctured, _decode_punctured, _punctured_info),
     (Shortened, _encode_shortened, _decode_shortened, _shortened_info),
 ):
-    _register(
-        _cls,
-        _Codec(
-            encode=_enc,
-            decode=_dec,
-            # The inner code's decoders, resolved (and checked) on the inner code.
-            default_method=lambda code: _resolve_method(code.code, None, "decode()"),
-            methods=(object,),
-            checked=lambda code, method: _checked(code.code, method),
-            info_positions=_info,
-        ),
+    _CODECS[_cls] = _Codec(
+        encode=_enc,
+        decode=_dec,
+        # The inner code's decoders, resolved (and checked) on the inner code.
+        default_method=lambda code: _resolve_method(code.code, None, "decode()"),
+        methods=(object,),
+        checked=lambda code, method: _checked(code.code, method),
+        info_positions=_info,
     )

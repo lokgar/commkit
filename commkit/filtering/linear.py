@@ -17,10 +17,10 @@ from .. import _cuda, _fft
 from .._array import as_2d, restore_1d
 from .._circular import convolve_periodic
 from .._overlap_save import ols_apply
-from ..backend import ArrayType, dispatch, to_device
+from ..backend import ArrayType, _to_host, dispatch
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
-from ..math import normalize
+from ..math import _next_pow2, normalize
 from .pulses import Pulse
 
 __all__ = [
@@ -496,8 +496,8 @@ def _overlap_save_filter(
     """
     L = taps.size
     guard = L - 1 - center  # lags -center .. L - 1 - center
-    nfft = max(1024, 1 << (max(1, 4 * L) - 1).bit_length())
-    nfft = max(nfft, 1 << (2 * guard).bit_length())
+    # The power of two above 2 * guard keeps at least half of each block.
+    nfft = max(1024, _next_pow2(max(1, 4 * L)), _next_pow2(2 * guard + 1))
     real = not xp.iscomplexobj(rows) and not xp.iscomplexobj(taps)
     kernel = xp.zeros(nfft, dtype=taps.dtype)
     kernel[:L] = taps
@@ -540,12 +540,7 @@ def matched_filter(
         If there is no pulse, or a pulse object is given with array input.
     """
     signal_adapter = adapt_signal(samples, function_name="matched_filter()")
-    pulse = signal_adapter.resolve_choice("pulse", pulse)
-    if pulse is None:
-        raise ValueError(
-            "matched_filter() needs a pulse: pass pulse= (a Pulse or taps) or a "
-            "Signal that has one."
-        )
+    pulse = signal_adapter.require_choice("pulse", pulse, purpose=" (a Pulse or taps)")
     if isinstance(pulse, Pulse):
         sig = signal_adapter.signal
         if sig is None:
@@ -774,7 +769,7 @@ def iir_filter(
     """
     signal_adapter = adapt_signal(samples, function_name="iir_filter()")
     x, xp, _ = dispatch(signal_adapter.array)
-    sos_np = np.asarray(to_device(sos, "cpu"), dtype=np.float64)
+    sos_np = _to_host(sos, np.float64)
     if sos_np.ndim != 2 or sos_np.shape[1] != 6:
         raise ValueError(
             f"iir_filter(): sos must have shape (n_sections, 6), got {sos_np.shape}."

@@ -6,9 +6,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
 
-from ..backend import dispatch, to_device
+from ..backend import _to_host, dispatch, to_device
 from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..logger import logger
+from ..math import normalize
 from ..smoothing import smooth_density_2d
 from .theme import _finish, _grid_figsize
 
@@ -64,7 +65,6 @@ def _plot_eye_traces(
     samples, xp, _ = dispatch(samples)
 
     # Normalize to max amplitude 1.0
-    from ..math import normalize
 
     samples = normalize(samples, mode="peak")
 
@@ -100,7 +100,7 @@ def _plot_eye_traces(
         # Gather samples
         traces = samples[gather_indices]  # (num_traces, trace_len)
 
-        traces = np.asarray(to_device(traces, "cpu"))
+        traces = _to_host(traces)
         t = np.linspace(0, num_symbols, trace_len, endpoint=True)
 
         # One LineCollection instead of one Line2D per trace: a single artist
@@ -151,7 +151,7 @@ def _plot_eye_traces(
         h = smooth_density_2d(h, sigma=1.0)
 
         # Normalize on the host, where the image goes anyway.
-        h = np.asarray(to_device(h, "cpu"))
+        h = _to_host(h)
         h_max = h.max()
         if h_max > 0:
             h = h / h_max
@@ -167,7 +167,7 @@ def _plot_eye_traces(
         }
         imshow_kwargs.update(kwargs)
 
-        ax.imshow(h, **imshow_kwargs)  # type: ignore[arg-type]
+        ax.imshow(h, **imshow_kwargs)
 
     else:
         raise ValueError(f"Unknown kind: {kind}. Supported: 'line', 'hist'")

@@ -508,12 +508,16 @@ class TestClosedFormMaxLog:
 
         used: list[str] = []
         if xp is np:
-            real = llr_module._get_numba_llr
-            monkeypatch.setattr(
-                llr_module,
-                "_get_numba_llr",
-                lambda name="llr": used.append(name) or real(name),
-            )
+            kernels = llr_module._numba()
+
+            class Spy:
+                """The kernel module, recording which kernel is fetched."""
+
+                def __getattr__(self, name: str) -> Any:
+                    used.append(name.removesuffix("_kernel"))
+                    return getattr(kernels, name)
+
+            monkeypatch.setattr(llr_module, "_numba", Spy)
             expect_closed = cpu_closed
         else:
             real = _cuda.get_kernel

@@ -525,3 +525,55 @@ def make_offset_qpsk(
     x = x + 0.05 * (rng.standard_normal(x.shape) + 1j * rng.standard_normal(x.shape))
     x = x.astype(np.complex64)
     return xp.asarray(x[0] if channels == 1 else x), s
+
+
+def make_band_limited_field(
+    num_channels: int,
+    n: int,
+    *,
+    seed: int = 1,
+    unit_power: bool = False,
+    dtype: Any = np.complex64,
+) -> np.ndarray:
+    """Complex Gaussian field occupying ``|f| < f_s/4``, ``(num_channels, n)``.
+
+    White complex Gaussian rows, low-passed by zeroing the FFT bins above a
+    quarter of the sampling rate; ``unit_power`` scales the whole field to
+    unit mean power.  A host array, for the fibre channel's tests.
+    """
+    rng = np.random.default_rng(seed)
+    x = rng.standard_normal((num_channels, n)) + 1j * rng.standard_normal(
+        (num_channels, n)
+    )
+    spectrum = np.fft.fft(x, axis=-1)
+    spectrum[:, np.abs(np.fft.fftfreq(n)) > 0.25] = 0.0
+    x = np.fft.ifft(spectrum, axis=-1)
+    if unit_power:
+        x = x / np.sqrt(np.mean(np.abs(x) ** 2))
+    return x.astype(dtype)
+
+
+def make_wiener_record(
+    constellation: Constellation,
+    linewidth_ts: float,
+    esn0_db: float,
+    *,
+    n: int,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Symbols of ``constellation`` at 1 SPS under a Wiener phase and AWGN.
+
+    The phase increments have variance ``2π Δν T`` (``linewidth_ts`` is
+    ``Δν T``), the complex noise variance ``10^(-esn0_db/10)``.  Returns the
+    complex64 samples, the complex64 symbols and the float64 phase, on the
+    host.
+    """
+    rng = np.random.default_rng(seed)
+    symbols = constellation.points.astype(np.complex64)[
+        rng.integers(0, constellation.order, n)
+    ]
+    phase = np.cumsum(rng.standard_normal(n) * np.sqrt(2 * np.pi * linewidth_ts))
+    noise = np.sqrt(10 ** (-esn0_db / 10) / 2) * (
+        rng.standard_normal(n) + 1j * rng.standard_normal(n)
+    )
+    return (symbols * np.exp(1j * phase) + noise).astype(np.complex64), symbols, phase

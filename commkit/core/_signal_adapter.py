@@ -4,8 +4,8 @@
 which resolves facts (``resolve_fact``: a conflicting argument raises) and
 choices (``resolve_choice``: an explicit argument wins), and returns results
 through ``wrap_samples``.  :data:`S` is the TypeVar of a transform's
-argument and result.  Also :func:`require_device` and
-:func:`require_integer_sps`.
+argument and result.  Also :func:`require_choice` (a choice that must be
+there), :func:`require_device` and :func:`require_integer_sps`.
 
 This module holds container adaptation only: numerical code receives arrays
 and fully resolved scalar metadata.
@@ -103,6 +103,19 @@ class SignalAdapter(Generic[S]):
             return supplied
         return getattr(self.signal, field)
 
+    def require_choice(
+        self, field: str, supplied: Any = None, *, purpose: str = "", kind: Any = None
+    ) -> Any:
+        """Resolve a choice as :meth:`resolve_choice` does, raising when there is
+        none (see :func:`require_choice`)."""
+        return require_choice(
+            self.resolve_choice(field, supplied),
+            field,
+            self.function_name,
+            purpose=purpose,
+            kind=kind,
+        )
+
     def symbol_array(self) -> ArrayType:
         """The symbols: the array, or a Signal's samples at one sample per symbol.
 
@@ -164,6 +177,28 @@ def _same_fact(a: Any, b: Any) -> bool:
         return bool(np.isclose(float(a), float(b), rtol=_FACT_RTOL, atol=0.0))
     except (TypeError, ValueError):
         return bool(a == b)
+
+
+def require_choice(
+    value: Any, field: str, function_name: str, *, purpose: str = "", kind: Any = None
+) -> Any:
+    """``value``, a resolved choice; ``None`` raises ``ValueError``.
+
+    The message names the function, the ``field`` and what it is needed for
+    (``purpose``, such as ``" for its decisions"``).  With ``kind`` a value
+    of another type raises ``TypeError``.
+    """
+    if value is None:
+        raise ValueError(
+            f"{function_name} needs a {field}{purpose}: pass {field}= or a Signal "
+            "that has one."
+        )
+    if kind is not None and not isinstance(value, kind):
+        raise TypeError(
+            f"{function_name}: {field} must be a {kind.__name__}, got "
+            f"{type(value).__name__}."
+        )
+    return value
 
 
 def require_device(device: str, function_name: str) -> str:

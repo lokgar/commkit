@@ -19,13 +19,13 @@ from typing import Any
 import numpy as np
 
 from ... import _fft
-from ..._array import as_2d, broadcast_channels
+from ..._array import as_2d, broadcast_channels, freeze_host
 from ..._constants import SPEED_OF_LIGHT as _SPEED_OF_LIGHT
 from ..._dispersion import (
     beta2_length,
     spread_samples,
 )
-from ...backend import ArrayType, dispatch, to_device
+from ...backend import ArrayType, _to_host, dispatch, to_device
 from ...core._signal_adapter import (
     SignalAdapter,
     adapt_signal,
@@ -33,7 +33,7 @@ from ...core._signal_adapter import (
 )
 from ...core.signal import Signal
 from ...logger import logger
-from ...math import _phasor
+from ...math import _next_pow2, _phasor
 
 __all__ = [
     "ChromaticDispersionEstimate",
@@ -223,14 +223,12 @@ class QuadraticPhaseFit:
                 f"{self.max_dispersion_ps_nm!r}."
             )
         if self.symbols is not None:
-            symbols = np.array(to_device(self.symbols, "cpu"))
+            symbols = freeze_host(self, "symbols", self.symbols)
             if symbols.ndim not in (1, 2):
                 raise ValueError(
                     "QuadraticPhaseFit: symbols must have shape (K,) or (C, K), "
                     f"got {symbols.shape}."
                 )
-            symbols.setflags(write=False)
-            object.__setattr__(self, "symbols", symbols)
 
 
 @dataclass(frozen=True)
@@ -311,10 +309,6 @@ _MIN_SCAN_BLOCK = 1024
 _SCAN_PADDING = 16
 
 
-def _ps_nm_to_beta2_length(ps_nm: float, wavelength_nm: float) -> float:
-    return beta2_length(dispersion_ps_nm=ps_nm, center_wavelength_nm=wavelength_nm)
-
-
 def _beta2_length_to_ps_nm(b2l: Any, wavelength_nm: float) -> Any:
     lam = wavelength_nm * 1e-9
     return -b2l * 2.0 * np.pi * _SPEED_OF_LIGHT / lam**2 / 1e-3
@@ -324,9 +318,12 @@ def _scan_block(method: Any, wavelength_nm: float, fs: float, minimum: int) -> i
     """FFT block of a scan: a power of two of eight spreads of the range's
     larger end, at least ``minimum``."""
     lo, hi = method.search_range
-    b_max = max(abs(_ps_nm_to_beta2_length(v, wavelength_nm)) for v in (lo, hi))
+    b_max = max(
+        abs(beta2_length(dispersion_ps_nm=v, center_wavelength_nm=wavelength_nm))
+        for v in (lo, hi)
+    )
     spread = spread_samples(b_max, sampling_rate=fs, bandwidth=fs)
-    return max(minimum, 1 << max(int(math.ceil(8.0 * spread)) - 1, 1).bit_length())
+    return max(minimum, _next_pow2(max(math.ceil(8.0 * spread), 2)))
 
 
 def _clock_tone(
@@ -374,7 +371,7 @@ def _clock_tone(
     scan_plus = _fft.ifft(plus, n=size, axis=-1) * shift
     scan_minus = _fft.fft(minus, n=size, axis=-1) * xp.conj(shift)
     metric = xp.sum(xp.abs(scan_plus) ** 2 + xp.abs(scan_minus) ** 2, axis=0)
-    metric_cpu = np.asarray(to_device(metric, "cpu"), dtype=np.float64)
+    metric_cpu = _to_host(metric, np.float64)
     lag = np.arange(size)
     lag[lag >= size // 2] -= size
     tau = lag * nfft / (size * sampling_rate)  # s: β₂L·Ω
@@ -455,7 +452,12 @@ def _fourth_moment(
         out = np.empty(ps_nm.size)
         for start in range(0, ps_nm.size, _MOMENT_BATCH):
             chunk = ps_nm[start : start + _MOMENT_BATCH]
-            b2l = xp.asarray([_ps_nm_to_beta2_length(v, wavelength_nm) for v in chunk])
+            b2l = xp.asarray(
+                [
+                    beta2_length(dispersion_ps_nm=v, center_wavelength_nm=wavelength_nm)
+                    for v in chunk
+                ]
+            )
             response = _phasor(0.5 * b2l[:, None] * omega2[None, :], spectra.dtype, xp)
             z = _fft.ifft(spectra[None] * response[:, None, None, :])
             power = xp.abs(z[..., guard:-guard]) ** 2
@@ -512,7 +514,7 @@ def _quadratic_phase_pass(
         average = xp.sum(cross * xp.exp(-1j * phase)[..., None], axis=1)
     response = average / xp.maximum(power, xp.finfo(power.dtype).tiny)
     diff = xp.sum(response[:, 1:] * xp.conj(response[:, :-1]) * power[:, 1:], axis=0)
-    diff = np.asarray(to_device(diff, "cpu"), dtype=np.complex128)
+    diff = _to_host(diff, np.complex128)
     f = np.fft.fftfreq(nfft, d=1.0 / sampling_rate)
     d_omega = 2.0 * np.pi * sampling_rate / nfft
     omega = 2.0 * np.pi * f[:-1] + d_omega / 2.0
@@ -560,9 +562,11 @@ def _quadratic_phase(
         # 0.8 π up to omega_max (the band edge, where the weights are
         # smallest); smaller blocks average more of them.
         need = 2.5 * abs(b2l) * omega_max * sampling_rate
-        return max(1024, 1 << max(int(math.ceil(need)) - 1, 1).bit_length())
+        return max(1024, _next_pow2(max(math.ceil(need), 2)))
 
-    b2l_max = _ps_nm_to_beta2_length(method.max_dispersion_ps_nm, wavelength_nm)
+    b2l_max = beta2_length(
+        dispersion_ps_nm=method.max_dispersion_ps_nm, center_wavelength_nm=wavelength_nm
+    )
     nfft = block(b2l_max, np.pi * sampling_rate)  # the whole band, first
     if n < 2 * nfft:
         raise ValueError(

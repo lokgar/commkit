@@ -20,6 +20,7 @@ import dataclasses
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -27,6 +28,14 @@ import numpy as np
 from .._array import as_2d, restore_1d, validate_array, warn_if_double
 from ..backend import ArrayType, get_array_module, to_device
 from ..logger import logger
+
+
+def _numba() -> ModuleType:
+    """``coding._numba_loops``, imported (with Numba) on first use."""
+    from . import _numba_loops
+
+    return _numba_loops
+
 
 __all__ = ["DecodeResult", "decode", "encode"]
 
@@ -128,7 +137,7 @@ class _Value:
             return True
         if type(other) is not type(self):
             return NotImplemented
-        return self._key() == other._key()  # type: ignore[attr-defined]
+        return self._key() == other._key()
 
     def __hash__(self) -> int:
         # Cached: the device-table cache hashes the object on every call, and
@@ -177,11 +186,8 @@ class _Codec:
     host: bool = False
 
 
+#: Codec per code class, filled by each code module as ``_CODECS[cls] = ...``.
 _CODECS: dict[type, _Codec] = {}
-
-
-def _register(cls: type, codec: _Codec) -> None:
-    _CODECS[cls] = codec
 
 
 def _codec(code: Any, function_name: str) -> _Codec:

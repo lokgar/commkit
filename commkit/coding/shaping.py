@@ -42,6 +42,7 @@ from ..backend import ArrayType, dispatch, to_device
 from ..mapping import Constellation
 from ..mapping._lattice import separable_axes
 from .base import (
+    _CODECS,
     _Code,
     _Codec,
     _codec,
@@ -50,7 +51,7 @@ from .base import (
     _encode_blocks,
     _hard,
     _info_positions,
-    _register,
+    _numba,
     _resolve_method,
 )
 from .interleaving import Interleaver, deinterleave, interleave
@@ -181,7 +182,7 @@ class CCDM(_Code):
     def _match(self, bits: np.ndarray) -> np.ndarray:
         """Host ``(R, k)`` bits to ``(R, num_symbols)`` point indices."""
         out = np.empty((bits.shape[0], self.num_symbols), dtype=np.int64)
-        _get_numba_ccdm("match")(
+        _numba().ccdm_match(
             np.ascontiguousarray(bits, dtype=np.int8), self.composition, out
         )
         return out
@@ -191,7 +192,7 @@ class CCDM(_Code):
         rows = symbols.shape[0]
         bits = np.empty((rows, self.k), dtype=np.int8)
         valid = np.empty(rows, dtype=np.bool_)
-        _get_numba_ccdm("dematch")(
+        _numba().ccdm_dematch(
             np.ascontiguousarray(symbols, dtype=np.int64),
             self.composition,
             self._buffer_bits,
@@ -214,23 +215,6 @@ def _composition(pmf: np.ndarray, n: int) -> np.ndarray:
         cost[p == 0] = np.inf
         c[int(np.argmin(cost))] += 1
     return c
-
-
-def _get_numba_ccdm(name: str) -> Any:
-    """Numba matcher and dematcher, parallel over blocks.
-
-    The range coder of the module docstring.  The interval of the current
-    prefix is ``[low, low + range 2^-S)``; ``range`` is kept in
-    ``[2^31, 2^32)`` by doubling it (``S += 1``).  Splitting gives point
-    ``i`` the share ``floor(range c_i / n_rem)``, plus the remainder for the
-    most frequent point (lowest index among equals).  The matcher tracks
-    ``D = floor((v - low) 2^S)`` for its input point ``v``; the dematcher
-    accumulates ``low`` exactly in a bit array and rounds it up to ``k``
-    bits.
-    """
-    from . import _numba_loops
-
-    return getattr(_numba_loops, f"ccdm_{name}")
 
 
 def _encode_ccdm(code: CCDM, bits: ArrayType) -> ArrayType:
@@ -433,25 +417,19 @@ def _decode_pas(code: PAS, llrs: ArrayType, method: Any) -> _Decoded:
     )
 
 
-_register(
-    CCDM,
-    _Codec(
-        encode=_encode_ccdm,
-        decode=_decode_ccdm,
-        default_method=lambda code: _Dematch(),
-        methods=(_Dematch,),
-        checked=lambda code, method: True,
-        host=True,
-    ),
+_CODECS[CCDM] = _Codec(
+    encode=_encode_ccdm,
+    decode=_decode_ccdm,
+    default_method=lambda code: _Dematch(),
+    methods=(_Dematch,),
+    checked=lambda code, method: True,
+    host=True,
 )
-_register(
-    PAS,
-    _Codec(
-        encode=_encode_pas,
-        decode=_decode_pas,
-        default_method=lambda code: _resolve_method(code.code, None, "decode()"),
-        methods=(object,),
-        checked=lambda code, method: True,  # the matcher's composition check
-        host=True,
-    ),
+_CODECS[PAS] = _Codec(
+    encode=_encode_pas,
+    decode=_decode_pas,
+    default_method=lambda code: _resolve_method(code.code, None, "decode()"),
+    methods=(object,),
+    checked=lambda code, method: True,  # the matcher's composition check
+    host=True,
 )

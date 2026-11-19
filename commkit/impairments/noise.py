@@ -22,7 +22,7 @@ import numpy as np
 from .._array import as_2d, restore_1d
 from .._constants import ELEMENTARY_CHARGE
 from .._random import RNG, as_generator, complex_normal, standard_normal
-from ..backend import ArrayType, dispatch, to_device
+from ..backend import ArrayType, _to_host, dispatch
 from ..core._signal_adapter import S, SignalAdapter, adapt_signal
 from ..logger import logger
 from ..math import db_to_linear
@@ -438,7 +438,7 @@ def apply_coherent_detection(
         x = x.astype(xp.complex64 if x.dtype == xp.float32 else xp.complex128)
     x, was_1d = as_2d(x, name="samples")
     channel_power = xp.mean(xp.abs(x) ** 2, axis=-1, dtype=xp.float64)  # (C,)
-    host_power = np.asarray(to_device(channel_power, "cpu"), dtype=np.float64)
+    host_power = _to_host(channel_power, np.float64)
     if np.any(host_power == 0):
         raise ValueError(f"{function_name}: a channel is all zeros.")
     p_total = 1e-3 * 10 ** (received_power_dbm / 10)

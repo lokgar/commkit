@@ -21,10 +21,15 @@ from .._peaks import parabolic_peak_offset
 from .._sequences import barker_sequence, zadoff_chu_sequence
 from ..backend import ArrayType, dispatch, to_device
 from ..core import Preamble, Signal
-from ..core._signal_adapter import S, adapt_signal, require_integer_sps
+from ..core._signal_adapter import (
+    S,
+    SignalAdapter,
+    adapt_signal,
+    require_integer_sps,
+)
 from ..filtering.pulses import Pulse
 from ..logger import logger
-from ..math import _derotate
+from ..math import _derotate, _next_pow2
 
 __all__ = [
     "TimingEstimate",
@@ -94,9 +99,7 @@ def cross_correlate(
     full_len = N + L - 1
 
     # Smallest power-of-2 >= full_len for FFT efficiency.
-    # `(full_len - 1).bit_length()` is the canonical integer-only formula;
-    # `full_len.bit_length()` would round up even when full_len is already a power of 2.
-    n_fft = 1 << (full_len - 1).bit_length()
+    n_fft = _next_pow2(full_len)
 
     # FFT-based correlation: R[k] = IFFT(FFT(samples) * conj(FFT(template)))
     # Circular correlation places positive lags at 0..N-1 and negative lags
@@ -482,153 +485,25 @@ def estimate_timing(
         ``threshold``.
     """
     signal_adapter = adapt_signal(samples, function_name="estimate_timing()")
-    sig = signal_adapter.signal
-    if template is None and sig is not None and sig.frame is not None:
-        template = getattr(sig.frame, "preamble", None)
-    if template is None:
-        raise ValueError(
-            "estimate_timing() needs a template: pass template= (array or "
-            "Preamble) or a Signal whose frame has a preamble."
-        )
-    sig_array, xp, _ = dispatch(signal_adapter.array)
-    sig_array, was_1d = as_2d(sig_array, name="samples")
+    x, xp, _ = dispatch(signal_adapter.array)
+    x, was_1d = as_2d(x, name="samples")
+    ref = _timing_template(signal_adapter, template, sps, pulse, xp)  # (C_tx, L)
 
-    if isinstance(template, Preamble):
-        if sig is None and sps is None:
-            raise ValueError("SPS must be provided when using a Preamble template.")
-        sps_int = require_integer_sps(
-            signal_adapter.resolve_fact("sps", sps), "estimate_timing()"
-        )
-        pulse = signal_adapter.resolve_choice("pulse", pulse)
-        ref_waveform = xp.asarray(
-            template.to_signal(sps=sps_int, symbol_rate=1.0, pulse=pulse).samples
-        )
-    else:
-        ref_waveform = xp.asarray(template)
-    if ref_waveform.ndim == 1:
-        ref_waveform = ref_waveform[None, :]
-    # Ensure the template is on the same device as the signal.
-    ref_waveform = to_device(ref_waveform, "cpu" if xp is np else "gpu")
-
-    num_sig_ch = sig_array.shape[0]
-
-    # Apply search range
     offset = 0
     if search_range is not None:
         start, end = search_range
-        sig_processing = sig_array[:, start:end]
+        x = x[:, start:end]
         offset = int(start)
-    else:
-        sig_processing = sig_array
 
-    # === Vectorized Correlation (FFT) via shared helper ===
-    L = ref_waveform.shape[-1]
-    C_tx = ref_waveform.shape[0]
-
-    if C_tx > 1:
-        # Correlate every TX template against every RX channel, with one
-        # transform of the signal: corr_all[rx, tx, lag], (C_rx, C_tx, N_lag),
-        # the positive lags of cross_correlate.
-        N_lag = sig_processing.shape[-1]
-        n_fft = 1 << (N_lag + L - 2).bit_length()
-        SIG = _fft.fft(sig_processing, n_fft, axis=-1)[:, None, :]
-        TPL = _fft.fft(ref_waveform, n_fft, axis=-1)[None, :, :]
-        corr_all = _fft.ifft(SIG * xp.conj(TPL), axis=-1)[..., :N_lag]
-
-        # === Greedy per-channel peak finding ===
-        # Each RX channel takes its strongest peak across all (template, lag).
-        # The lag is an independent per-channel argmax, so hardware skew is
-        # preserved; the template choice only selects which peak height is read,
-        # not its position (all streams share the symbol clock).  Robust to a
-        # polarization swap, mixing, or a missing/weak stream.  Polarization
-        # identity is not resolved here (see recovery.resolve_channel_permutation).
-        corr_all_mag = xp.abs(corr_all)  # (C_rx, C_tx, N_lag)
-        best_tx = xp.argmax(xp.max(corr_all_mag, axis=-1), axis=-1)  # (C_rx,)
-        # On-device gathers, no per-channel host sync: (C_rx, N_lag).
-        pick = best_tx[:, None, None]
-        corr = xp.take_along_axis(corr_all, pick, axis=1)[:, 0]
-        corr_mag = xp.take_along_axis(corr_all_mag, pick, axis=1)[:, 0]
-    else:
-        corr = cross_correlate(sig_processing, ref_waveform, mode="positive_lags")
-        corr_mag = xp.abs(corr)
+    corr, corr_mag = _timing_correlation(x, ref, xp)
     peak_indices = xp.argmax(corr_mag, axis=-1)  # (C,)
-
-    # === Per-Channel Normalization ===
-    # Normalized correlation metric: use local signal energy around each
-    # detected peak (L-sample window) instead of global mean.  This gives
-    # metric ≈ 1.0 for a perfectly matched reference regardless of the
-    # noise/data content elsewhere in the signal.
-    e_ref = xp.sum(xp.abs(ref_waveform) ** 2, axis=-1)  # (C_tx,) or scalar
-    if e_ref.ndim == 0:
-        e_ref = xp.full(num_sig_ch, e_ref)
-    else:
-        e_ref = xp.full(num_sig_ch, xp.mean(e_ref))
-
-    # Local signal energy: sum |sig|² in the L-sample window at each peak.
-    # Batch the peak indices to host once instead of one sync per channel.
-    N_sig = sig_processing.shape[-1]
-    peaks_np = to_device(peak_indices, "cpu")
-    e_s = xp.empty(num_sig_ch, dtype=sig_processing.real.dtype)
-    for ch in range(num_sig_ch):
-        pk = int(peaks_np[ch])
-        end_idx = min(pk + L, N_sig)
-        e_s[ch] = xp.sum(xp.abs(sig_processing[ch, pk:end_idx]) ** 2)
-
-    norm_factors = xp.sqrt(e_ref * e_s)
-    norm_factors = xp.maximum(norm_factors, 1e-12)
-
-    # Calculate per-channel coherence (diagnostic mathematically absolute bound, [0, 1])
-    peak_vals = xp.max(corr_mag, axis=-1)  # (C,) incoherent, as the peak search
-    mean_vals = xp.mean(corr_mag, axis=-1)
-
-    coherence = peak_vals / norm_factors
-    coherence = xp.clip(coherence, 0.0, 1.0)
-
-    # Primary timing metric: PAPR (Peak-to-Average magnitude)
-    # This evaluates visual prominence against the noise floor, ensuring
-    # extreme robustness to CFO phase-rotation and pulse-shape mismatch.
-    mean_vals = xp.maximum(mean_vals, 1e-12)
-    metrics = peak_vals / mean_vals
-
+    metrics, coherence = _timing_metrics(x, ref, corr_mag, peak_indices, xp)
     # Diagnostics from one batched D2H per array, not per channel.
-    coherence_np = to_device(coherence, "cpu")
     metrics_np = to_device(metrics, "cpu")
-    logger.debug(
-        "Peak prominence per channel %s, coherence %s.",
-        np.round(metrics_np, 1).tolist(),
-        np.round(coherence_np, 2).tolist(),
-    )
-
-    # === Threshold Check === (reuses the host copy - no further syncs)
-    max_metric = float(metrics_np.max())
-    if max_metric < threshold:
-        raise ValueError(
-            f"No correlation peak above threshold {threshold} (max: {max_metric:.3f})"
-        )
-    incoherent = np.flatnonzero((coherence_np < 0.5) & (metrics_np >= threshold))
-    if incoherent.size:
-        logger.warning(
-            "Channels %s: peak phase coherence below 0.5 (%s) although the "
-            "peak is prominent; a strong carrier frequency offset or "
-            "uncompensated dispersion destroys the phase alignment over the "
-            "sequence.",
-            incoherent.tolist(),
-            np.round(coherence_np[incoherent], 2).tolist(),
-        )
-    weak = np.flatnonzero(metrics_np < threshold)
-    if weak.size:
-        logger.warning(
-            "Channels %s: correlation metric %s below threshold %s; their "
-            "integer offsets may be unreliable.",
-            weak.tolist(),
-            np.round(metrics_np[weak], 3).tolist(),
-            threshold,
-        )
+    _check_timing(metrics_np, to_device(coherence, "cpu"), threshold)
 
     # Each channel's peak is found independently so hardware skew is preserved.
     integer_offsets = xp.maximum(0, peak_indices + offset)
-
-    # === Fractional Timing (Parabolic Interpolation) ===
     fractional_offsets = peak_offset(
         corr, peak_indices, dft_upsample=dft_upsample, method=fit
     )
@@ -658,6 +533,135 @@ def estimate_timing(
         correlation=corr,
         search_start=offset,
     )
+
+
+def _timing_template(
+    signal_adapter: SignalAdapter[Any],
+    template: ArrayType | Preamble | None,
+    sps: float | None,
+    pulse: Pulse | ArrayType | None,
+    xp: Any,
+) -> ArrayType:
+    """The template of :func:`estimate_timing`, ``(C_tx, L)`` on the data's device.
+
+    The argument, else the preamble of the Signal's frame; a Preamble is
+    shaped at the resolved ``sps`` with the resolved ``pulse``.
+    """
+    sig = signal_adapter.signal
+    if template is None and sig is not None and sig.frame is not None:
+        template = sig.frame.preamble
+    if template is None:
+        raise ValueError(
+            "estimate_timing() needs a template: pass template= (array or "
+            "Preamble) or a Signal whose frame has a preamble."
+        )
+    if isinstance(template, Preamble):
+        if sig is None and sps is None:
+            raise ValueError("SPS must be provided when using a Preamble template.")
+        sps_int = require_integer_sps(
+            signal_adapter.resolve_fact("sps", sps), "estimate_timing()"
+        )
+        pulse = signal_adapter.resolve_choice("pulse", pulse)
+        ref = xp.asarray(
+            template.to_signal(sps=sps_int, symbol_rate=1.0, pulse=pulse).samples
+        )
+    else:
+        ref = xp.asarray(template)
+    if ref.ndim == 1:
+        ref = ref[None, :]
+    return to_device(ref, "cpu" if xp is np else "gpu")
+
+
+def _timing_correlation(x: ArrayType, ref: ArrayType, xp: Any) -> tuple[Any, Any]:
+    """Correlation of ``(C, N)`` samples with the template, and its magnitude.
+
+    A multi-stream template correlates every stream with every channel, and
+    each channel keeps the stream of its strongest peak: the lag stays an
+    independent per-channel argmax, so hardware skew is preserved, and the
+    stream only selects which peak height is read (all streams share the
+    symbol clock).  Robust to a polarization swap, mixing, or a missing or
+    weak stream; polarization identity is resolved elsewhere
+    (:func:`~commkit.recovery.resolve_channel_permutation`).
+    """
+    if ref.shape[0] == 1:
+        corr = cross_correlate(x, ref, mode="positive_lags")
+        return corr, xp.abs(corr)
+    # One transform of the signal: corr_all[rx, tx, lag], (C_rx, C_tx, N_lag),
+    # the positive lags of cross_correlate.
+    N_lag, L = x.shape[-1], ref.shape[-1]
+    n_fft = _next_pow2(N_lag + L - 1)
+    SIG = _fft.fft(x, n_fft, axis=-1)[:, None, :]
+    TPL = _fft.fft(ref, n_fft, axis=-1)[None, :, :]
+    corr_all = _fft.ifft(SIG * xp.conj(TPL), axis=-1)[..., :N_lag]
+    corr_all_mag = xp.abs(corr_all)
+    best_tx = xp.argmax(xp.max(corr_all_mag, axis=-1), axis=-1)  # (C_rx,)
+    # On-device gathers, no per-channel host sync: (C_rx, N_lag).
+    pick = best_tx[:, None, None]
+    corr = xp.take_along_axis(corr_all, pick, axis=1)[:, 0]
+    return corr, xp.take_along_axis(corr_all_mag, pick, axis=1)[:, 0]
+
+
+def _timing_metrics(
+    x: ArrayType, ref: ArrayType, corr_mag: ArrayType, peaks: ArrayType, xp: Any
+) -> tuple[Any, Any]:
+    """Peak-to-average metric and coherence per channel, ``(C,)`` each.
+
+    The metric is the peak's prominence over the correlation floor;
+    magnitudes keep it insensitive to a CFO rotation and to pulse-shape
+    mismatch.  The coherence, bounded to [0, 1] by Cauchy-Schwarz, divides
+    the peak by the energies of the template and of the signal in the
+    template-long window at the peak, so a matched template gives about 1
+    whatever the rest of the record holds.
+    """
+    C, N = x.shape
+    L = ref.shape[-1]
+    e_ref = xp.full(C, xp.mean(xp.sum(xp.abs(ref) ** 2, axis=-1)))
+    # The window at each peak by one gather on the device, cut at the record's
+    # end: no host sync and no launch per channel.
+    idx = peaks[:, None] + xp.arange(L)[None, :]  # (C, L)
+    window = xp.take_along_axis(x, xp.minimum(idx, N - 1), axis=-1)
+    power = xp.where(idx < N, xp.abs(window) ** 2, 0)
+    e_s = xp.sum(power, axis=-1)
+    norm_factors = xp.maximum(xp.sqrt(e_ref * e_s), 1e-12)
+
+    peak_vals = xp.max(corr_mag, axis=-1)  # incoherent, as the peak search
+    coherence = xp.clip(peak_vals / norm_factors, 0.0, 1.0)
+    metrics = peak_vals / xp.maximum(xp.mean(corr_mag, axis=-1), 1e-12)
+    return metrics, coherence
+
+
+def _check_timing(metrics: np.ndarray, coherence: np.ndarray, threshold: float) -> None:
+    """Raise when no channel's metric reaches ``threshold``; warn per channel
+    on a weak or incoherent peak."""
+    logger.debug(
+        "Peak prominence per channel %s, coherence %s.",
+        np.round(metrics, 1).tolist(),
+        np.round(coherence, 2).tolist(),
+    )
+    max_metric = float(metrics.max())
+    if max_metric < threshold:
+        raise ValueError(
+            f"No correlation peak above threshold {threshold} (max: {max_metric:.3f})"
+        )
+    incoherent = np.flatnonzero((coherence < 0.5) & (metrics >= threshold))
+    if incoherent.size:
+        logger.warning(
+            "Channels %s: peak phase coherence below 0.5 (%s) although the "
+            "peak is prominent; a strong carrier frequency offset or "
+            "uncompensated dispersion destroys the phase alignment over the "
+            "sequence.",
+            incoherent.tolist(),
+            np.round(coherence[incoherent], 2).tolist(),
+        )
+    weak = np.flatnonzero(metrics < threshold)
+    if weak.size:
+        logger.warning(
+            "Channels %s: correlation metric %s below threshold %s; their "
+            "integer offsets may be unreliable.",
+            weak.tolist(),
+            np.round(metrics[weak], 3).tolist(),
+            threshold,
+        )
 
 
 def _require_slice_shift(low: int, high: int, n: int) -> None:

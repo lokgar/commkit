@@ -19,37 +19,23 @@ from commkit.impairments import (
     apply_chromatic_dispersion,
     apply_fiber_propagation,
 )
+from tests.common.conversions import to_numpy
+from tests.common.metrics import relative_rms_error
+from tests.common.signals import make_band_limited_field
 
 FS = 64e9
 C_LIGHT = 299792458.0
 H_PLANCK = 6.62607015e-34
 
 
-def _field(num_channels, n=4096, seed=1, dtype=np.complex64):
-    """Band-limited complex Gaussian field (occupies |f| < f_s/4)."""
-    rng = np.random.default_rng(seed)
-    x = rng.standard_normal((num_channels, n)) + 1j * rng.standard_normal(
-        (num_channels, n)
-    )
-    spectrum = np.fft.fft(x, axis=-1)
-    spectrum[:, np.abs(np.fft.fftfreq(n)) > 0.25] = 0.0
-    x = np.fft.ifft(spectrum, axis=-1)
-    return (x / np.sqrt(np.mean(np.abs(x) ** 2))).astype(dtype)
-
-
 def _dbm(power_w):
     return 10.0 * math.log10(power_w / 1e-3)
-
-
-def _rel(a, b):
-    a, b = np.asarray(to_device(a, "cpu")), np.asarray(to_device(b, "cpu"))
-    return float(np.sqrt(np.mean(np.abs(a - b) ** 2) / np.mean(np.abs(b) ** 2)))
 
 
 class TestLinearLimits:
     def test_dispersion_only_matches_the_linear_channel(self, xp):
         """γ = 0, no loss: the split-step solver is the dispersion operator."""
-        x = xp.asarray(_field(2))
+        x = xp.asarray(make_band_limited_field(2, 4096, unit_power=True))
         fiber = Fiber(attenuation_db_km=0.0, nonlinearity_per_w_km=0.0)
         y = apply_fiber_propagation(
             x,
@@ -68,11 +54,11 @@ class TestLinearLimits:
             center_wavelength_nm=1550.0,
             sampling_rate=FS,
         )
-        assert _rel(y, ref) < 1e-5
+        assert relative_rms_error(y, ref) < 1e-5
 
     def test_amplifiers_restore_the_span_loss(self, xp):
         """With loss, each amplifier's gain e^{αL} restores the span exactly."""
-        x = xp.asarray(_field(1)[0])
+        x = xp.asarray(make_band_limited_field(1, 4096, unit_power=True)[0])
         kw = dict(
             center_wavelength_nm=1550.0,
             span_length_km=80.0,
@@ -87,7 +73,7 @@ class TestLinearLimits:
         lossless = apply_fiber_propagation(
             x, fiber=Fiber(attenuation_db_km=0.0, nonlinearity_per_w_km=0.0), **kw
         )
-        assert _rel(lossy, lossless) < 1e-5
+        assert relative_rms_error(lossy, lossless) < 1e-5
 
     @pytest.mark.allow_warnings
     def test_dispersion_slope_is_the_third_order_term(self, xp):
@@ -152,7 +138,7 @@ class TestKerrEffect:
         # The Kerr phase follows the power of the field: P / C per channel,
         # summed over the channels in the Manakov term.
         phase = -gamma * p_w * l_eff * spans
-        y = np.asarray(to_device(y, "cpu")).reshape(num_channels, n)
+        y = to_numpy(y).reshape(num_channels, n)
         np.testing.assert_allclose(np.abs(y), 1.0, atol=1e-5)
         np.testing.assert_allclose(np.angle(y), np.angle(np.exp(1j * phase)), atol=1e-5)
 
@@ -183,14 +169,14 @@ class TestKerrEffect:
                 center_wavelength_nm=1550.0,
                 sampling_rate=fs,
             )
-            return np.abs(np.asarray(to_device(y, "cpu")))
+            return np.abs(to_numpy(y))
 
-        assert _rel(run(p0), np.abs(pulse)) < 5e-3
-        assert _rel(run(p0 / 4.0), np.abs(pulse)) > 0.1
+        assert relative_rms_error(run(p0), np.abs(pulse)) < 5e-3
+        assert relative_rms_error(run(p0 / 4.0), np.abs(pulse)) > 0.1
 
     def test_second_order_convergence(self):
         """Halving the step quarters the error of the symmetric scheme."""
-        x = _field(2, n=2048, dtype=np.complex128)
+        x = make_band_limited_field(2, 2048, unit_power=True, dtype=np.complex128)
         kw = dict(
             center_wavelength_nm=1550.0,
             fiber=Fiber(),
@@ -200,12 +186,16 @@ class TestKerrEffect:
             sampling_rate=FS,
         )
         ref = apply_fiber_propagation(x, steps_per_span=800, **kw)
-        e1 = _rel(apply_fiber_propagation(x, steps_per_span=10, **kw), ref)
-        e2 = _rel(apply_fiber_propagation(x, steps_per_span=20, **kw), ref)
+        e1 = relative_rms_error(
+            apply_fiber_propagation(x, steps_per_span=10, **kw), ref
+        )
+        e2 = relative_rms_error(
+            apply_fiber_propagation(x, steps_per_span=20, **kw), ref
+        )
         assert 3.0 < e1 / e2 < 5.0
 
     def test_lossless_propagation_conserves_power(self):
-        x = _field(2, dtype=np.complex128)
+        x = make_band_limited_field(2, 4096, unit_power=True, dtype=np.complex128)
         y = apply_fiber_propagation(
             x,
             center_wavelength_nm=1550.0,
@@ -253,7 +243,7 @@ class TestGaussianNoiseModel:
         out = {}
         for name, g in (("nl", gamma), ("lin", 0.0)):
             y = apply_fiber_propagation(x, fiber=Fiber(nonlinearity_per_w_km=g), **kw)
-            out[name] = np.asarray(to_device(y, "cpu")).astype(np.complex128)
+            out[name] = to_numpy(y).astype(np.complex128)
         a = np.vdot(out["lin"], out["nl"]) / np.vdot(out["lin"], out["lin"])
         nli = np.abs(np.fft.fft(out["nl"] - a * out["lin"])) ** 2
         sig = np.abs(np.fft.fft(out["lin"])) ** 2
@@ -318,7 +308,9 @@ class TestAmplifierNoise:
         """Each of the spans' amplifiers adds (F G - 1) hν/2 · f_s per
         polarization; γ = 0 keeps the noise additive.  In the input's units
         (input power = launch power) that is P_ase · P_in / P_launch."""
-        x = xp.asarray(_field(num_channels, n=1 << 16, seed=3))
+        x = xp.asarray(
+            make_band_limited_field(num_channels, 1 << 16, seed=3, unit_power=True)
+        )
         if num_channels == 1:
             x = x[0]
         nf_db, spans, launch_dbm, span_km = 5.0, 4, -3.0, 80.0
@@ -333,13 +325,11 @@ class TestAmplifierNoise:
         )
         noisy = apply_fiber_propagation(x, noise_figure_db=nf_db, rng=7, **kw)
         clean = apply_fiber_propagation(x, **kw)
-        noise = np.asarray(to_device(noisy - clean, "cpu"))
+        noise = to_numpy(noisy - clean)
         gain = 10.0 ** (0.2 * span_km / 10.0)
         nu = C_LIGHT / 1550e-9
         p_ase = spans * (10.0 ** (nf_db / 10.0) * gain - 1.0) * H_PLANCK * nu / 2 * FS
-        p_in = (
-            float(np.mean(np.abs(np.asarray(to_device(x, "cpu"))) ** 2)) * num_channels
-        )
+        p_in = float(np.mean(np.abs(to_numpy(x)) ** 2)) * num_channels
         expected = p_ase * p_in / (1e-3 * 10.0 ** (launch_dbm / 10.0))
         measured = np.mean(np.abs(noise.reshape(num_channels, -1)) ** 2, axis=-1)
         np.testing.assert_allclose(measured, expected, rtol=0.03)
@@ -358,13 +348,13 @@ class TestAmplifierNoise:
         )
         noisy = apply_fiber_propagation(x, noise_figure_db=nf_db, rng=11, **kw)
         clean = apply_fiber_propagation(x, **kw)
-        return float(np.mean(np.abs(np.asarray(to_device(noisy - clean, "cpu"))) ** 2))
+        return float(np.mean(np.abs(to_numpy(noisy - clean)) ** 2))
 
     def test_ase_power_scales_with_the_span_gain(self, xp):
         """The amplifier's gain is the span loss, G = 10^(a L / 10), so at a
         fixed noise figure F the ASE power follows (F G - 1): ratios between
         attenuations cancel hν, f_s and the launch power."""
-        x = xp.asarray(_field(1, n=1 << 16, seed=5))[0]
+        x = xp.asarray(make_band_limited_field(1, 1 << 16, seed=5, unit_power=True))[0]
         nf_db, span_km = 5.0, 80.0
         f = 10.0 ** (nf_db / 10.0)
         attenuations = (0.0, 0.1, 0.25)  # G = 0, 8, 20 dB
@@ -377,11 +367,11 @@ class TestAmplifierNoise:
 
     def test_ideal_amplifier_on_a_lossless_span_adds_no_noise(self, xp):
         """F = 1 (0 dB) and G = 1: (F G - 1) hν / 2 = 0."""
-        x = xp.asarray(_field(1, n=1 << 12, seed=5))[0]
+        x = xp.asarray(make_band_limited_field(1, 1 << 12, seed=5, unit_power=True))[0]
         assert self._ase_power(x, 0.0, 0.0) == 0.0
 
     def test_noise_needs_a_seed_only_for_its_realization(self, xp):
-        x = xp.asarray(_field(2))
+        x = xp.asarray(make_band_limited_field(2, 4096, unit_power=True))
         kw = dict(
             center_wavelength_nm=1550.0,
             fiber=Fiber(),
@@ -395,8 +385,8 @@ class TestAmplifierNoise:
         a = apply_fiber_propagation(x, rng=1, **kw)
         b = apply_fiber_propagation(x, rng=1, **kw)
         c = apply_fiber_propagation(x, rng=2, **kw)
-        assert _rel(a, b) == 0.0
-        assert _rel(a, c) > 0.0
+        assert relative_rms_error(a, b) == 0.0
+        assert relative_rms_error(a, c) > 0.0
 
 
 class TestPMD:
@@ -446,7 +436,7 @@ class TestPMD:
     def test_pmd_needs_two_polarizations(self, xp):
         with pytest.raises(ValueError, match="pmd"):
             apply_fiber_propagation(
-                xp.asarray(_field(1)[0]),
+                xp.asarray(make_band_limited_field(1, 4096, unit_power=True)[0]),
                 center_wavelength_nm=1550.0,
                 fiber=Fiber(pmd_ps_sqrt_km=0.1),
                 span_length_km=10.0,
@@ -495,12 +485,14 @@ class TestValidation:
             | kwargs
         )
         with pytest.raises((ValueError, TypeError), match=match):
-            apply_fiber_propagation(xp.asarray(_field(2)), **kw)
+            apply_fiber_propagation(
+                xp.asarray(make_band_limited_field(2, 4096, unit_power=True)), **kw
+            )
 
     def test_three_channels_raise(self, xp):
         with pytest.raises(ValueError, match=r"\(2, N\)"):
             apply_fiber_propagation(
-                xp.asarray(_field(3)),
+                xp.asarray(make_band_limited_field(3, 4096, unit_power=True)),
                 center_wavelength_nm=1550.0,
                 fiber=Fiber(),
                 span_length_km=10.0,
@@ -531,7 +523,7 @@ class TestValidation:
 
 class TestSignalInput:
     def test_signal_keeps_its_metadata(self, xp, xpt):
-        x = xp.asarray(_field(2))
+        x = xp.asarray(make_band_limited_field(2, 4096, unit_power=True))
         sig = Signal(samples=x, sampling_rate=FS, symbol_rate=FS / 2)
         kw = dict(
             center_wavelength_nm=1550.0,

@@ -12,56 +12,18 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ._common import (
-    _check_blocks,
     _Context,
     _interp_block_phases,
     _mth_power_geometry,
-    _Phase,
+    _num_blocks,
+    _numba,
     _vv_block_phase,
 )
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
+from .estimates import BlockPhaseEstimate
 from .viterbi_viterbi import _warn_small_qam_block
 
 __all__ = ["Tikhonov"]
-
-
-def _get_numba_rts_smoother() -> Any:
-    """The Rauch-Tung-Striebel smoother kernel."""
-    from . import _numba_loops
-
-    return _numba_loops.rts_smoother
-
-
-def _rts_smoother_1d(
-    phi_obs: np.ndarray,
-    sigma_p2: float,
-    sigma_v2: float,
-) -> np.ndarray:
-    """Smooth a random-walk phase with the Rauch-Tung-Striebel (RTS) smoother.
-
-    Runs the Numba kernel of ``_get_numba_rts_smoother`` on the host; the
-    caller moves the observations to the CPU.
-
-    State model: ``x[k+1] = x[k] + w[k]``, ``w ~ N(0, sigma_p2)``.
-    Observation: ``y[k] = x[k] + v[k]``, ``v ~ N(0, sigma_v2)``.
-
-    Parameters
-    ----------
-    phi_obs : numpy.ndarray
-        Noisy block phases in radians (from Viterbi-Viterbi), float64,
-        ``(B,)``.
-    sigma_p2 : float
-        Process noise variance per block (the Wiener phase increment).
-    sigma_v2 : float
-        Observation noise variance per block (the Viterbi-Viterbi estimator
-        variance).
-
-    Returns
-    -------
-    numpy.ndarray
-        MAP-smoothed phases, float64, ``(B,)``.
-    """
-    return _get_numba_rts_smoother()(phi_obs, float(sigma_p2), float(sigma_v2))
 
 
 def _sskf_smoother_1d(
@@ -79,8 +41,8 @@ def _sskf_smoother_1d(
     state.  It runs on the input's device (``sp.signal.filtfilt``).
 
     The approximation is close when ``B >> 1/K_∞`` (typically ``B > 20``).
-    Below 7 blocks (the ``filtfilt`` minimum) the exact ``_rts_smoother_1d``
-    runs on the CPU instead.
+    Below 7 blocks (the ``filtfilt`` minimum) the exact RTS kernel runs on
+    the CPU instead.
 
     Parameters
     ----------
@@ -101,7 +63,8 @@ def _sskf_smoother_1d(
     # filtfilt requires at least padlen * 2 + 1 samples; padlen = 3 * max(len(b), len(a)) = 6
     if len(phi_obs) < 7:
         phi_np = to_device(phi_obs, "cpu")
-        return xp.asarray(_rts_smoother_1d(phi_np, sigma_p2, sigma_v2))
+        rts = _numba().rts_smoother
+        return xp.asarray(rts(phi_np, float(sigma_p2), float(sigma_v2)))
 
     # Steady-state prediction error covariance from discrete Riccati equation:
     #   p² - σ_p²·p - σ_p²·σ_v² = 0  ->  p = (σ_p² + √(σ_p⁴ + 4σ_p²σ_v²)) / 2
@@ -219,14 +182,16 @@ def _vv_observation_variance(
     return (power - second.real) / (2.0 * block_size * M**2 * abs(mu) ** 2)
 
 
-def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
+def _tikhonov(
+    symbols: ArrayType, method: Tikhonov, ctx: _Context
+) -> BlockPhaseEstimate:
     """Tikhonov-smoothed Viterbi-Viterbi phase of ``(C, N)`` symbols."""
     constellation = ctx.need_constellation(method)
     symbols, xp, sp = dispatch(symbols)
     C, N = symbols.shape
     block_size = method.block_size
     M, project, bias = _mth_power_geometry(constellation)
-    N_blocks = _check_blocks(N, block_size)
+    N_blocks = _num_blocks(N, block_size)
     # Same data-residual constraint as Viterbi-Viterbi: block phase variance
     # can exceed π/M before smoothing, causing slips the smoother cannot fix.
     _warn_small_qam_block("Tikhonov", block_size, project, constellation.order)
@@ -247,8 +212,9 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
 
     if method.smoother == "rts":
         phi_u_np = to_device(phi_u, "cpu")  # (R, N_blocks) float64
+        rts = _numba().rts_smoother
         phi_smooth = xp.asarray(
-            np.stack([_rts_smoother_1d(row, sigma_p2, sigma_v2) for row in phi_u_np])
+            np.stack([rts(row, float(sigma_p2), float(sigma_v2)) for row in phi_u_np])
         )
     else:
         phi_smooth = xp.stack(
@@ -267,8 +233,8 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
         "[%s blocks x %s, σ_p²=%.2e, σ_v²=%.2e, C=%s, cycle_slip=%s]",
         (N_blocks, block_size, sigma_p2, sigma_v2, C, method.cycle_slip is not None),
     )
-    return _Phase(
-        phase=phi_full,
+    return BlockPhaseEstimate(
+        value=phi_full,
         block_centers=np.arange(N_blocks, dtype=np.float64) * block_size
         + block_size / 2,
         block_phase=phi_smooth,

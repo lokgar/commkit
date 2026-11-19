@@ -217,6 +217,16 @@ def to_device(data: Any, device: str) -> ArrayType:
         raise ValueError(f"Unknown device: {device.upper()}")
 
 
+def _to_host(data: Any, dtype: Any = None) -> np.ndarray:
+    """``data`` as a host NumPy array (one transfer for device input).
+
+    :func:`to_device` to ``"cpu"`` typed as ``numpy.ndarray``, with an
+    optional ``dtype`` conversion.  No copy when ``data`` is a NumPy array of
+    that dtype already.
+    """
+    return np.asarray(to_device(data, "cpu"), dtype=dtype)
+
+
 # Device copies of the host tables of value objects (a constellation's
 # points and labels, a code's parity checks), per owner and then per (table
 # kind, CUDA device id): built on the first call instead of on every one.

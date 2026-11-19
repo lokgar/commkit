@@ -11,7 +11,16 @@ from typing import Any
 
 import numpy as np
 
-from ..backend import to_device
+from ..analysis import (
+    AllanDeviation,
+    BetaSeparationEstimate,
+    DshLorentzianEstimate,
+    FmNoiseFitEstimate,
+    FrequencyDrift,
+    IncrementEstimate,
+    IncrementSlopeEstimate,
+)
+from ..backend import _to_host
 from .theme import (
     _as_channels,
     _device_channels,
@@ -183,7 +192,7 @@ def plot_frequency_drift(
         shows the figure instead.
     """
     df_c = _device_channels(
-        _require(drift, "df", "plot_frequency_drift()", "a FrequencyDrift")
+        _require(drift, FrequencyDrift, "plot_frequency_drift()", "a FrequencyDrift").df
     )
     C = df_c.shape[0]
 
@@ -306,13 +315,17 @@ def plot_frequency_noise_psd(
         shows the figure instead.
     """
     name = "plot_frequency_noise_psd()"
-    S_f = _require(estimate, "fm_psd", name, "a BetaSeparation or DshFmFit estimate")
+    estimate = _require(
+        estimate, FmNoiseFitEstimate, name, "a BetaSeparation or DshFmFit estimate"
+    )
+    S_f = estimate.fm_psd
     f, band, used = estimate.frequencies, estimate.band, estimate.used
     # BetaSeparation only: the β-line, its region and the white-FM floor.
-    beta_line = getattr(estimate, "beta_line", None)
-    above = getattr(estimate, "above", None)
-    floor = getattr(estimate, "linewidth_floor", estimate.value)
-    f_c = np.asarray(to_device(f, "cpu"), dtype=np.float64)
+    beta = isinstance(estimate, BetaSeparationEstimate)
+    beta_line = estimate.beta_line if beta else None
+    above = estimate.above if beta else None
+    floor = estimate.linewidth_floor if beta else estimate.value
+    f_c = _to_host(f, np.float64)
     S_c = _as_channels(S_f)
     C = S_c.shape[0]
     pos = f_c > 0
@@ -337,7 +350,7 @@ def plot_frequency_noise_psd(
     if annotations:
         b_c = None
         if beta_line is not None:
-            b_c = np.asarray(to_device(beta_line, "cpu"), dtype=np.float64)
+            b_c = _to_host(beta_line, np.float64)
             top = 10.0 * float(np.nanmax(S_c[:, pos]))
             shown = pos & (b_c <= top)
             axi.loglog(
@@ -349,7 +362,7 @@ def plot_frequency_noise_psd(
             )
 
         if above is not None and b_c is not None:
-            a_c = np.asarray(to_device(above, "cpu"), dtype=bool)
+            a_c = _to_host(above, bool)
             if a_c.ndim > 1:
                 a_c = a_c[0]
             axi.fill_between(
@@ -363,7 +376,7 @@ def plot_frequency_noise_psd(
                 label=r"$\beta$-area (integrated region)",
             )
 
-        model = getattr(estimate, "fm_psd_model", None)
+        model = estimate.fm_psd_model
         m_i = None
         if model is not None:
             m_c = _as_channels(model)
@@ -376,7 +389,7 @@ def plot_frequency_noise_psd(
 
         used_label = "Fit bins"
         if used is not None:
-            u_c = np.asarray(to_device(used, "cpu"), dtype=bool)
+            u_c = _to_host(used, bool)
             if u_c.ndim > 1:
                 u_c = u_c[0]
             sel = u_c[pos] & np.isfinite(S_c[0, pos])
@@ -494,8 +507,10 @@ def plot_allan_deviation(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    adev = _require(allan, "adev", "plot_allan_deviation()", "an AllanDeviation")
-    tau = np.asarray(to_device(allan.taus, "cpu"), dtype=np.float64)
+    adev = _require(
+        allan, AllanDeviation, "plot_allan_deviation()", "an AllanDeviation"
+    ).adev
+    tau = _to_host(allan.taus, np.float64)
     adv = _as_channels(adev)
     C = adv.shape[0]
 
@@ -580,16 +595,18 @@ def plot_increment_variance(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    var = _require(
+    estimate = _require(
         estimate,
-        "increment_var",
+        IncrementEstimate,
         "plot_increment_variance()",
         "an increment-method estimate",
     )
+    var = estimate.increment_var
     # IncrementSlope and DshIncrement only.
-    slope = getattr(estimate, "slope", None)
-    intercept = getattr(estimate, "intercept", None)
-    lag = np.asarray(to_device(estimate.lag_s, "cpu"), dtype=np.float64)
+    fit = isinstance(estimate, IncrementSlopeEstimate)
+    slope = estimate.slope if fit else None
+    intercept = estimate.intercept if fit else None
+    lag = _to_host(estimate.lag_s, np.float64)
     v = _as_channels(var)
     C = v.shape[0]
 
@@ -603,8 +620,8 @@ def plot_increment_variance(
         line = axi.plot(lag, v[i], "o", label=curve_label)[0]
         colors.append(line.get_color())
     if annotations and slope is not None and intercept is not None:
-        sl = np.atleast_1d(np.asarray(to_device(slope, "cpu"), dtype=np.float64))
-        ic = np.atleast_1d(np.asarray(to_device(intercept, "cpu"), dtype=np.float64))
+        sl = np.atleast_1d(_to_host(slope, np.float64))
+        ic = np.atleast_1d(_to_host(intercept, np.float64))
         for i in range(C):
             axi.plot(
                 lag,
@@ -678,11 +695,17 @@ def plot_dsh_beat_psd(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    psd = _require(estimate, "psd", "plot_dsh_beat_psd()", "a DshLorentzian estimate")
+    estimate = _require(
+        estimate,
+        DshLorentzianEstimate,
+        "plot_dsh_beat_psd()",
+        "a DshLorentzian estimate",
+    )
+    psd = estimate.psd
     f, f_peak = estimate.frequencies, estimate.peak_frequency
     linewidth, linewidth_3db = estimate.value, estimate.linewidth_3db
     level_db = float(estimate.method.level_db)
-    f_c = np.asarray(to_device(f, "cpu"), dtype=np.float64)
+    f_c = _to_host(f, np.float64)
     p = _as_channels(psd)
     C = p.shape[0]
     f0 = 0.0

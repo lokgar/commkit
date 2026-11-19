@@ -2,7 +2,8 @@
 
 :func:`rms`, :func:`normalize`, :func:`db_to_linear` and
 :func:`linear_to_db`.  Also the private helpers shared by the DSP modules:
-the linear trend (``_linear_trend_slope``, ``_remove_linear_trend``) and the
+the FFT size ``_next_pow2``, the linear trend (``_linear_trend_slope``,
+``_remove_linear_trend``) and the
 phase rotations ``_unit_phasor`` (``exp(j·phase)`` in a chosen precision),
 ``_phasor`` and ``_derotate`` (``x·exp(-j·phase)`` in the precision of
 ``x``).
@@ -225,6 +226,11 @@ def linear_to_db(x: ArrayType, *, power: bool = True) -> ArrayType:
 # ---------------------------------------------------------------------------
 # Linear trend (least-squares slope), shared by frequency, recovery and analysis
 # ---------------------------------------------------------------------------
+
+
+def _next_pow2(n: int) -> int:
+    """Smallest power of two ``>= n``, for an integer ``n >= 1`` (exact)."""
+    return 1 << (n - 1).bit_length()
 
 
 def _centered_axis(n: int, x: Any, xp: Any) -> tuple[ArrayType, ArrayType]:

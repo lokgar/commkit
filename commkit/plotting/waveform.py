@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 
-from ..backend import dispatch, to_device
+from ..backend import _to_host, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..logger import logger
 from .theme import (
@@ -140,7 +140,7 @@ def _envelope(
     """
     n = int(y.shape[-1])
     if max_points is None or n <= max_points:
-        return np.arange(n) / sampling_rate, np.asarray(to_device(y, "cpu"))
+        return np.arange(n) / sampling_rate, _to_host(y)
     width = -(-n // max(1, max_points // 2))  # ceil
     full = n // width
     blocks = y[: full * width].reshape(full, width)
@@ -151,4 +151,4 @@ def _envelope(
         hi.append(tail.max()[None])
     env = xp.stack([xp.concatenate(lo), xp.concatenate(hi)], axis=1).ravel()
     starts = np.arange(env.shape[0] // 2) * width
-    return np.repeat(starts, 2) / sampling_rate, np.asarray(to_device(env, "cpu"))
+    return np.repeat(starts, 2) / sampling_rate, _to_host(env)

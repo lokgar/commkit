@@ -6,10 +6,10 @@ import numpy as np
 import pytest
 
 from commkit import generate, metrics
-from commkit.backend import to_device
 from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation, compute_llr, map_bits
 from commkit.metrics import information
+from tests.common.conversions import to_numpy
 
 
 class TestInformationMetrics:
@@ -241,7 +241,7 @@ class TestGMIShaped:
         bits = rng.integers(0, 2, 4000).astype(np.int8)
         rx = (c.map(bits) + 0.2 * rng.standard_normal(1000)).astype(np.complex64)
         llrs = compute_llr(xp.asarray(rx), noise_var=0.08, constellation=c)
-        x = -np.asarray(to_device(llrs, "cpu"), np.float64) * (1 - 2.0 * bits)
+        x = -to_numpy(llrs).astype(np.float64) * (1 - 2.0 * bits)
         sp = (np.log1p(np.exp(-np.abs(x))) + np.maximum(0, x)) / np.log(2)
         expected = 4 * (1 - np.mean(sp))
         # float32 per element, float64 sum: equal to rounding.

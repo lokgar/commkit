@@ -26,11 +26,6 @@ from .signal import Reference, Signal
 __all__ = ["FrameStructure", "SingleCarrierFrame", "extract_payload"]
 
 
-def _readonly(mask: np.ndarray) -> np.ndarray:
-    mask.setflags(write=False)
-    return mask
-
-
 @dataclass(frozen=True)
 class FrameStructure:
     """Boolean masks of a frame's segments, from
@@ -650,7 +645,9 @@ class SingleCarrierFrame:
             masks = {k: np.repeat(v, sps) for k, v in masks.items()}
         else:  # copies, so the read-only flag never reaches the cached mask
             masks = {k: v.copy() for k, v in masks.items()}
-        return FrameStructure(**{k: _readonly(v) for k, v in masks.items()})
+        for mask in masks.values():
+            mask.setflags(write=False)
+        return FrameStructure(**masks)
 
     def pilot_indices(self, include_preamble: bool = True) -> np.ndarray:
         """Return the symbol indices of the pilots (host int64, ``(P,)``).

@@ -10,9 +10,10 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..backend import dispatch, to_device
-from ..core._signal_adapter import adapt_signal
+from ..backend import _to_host, dispatch, to_device
+from ..core._signal_adapter import adapt_signal, require_choice
 from ..logger import logger
+from ..mapping import Constellation
 from ..math import rms
 from ..smoothing import smooth_density_2d
 from .theme import (
@@ -64,13 +65,13 @@ def plot_ideal_constellation(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    from ..mapping import Constellation
 
-    if not isinstance(constellation, Constellation):
-        raise TypeError(
-            "plot_ideal_constellation(): constellation must be a Constellation, "
-            f"got {type(constellation).__name__}; use e.g. Constellation.qam(16)."
-        )
+    require_choice(
+        constellation,
+        "constellation",
+        "plot_ideal_constellation()",
+        kind=Constellation,
+    )
     logger.debug("Plotting ideal constellation %r.", constellation)
 
     if ax is None:
@@ -203,10 +204,12 @@ def plot_constellation(
     signal_adapter = adapt_signal(samples, function_name="plot_constellation()")
     sig = signal_adapter.signal
     constellation = signal_adapter.resolve_choice("constellation", constellation)
-    if overlay_ideal and constellation is None:
-        raise ValueError(
-            "plot_constellation(): overlay_ideal needs a constellation: pass "
-            "constellation= or a Signal that has one."
+    if overlay_ideal:
+        require_choice(
+            constellation,
+            "constellation",
+            "plot_constellation()",
+            purpose=" for overlay_ideal",
         )
     logger.debug("Generating constellation density plot.")
     x, xp, _ = dispatch(signal_adapter.array)
@@ -341,4 +344,4 @@ def _density(i_data: Any, q_data: Any, bins: int, limit: float, xp: Any) -> np.n
     inside = (ii >= 0) & (ii < bins) & (qq >= 0) & (qq < bins)
     flat = (ii * bins + qq)[inside]
     counts = xp.bincount(flat, minlength=bins * bins)
-    return np.asarray(to_device(counts, "cpu"), dtype=np.float64).reshape(bins, bins)
+    return _to_host(counts, np.float64).reshape(bins, bins)

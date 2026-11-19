@@ -5,10 +5,8 @@
 Euclidean distance).  Both run on the data's device.
 """
 
-from typing import Any
-
 from ..backend import ArrayType
-from ..core._signal_adapter import adapt_signal
+from ..core._signal_adapter import adapt_signal, require_choice
 from ..core.signal import Signal
 from .constellation import Constellation
 
@@ -34,7 +32,7 @@ def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
         Symbols, ``(..., n / k)``, on the bits' device: ``complex64``, or
         ``float32`` for a real constellation.
     """
-    _check_constellation(constellation, "map_bits()")
+    require_choice(constellation, "constellation", "map_bits()", kind=Constellation)
     return constellation.map(bits)
 
 
@@ -69,19 +67,7 @@ def demap_symbols(
     """
     signal_adapter = adapt_signal(symbols, function_name="demap_symbols()")
     x = signal_adapter.symbol_array()
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
-    _check_constellation(constellation, "demap_symbols()")
+    constellation = signal_adapter.require_choice(
+        "constellation", constellation, kind=Constellation
+    )
     return constellation.demap(x)
-
-
-def _check_constellation(constellation: Any, function_name: str) -> None:
-    if constellation is None:
-        raise ValueError(
-            f"{function_name} needs a constellation: pass constellation= or "
-            "a Signal that has one."
-        )
-    if not isinstance(constellation, Constellation):
-        raise TypeError(
-            f"{function_name}: constellation must be a Constellation, got "
-            f"{type(constellation).__name__}; use e.g. Constellation.qam(16)."
-        )

@@ -21,15 +21,24 @@ nearest levels, so it keeps the level metrics.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from types import ModuleType
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from .. import _cuda
 from .._bits import pack_bits
+from .._cuda.llr import LLR_MAX_K
 from ..backend import ArrayType, _device_tables, dispatch
 from ._lattice import Axis
+
+
+def _numba() -> ModuleType:
+    """``mapping._numba_llr``, imported (with Numba) on first use."""
+    from . import _numba_llr
+
+    return _numba_llr
+
 
 if TYPE_CHECKING:
     from .constellation import Constellation
@@ -55,34 +64,6 @@ def _noise_variance(
         return float(noise_var)
     n0 = constellation.power() / 10 ** (float(esn0_db) / 10)  # type: ignore[arg-type]
     return n0 / 2 if real else n0
-
-
-def _get_numba_llr(name: str = "llr") -> Callable[..., None]:
-    """Numba LLR kernels for the CPU, parallel over blocks of symbols.
-
-    ``"llr"`` computes per symbol the M metrics
-    ``m = -|x - s|^2 / sigma^2 + log P(s)``; ``"llr_separable"`` the
-    sqrt(M) metrics of each axis of a separable constellation
-    (:func:`_llr_separable`); ``"llr_separable_maxlog"`` the closed-form
-    max-log LLRs of a uniform separable constellation (module docstring),
-    1 + 2k metrics per axis.  The first two take each bit's LLR from the
-    metrics of the points whose bit is 0 and of those whose bit is 1:
-
-    - max-log: the max over the first minus the max over the second;
-    - exact: sums of ``e = exp(m - peak)``, computed once per point with the
-      symbol's peak metric (which cancels in the difference), so one
-      exponential per point instead of one per point and bit.
-
-    float32, as the GPU paths.
-    """
-    from . import _numba_llr
-
-    kernels: dict[str, Callable[..., None]] = {
-        "llr": _numba_llr.llr_kernel,
-        "llr_separable": _numba_llr.llr_separable_kernel,
-        "llr_separable_maxlog": _numba_llr.llr_separable_maxlog_kernel,
-    }
-    return kernels[name]
 
 
 def _half_indices(bit_labels: np.ndarray) -> np.ndarray:
@@ -201,7 +182,7 @@ def _llr(
 
         c_re, c_im, log_pmf_cpu, halves = _device_tables(owner, "llr", np, build_cpu)
         llrs = np.empty((n, k), dtype=np.float32)
-        _get_numba_llr()(
+        _numba().llr_kernel(
             *_real_imag(sym_flat),
             c_re,
             c_im if is_complex else np.zeros(order, np.float32),
@@ -238,9 +219,9 @@ def _llr(
 
 def _require_gpu_bits(k: int) -> None:
     """Raise for more bits per symbol than the CUDA LLR kernels handle."""
-    if k > _cuda._LLR_MAX_K:
+    if k > LLR_MAX_K:
         raise ValueError(
-            f"compute_llr(): GPU input supports at most {_cuda._LLR_MAX_K} bits "
+            f"compute_llr(): GPU input supports at most {LLR_MAX_K} bits "
             f"per symbol, the constellation has {k}"
         )
 
@@ -281,7 +262,7 @@ def _llr_separable(
                 )
             )
 
-        _get_numba_llr("llr_separable_maxlog")(
+        _numba().llr_separable_maxlog_kernel(
             *_real_imag(flat),
             *_device_tables(owner, "llr_separable_maxlog", np, build_closed),
             np.float32(1.0 / max(noise_var, 1e-20)),
@@ -302,7 +283,7 @@ def _llr_separable(
             im.bits.astype(np.int64),
         )
 
-    _get_numba_llr("llr_separable")(
+    _numba().llr_separable_kernel(
         *_real_imag(flat),
         *_device_tables(owner, "llr_separable", np, build),
         np.float32(1.0 / max(noise_var, 1e-20)),

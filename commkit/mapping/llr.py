@@ -18,6 +18,7 @@ from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
 from ._demap import _noise_variance
+from .constellation import Constellation
 
 if TYPE_CHECKING:
     from .constellation import Constellation
@@ -88,21 +89,12 @@ def compute_llr(
     ``m(s) = -(r - s)^2 / (2 sigma^2) + log P(s)`` for real ones: the
     Gaussian log-likelihood of the noise the symbols carry.
     """
-    from .constellation import Constellation
 
     signal_adapter = adapt_signal(symbols, function_name="compute_llr()")
     x = signal_adapter.symbol_array()
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
-    if constellation is None:
-        raise ValueError(
-            "compute_llr() needs a constellation: pass constellation= or a "
-            "Signal that has one."
-        )
-    if not isinstance(constellation, Constellation):
-        raise TypeError(
-            "compute_llr(): constellation must be a Constellation, got "
-            f"{type(constellation).__name__}; use e.g. Constellation.qam(16)."
-        )
+    constellation = signal_adapter.require_choice(
+        "constellation", constellation, kind=Constellation
+    )
     noise_var = _noise_variance(
         noise_var, esn0_db, constellation, x.dtype.kind != "c", "compute_llr()"
     )

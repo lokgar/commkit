@@ -195,3 +195,54 @@ def clock_offset_workload(
     rx = apply_sampling_clock_offset(apply_delay(rx, delay=0.37), offset_ppm=ppm)
     mf = matched_filter(rx)
     return np.asarray(mf.samples, dtype=np.complex64), np.asarray(tx.reference.symbols)
+
+
+def random_bits(shape, seed: int = 0) -> np.ndarray:
+    """Uniform random bits, int8 of ``shape``, for the encoder and matcher benches."""
+    return np.random.default_rng(seed).integers(0, 2, shape, dtype=np.int8)
+
+
+def hard_word_workload(code, num_codewords: int, ber: float, seed: int = 0):
+    """Codewords of ``code`` with independent bit flips at ``ber``, for the
+    hard-decision decoders.  Returns ``(received int8, info_bits int8)``."""
+    from commkit.coding import encode
+
+    rng = np.random.default_rng(seed)
+    bits = rng.integers(0, 2, (num_codewords, code.k), dtype=np.int8)
+    words = np.asarray(encode(bits, code=code))
+    return words ^ (rng.random(words.shape) < ber).astype(np.int8), bits
+
+
+def pipeline_signal(frame: bool):
+    """32k-symbol 16-QAM at 4 SPS with RRC 0.35 for the Signal pipeline bench:
+    a plain ``generate`` Signal, or a frame-backed one (Barker-13 preamble,
+    comb pilots every 32 symbols) with its lazy provenance arrays built."""
+    from commkit import generate
+    from commkit.core import Preamble, Reference, SingleCarrierFrame
+    from commkit.filtering import RRC
+
+    if not frame:
+        return generate(
+            Constellation.qam(16),
+            num_symbols=32_768,
+            symbol_rate=1e6,
+            sps=4,
+            pulse=RRC(0.35, span=8),
+            rng=42,
+        )
+    frame_ = SingleCarrierFrame(
+        # 1057 pilot periods of 31 payload symbols: the length the 1.x frame
+        # snapped 32_768 up to, so the workload matches the 0002 baseline.
+        payload_num_symbols=32_798,
+        payload_constellation=Constellation.qam(16),
+        payload_rng=42,
+        preamble=Preamble(sequence_type="barker", num_symbols=13),
+        pilot_pattern="comb",
+        pilot_period=32,
+    )
+    # Materialize all lazy provenance arrays so deep-copy overhead is visible.
+    payload_bits = frame_.payload_bits
+    payload_symbols = frame_.payload_symbols
+    _ = frame_.pilot_bits, frame_.pilot_symbols
+    sig = frame_.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.35, span=8))
+    return sig.replace(reference=Reference(symbols=payload_symbols, bits=payload_bits))
