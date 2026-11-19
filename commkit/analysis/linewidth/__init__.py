@@ -120,7 +120,7 @@ def estimate_linewidth(
     method : IncrementSlope, IncrementSubtract, BetaSeparation, DshFmFit, DshIncrement or DshLorentzian
         The estimator and its parameters.
     sampling_rate : float, optional
-        Sampling rate of the record in Hz (a fact: the symbol rate for a
+        Sampling rate of the record in Hz (a property: the symbol rate for a
         per-symbol phase trajectory).  Taken from a Signal; required for
         arrays.  A value that disagrees with the Signal raises.
 

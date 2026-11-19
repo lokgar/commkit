@@ -128,7 +128,7 @@ class TestSignalInputInterferometry:
         xpt.assert_allclose(dp_sig, dp_arr)
 
     def test_conflicting_sampling_rate_raises(self, xp):
-        """sampling_rate is a fact: a value that disagrees with the Signal raises."""
+        """sampling_rate is a property: a value that disagrees with the Signal raises."""
         z, _ = make_dsh_beat(2e6, 1 << 12, 50, 80e6, snr_db=None, seed=1)
         sig = Signal(samples=xp.asarray(z), sampling_rate=FS, symbol_rate=FS)
         with pytest.raises(ValueError, match="conflicts"):

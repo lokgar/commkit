@@ -1,7 +1,7 @@
 """Containers and factories: :class:`Signal`, frames and generation.
 
 - :class:`Signal` and :class:`Reference` (:mod:`commkit.core.signal`): a
-  waveform with its facts, description and ground truth.
+  waveform with its properties, description and ground truth.
 - :class:`SingleCarrierFrame`, its :class:`FrameStructure` masks and
   :func:`extract_payload` (:mod:`commkit.core.frame`): structured frames with
   pilots, guard intervals and MIMO streams.

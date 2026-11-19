@@ -126,7 +126,7 @@ def correct_chromatic_dispersion(
     how : ChromaticDispersionEstimate or method object, optional
         An estimate of :func:`estimate_chromatic_dispersion`, or one of its
         methods (:class:`ClockToneScan`, :class:`FourthMomentScan`,
-        :class:`QuadraticPhaseFit`), estimated first with the Signal's facts
+        :class:`QuadraticPhaseFit`), estimated first with the Signal's properties
         (estimate first for array input).  Give ``how`` or ``dispersion_ps_nm``, not both.
     dispersion_ps_nm : float, optional
         Known accumulated dispersion of the link ``D·L`` in ps/nm (standard

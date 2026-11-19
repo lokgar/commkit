@@ -733,7 +733,7 @@ def estimate_frequency_offset(
 def _estimate_frequency_offset(
     samples: ArrayType, method: FrequencyMethod, fs: float, constellation: Any
 ) -> FrequencyOffsetEstimate:
-    """:func:`estimate_frequency_offset` on an array with resolved facts."""
+    """:func:`estimate_frequency_offset` on an array with resolved properties."""
     x, xp, _ = dispatch(samples)
     x, was_1d = as_2d(x, name="samples")
     C, N = x.shape

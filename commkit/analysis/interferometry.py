@@ -303,7 +303,7 @@ def dsh_phase(
         heterodyne) or complex (IQ front-end).  A :class:`Signal` supplies
         ``sampling_rate``.
     sampling_rate : float, optional
-        Sampling rate in Hz (a fact).  Taken from a Signal; required for array
+        Sampling rate in Hz (a property).  Taken from a Signal; required for array
         input.  A value that disagrees with the Signal raises.
     f_shift : float, optional
         Known beat carrier in Hz (the AOM frequency).  ``None`` estimates the

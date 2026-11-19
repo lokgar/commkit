@@ -309,7 +309,7 @@ def plot_pilot_tone_phase_estimate(
     method : PilotTone
         The method used (its ``frequency`` and ``bandwidth`` are drawn).
     sampling_rate : float, optional
-        Sampling rate in Hz (a fact): taken from a Signal, required for
+        Sampling rate in Hz (a property): taken from a Signal, required for
         arrays.
     quantity : {"spectrum", "phase"}, optional
         Select one panel; ``None`` draws both.

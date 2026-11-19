@@ -106,10 +106,10 @@ def lms(
         array input.  A WARNING is logged when the decided symbols of the
         last half of the decision-directed output lack its power by more
         than 1.5 dB: a lock at a wrong gain, or a constellation that does
-        not match the signal.  An explicit choice applies to this call
+        not match the signal.  An explicit constellation applies to this call
         only: ``signal`` of the result keeps the input Signal's
         ``constellation``, which describes its reference symbols, so pass
-        the same choice to the metrics, or set it on the Signal with
+        the same constellation to the metrics, or set it on the Signal with
         ``replace`` (with matching reference symbols) before equalizing.
     store_weights : bool, default False
         Record the weights of every symbol in ``weights_history``.
@@ -474,10 +474,10 @@ def rls(
         array input.  A WARNING is logged when the decided symbols of the
         last half of the decision-directed output lack its power by more
         than 1.5 dB: a lock at a wrong gain, or a constellation that does
-        not match the signal.  An explicit choice applies to this call
+        not match the signal.  An explicit constellation applies to this call
         only: ``signal`` of the result keeps the input Signal's
         ``constellation``, which describes its reference symbols, so pass
-        the same choice to the metrics, or set it on the Signal with
+        the same constellation to the metrics, or set it on the Signal with
         ``replace`` (with matching reference symbols) before equalizing.
     store_weights : bool, default False
         Record the weights of every symbol in ``weights_history``.

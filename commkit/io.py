@@ -313,7 +313,7 @@ def load_npz(
     Returns
     -------
     Signal
-        The stored samples (in their stored dtype), facts, constellation,
+        The stored samples (in their stored dtype), properties, constellation,
         pulse, reference and frame.
 
     Raises

@@ -52,7 +52,7 @@ def plot_time_domain(
     num_symbols : int, optional
         Number of symbol periods drawn; needs ``sps``.
     sps : float, optional
-        Samples per symbol (a fact): taken from a Signal; for arrays, needed
+        Samples per symbol (a property): taken from a Signal; for arrays, needed
         to count in symbols, otherwise ``start_symbol`` counts samples.
     max_points : int or None, default 10000
         A longer view is drawn as its min/max envelope: the samples are cut

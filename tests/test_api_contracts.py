@@ -14,8 +14,8 @@ The checks encode the API rules in AGENTS.md section 4:
   leaves the input Signal unchanged.
 - ``no_mutation``: input arrays are not modified.
 - ``foreign_array``: array types other than NumPy/CuPy raise ``TypeError``.
-- ``fact_conflict``: a Signal fact passed again with a different value raises
-  ``ValueError``.
+- ``property_conflict``: a property of a Signal (its ``sps`` or
+  ``sampling_rate``) passed again with a different value raises ``ValueError``.
 - ``trajectory``: per-symbol estimates keep the input's shape and device.
 - ``estimate_rank``: per-channel estimates reduce the time axis, giving 0-d for
   ``(N,)`` and ``(C,)`` for ``(C, N)``, and stay on the input device.
@@ -90,7 +90,7 @@ ARR = "array_roundtrip"
 SGN = "signal_roundtrip"
 MUT = "no_mutation"
 FOR = "foreign_array"
-FCT = "fact_conflict"
+PRP = "property_conflict"
 TRJ = "trajectory"
 RNK = "estimate_rank"
 MET = "metric_host"
@@ -105,7 +105,9 @@ class Row:
     kind: str
     data: int = 1  # leading parameters that may stay positional
     call: Builder | None = None
-    fact: tuple[str, Any] | None = None  # (kwarg, conflicting value)
+    # A property passed again with a conflicting value: (kwarg, value).  Not
+    # named ``property``, which would shadow the decorator in this class.
+    conflict: tuple[str, Any] | None = None
     dims: tuple[int, ...] = (1, 2)  # accepted input ranks: (N,) and/or (C, N)
     symbols: bool = False  # primary input is 1-SPS symbols, not a waveform
 
@@ -353,7 +355,7 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(
             x, _ref(c, x)[..., :200], num_taps=5, sps=SPS, constellation=C16
         ),
-        fact=SPS_CONFLICT,
+        conflict=SPS_CONFLICT,
     ),
     Row(
         "commkit.equalization._sequential._dd.rls",
@@ -362,19 +364,19 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(
             x, _ref(c, x)[..., :200], num_taps=5, sps=SPS, constellation=C16
         ),
-        fact=SPS_CONFLICT,
+        conflict=SPS_CONFLICT,
     ),
     Row(
         "commkit.equalization._sequential._blind.cma",
         EQUALIZER,
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, constellation=C16),
-        fact=SPS_CONFLICT,
+        conflict=SPS_CONFLICT,
     ),
     Row(
         "commkit.equalization._sequential._blind.rde",
         EQUALIZER,
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, constellation=C16),
-        fact=SPS_CONFLICT,
+        conflict=SPS_CONFLICT,
     ),
     Row(
         "commkit.equalization._block._dd.block_lms",
@@ -388,19 +390,19 @@ ROWS: list[Row] = [
             block_size=64,
             constellation=C16,
         ),
-        fact=SPS_CONFLICT,
+        conflict=SPS_CONFLICT,
     ),
     Row(
         "commkit.equalization._block._blind.block_cma",
         EQUALIZER,
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, block_size=64, constellation=C16),
-        fact=SPS_CONFLICT,
+        conflict=SPS_CONFLICT,
     ),
     Row(
         "commkit.equalization._block._blind.block_rde",
         EQUALIZER,
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, block_size=64, constellation=C16),
-        fact=SPS_CONFLICT,
+        conflict=SPS_CONFLICT,
     ),
     Row("commkit.equalization.pilots.EqualizerPilots", VALUE),
     Row(
@@ -408,7 +410,7 @@ ROWS: list[Row] = [
         RATE_CHANGE,
         data=2,
         call=lambda c, x: _a(x, _identity_taps(c, x), sps=SPS),
-        fact=SPS_CONFLICT,
+        conflict=SPS_CONFLICT,
     ),
     Row("commkit.equalization.linear.ChannelEstimate", VALUE),
     Row("commkit.equalization.linear.estimate_channel", MULTI, data=2),
@@ -477,7 +479,7 @@ ROWS: list[Row] = [
         TRANSFORM,
         data=2,
         call=lambda c, x: _a(x, sampling_rate=FS, **CDC),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row(
         "commkit.filtering.fiber.compensation.dispersion_compensation_taps",
@@ -503,13 +505,13 @@ ROWS: list[Row] = [
             symbol_rate=RS,
             center_wavelength_nm=1550.0,
         ),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row(
         "commkit.filtering.fiber.compensation.correct_fiber_propagation",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, **FIBER_LINK),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     # --- frequency ----------------------------------------------------------
     Row("commkit.frequency.SpectralPeak", VALUE),
@@ -526,14 +528,14 @@ ROWS: list[Row] = [
         TRANSFORM,
         data=2,
         call=lambda c, x: _a(x, 1e6, sampling_rate=FS),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row(
         "commkit.frequency.estimate_frequency_offset",
         ESTIMATE,
         data=2,
         call=lambda c, x: _a(x, MthPower(), sampling_rate=FS, constellation=C16),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     # --- math -------------------------------------------------------------
     Row("commkit.backend.PrecisionWarning", VALUE),
@@ -546,7 +548,7 @@ ROWS: list[Row] = [
         "commkit.impairments.fiber_channel.apply_chromatic_dispersion",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, **CD),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row("commkit._fiber.Fiber", VALUE),
     Row(
@@ -555,19 +557,19 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(
             x, sampling_rate=FS, noise_figure_db=5.0, rng=1, **FIBER_LINK
         ),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row(
         "commkit.impairments.source.apply_intensity_noise",
         TRANSFORM,
         call=lambda c, x: _a(x, rin_db_hz=-140.0, sampling_rate=FS, rng=1),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row(
         "commkit.impairments.fiber_channel.apply_pmd",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, dgd=1e-12, theta=0.3),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
         dims=(2,),
     ),
     Row(
@@ -586,7 +588,7 @@ ROWS: list[Row] = [
             skew=2e-12,
             sampling_rate=FS,
         ),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row(
         "commkit.impairments.frontend.apply_quantization",
@@ -597,7 +599,7 @@ ROWS: list[Row] = [
         "commkit.impairments.frontend.apply_sampling_jitter",
         TRANSFORM,
         call=lambda c, x: _a(x, jitter=1e-12, sampling_rate=FS, rng=1),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row(
         "commkit.impairments.frontend.apply_sampling_clock_offset",
@@ -620,7 +622,7 @@ ROWS: list[Row] = [
         "commkit.impairments.noise.apply_photodetection",
         TRANSFORM,
         call=lambda c, x: _a(x, received_power_dbm=-10.0, sampling_rate=FS, rng=1),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row(
         "commkit.impairments.noise.apply_coherent_detection",
@@ -628,25 +630,25 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(
             x, received_power_dbm=-20.0, lo_power_dbm=10.0, sampling_rate=FS, rng=1
         ),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row(
         "commkit.impairments.noise.apply_awgn",
         TRANSFORM,
         call=lambda c, x: _a(x, sps=SPS, esn0_db=20, rng=1),
-        fact=SPS_CONFLICT,
+        conflict=SPS_CONFLICT,
     ),
     Row(
         "commkit.impairments.source.apply_frequency_offset",
         TRANSFORM,
         call=lambda c, x: _a(x, offset=1e6, sampling_rate=FS),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row(
         "commkit.impairments.source.apply_phase_noise",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, linewidth=1e5, rng=1),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row("commkit.impairments.source.generate_phase_noise", SYNTHESIS, data=0),
     # --- mapping ------------------------------------------------------------
@@ -745,13 +747,13 @@ ROWS: list[Row] = [
         "commkit.multirate.decimate_to_symbol_rate",
         RATE_CHANGE,
         call=lambda c, x: _a(x, sps=SPS),
-        fact=SPS_CONFLICT,
+        conflict=SPS_CONFLICT,
     ),
     Row(
         "commkit.multirate.resample",
         RATE_CHANGE,
         call=lambda c, x: _a(x, sps_in=SPS, sps_out=3),
-        fact=("sps_in", 4),
+        conflict=("sps_in", 4),
     ),
     Row(
         "commkit.multirate.upsample",
@@ -807,7 +809,7 @@ ROWS: list[Row] = [
         TRAJECTORY,
         data=2,
         call=lambda c, x: _a(x, BPS(), constellation=C16),
-        fact=("sampling_rate", 3 * RS),
+        conflict=("sampling_rate", 3 * RS),
         symbols=True,
     ),
     Row("commkit.recovery.corrections.CycleSlip", VALUE),
@@ -843,13 +845,13 @@ ROWS: list[Row] = [
         "commkit.spectral.add_pilot_tone",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, frequency=1e8, power_ratio_db=-10),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row(
         "commkit.spectral.shift_frequency",
         TRANSFORM,
         call=lambda c, x: _a(x, frequency=1e7, sampling_rate=FS),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row("commkit.spectral.grid_frequency", DESIGN, data=1),
     Row("commkit.spectral.Spectrogram", VALUE),
@@ -857,13 +859,13 @@ ROWS: list[Row] = [
         "commkit.spectral.spectrogram",
         MULTI,
         call=lambda c, x: _a(x, sampling_rate=FS, nperseg=64),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     Row(
         "commkit.spectral.welch_psd",
         MULTI,
         call=lambda c, x: _a(x, sampling_rate=FS, nperseg=64),
-        fact=FS_CONFLICT,
+        conflict=FS_CONFLICT,
     ),
     # --- timing -------------------------------------------------------------
     Row("commkit._sequences.barker_sequence", DESIGN),
@@ -875,14 +877,14 @@ ROWS: list[Row] = [
         ESTIMATE,
         data=2,
         call=lambda c, x: _a(x, Gardner(), sps=SPS),
-        fact=SPS_CONFLICT,
+        conflict=SPS_CONFLICT,
     ),
     Row(
         "commkit.timing.clock_recovery.correct_sampling_clock_offset",
         RATE_CHANGE,
         data=2,
         call=lambda c, x: _a(x, Gardner(), sps=SPS),
-        fact=SPS_CONFLICT,
+        conflict=SPS_CONFLICT,
     ),
     Row("commkit.timing.synchronization.cross_correlate", HELPER, data=2),
     Row(
@@ -1095,12 +1097,12 @@ def test_foreign_array_rejected(row: Row, xp):
 
 @pytest.mark.parametrize(
     "row",
-    _rows(BEHAVIORAL, predicate=lambda r: r.fact is not None and r.signal_aware),
+    _rows(BEHAVIORAL, predicate=lambda r: r.conflict is not None and r.signal_aware),
 )
-def test_fact_conflict_raises(row: Row, xp):
+def test_property_conflict_raises(row: Row, xp):
     c = Inputs(xp)
     args, kwargs = row.call(c, c.primary_signal(row, row.dims[0]))
-    name, wrong = row.fact
+    name, wrong = row.conflict
     kwargs[name] = wrong
     with pytest.raises(ValueError):
         row.obj(*args, **kwargs)

@@ -230,7 +230,7 @@ class TestPlotSpectrogram:
 
 
 class TestPlotFacts:
-    """sampling_rate and sps are facts: from a Signal, required for arrays."""
+    """sampling_rate and sps are properties: from a Signal, required for arrays."""
 
     def test_conflicting_sampling_rate_raises(self, xp: Any) -> None:
         from commkit.core import Signal
