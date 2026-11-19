@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, to_device
+from ..core._signal_adapter import require_choice
 
 
 def _resolve_pll_gains(
@@ -55,12 +56,12 @@ class _Context:
 
     def need_constellation(self, method: object) -> Any:
         """The constellation, or raise naming the method that needs it."""
-        if self.constellation is None:
-            raise ValueError(
-                f"estimate_carrier_phase(): {type(method).__name__} needs a "
-                "constellation (pass constellation= or a Signal that has one)."
-            )
-        return self.constellation
+        return require_choice(
+            self.constellation,
+            "constellation",
+            "estimate_carrier_phase()",
+            purpose=f" for {type(method).__name__}",
+        )
 
     def need_sampling_rate(self, method: object) -> float:
         """The sampling rate, or raise naming the method that needs it."""

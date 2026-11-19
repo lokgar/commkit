@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from ...backend import ArrayType, to_device
-from ...core._signal_adapter import adapt_signal, require_integer_sps
+from ...core._signal_adapter import adapt_signal, require_choice, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
 from ...mapping._lattice import slicer_params
@@ -557,11 +557,9 @@ def block_lms(
     training = run.training
     mu = min(0.5 / block_size, 8e-3) / sps if step_size is None else step_size
 
-    if constellation is None:
-        raise ValueError(
-            "block_lms() needs a constellation for its decisions (pass "
-            "constellation= or a Signal that has one)."
-        )
+    require_choice(
+        constellation, "constellation", "block_lms()", purpose=" for its decisions"
+    )
     constellation_np = np.ascontiguousarray(constellation.points, dtype=np.complex64)
     sq_side, sq_lev_min, sq_d_grid = slicer_params(constellation)
     slicer = _Slicer(

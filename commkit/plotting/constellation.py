@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..backend import _to_host, dispatch, to_device
-from ..core._signal_adapter import adapt_signal
+from ..core._signal_adapter import adapt_signal, require_choice
 from ..logger import logger
 from ..mapping import Constellation
 from ..math import rms
@@ -66,11 +66,12 @@ def plot_ideal_constellation(
         shows the figure instead.
     """
 
-    if not isinstance(constellation, Constellation):
-        raise TypeError(
-            "plot_ideal_constellation(): constellation must be a Constellation, "
-            f"got {type(constellation).__name__}; use e.g. Constellation.qam(16)."
-        )
+    require_choice(
+        constellation,
+        "constellation",
+        "plot_ideal_constellation()",
+        kind=Constellation,
+    )
     logger.debug("Plotting ideal constellation %r.", constellation)
 
     if ax is None:
@@ -203,10 +204,12 @@ def plot_constellation(
     signal_adapter = adapt_signal(samples, function_name="plot_constellation()")
     sig = signal_adapter.signal
     constellation = signal_adapter.resolve_choice("constellation", constellation)
-    if overlay_ideal and constellation is None:
-        raise ValueError(
-            "plot_constellation(): overlay_ideal needs a constellation: pass "
-            "constellation= or a Signal that has one."
+    if overlay_ideal:
+        require_choice(
+            constellation,
+            "constellation",
+            "plot_constellation()",
+            purpose=" for overlay_ideal",
         )
     logger.debug("Generating constellation density plot.")
     x, xp, _ = dispatch(signal_adapter.array)

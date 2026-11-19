@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, to_device
-from ..core._signal_adapter import SignalAdapter
+from ..core._signal_adapter import SignalAdapter, require_choice
 from ..core.signal import Reference, Signal
 from ..logger import logger
 from ..mapping import Constellation
@@ -102,17 +102,7 @@ def _decoded(bits: Any, reference: Any, name: str) -> tuple[Any, Any, Any] | Non
 def _constellation(adapter: SignalAdapter, constellation: Any, name: str) -> Any:
     """The decision constellation: the argument, else the Signal's."""
     constellation = adapter.resolve_choice("constellation", constellation)
-    if constellation is None:
-        raise ValueError(
-            f"{name} needs a constellation: pass constellation= or a Signal that "
-            "has one."
-        )
-    if not isinstance(constellation, Constellation):
-        raise TypeError(
-            f"{name}: constellation must be a Constellation, got "
-            f"{type(constellation).__name__}; use e.g. Constellation.qam(16)."
-        )
-    return constellation
+    return require_choice(constellation, "constellation", name, kind=Constellation)
 
 
 @functools.lru_cache(maxsize=64)

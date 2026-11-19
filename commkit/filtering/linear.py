@@ -540,12 +540,7 @@ def matched_filter(
         If there is no pulse, or a pulse object is given with array input.
     """
     signal_adapter = adapt_signal(samples, function_name="matched_filter()")
-    pulse = signal_adapter.resolve_choice("pulse", pulse)
-    if pulse is None:
-        raise ValueError(
-            "matched_filter() needs a pulse: pass pulse= (a Pulse or taps) or a "
-            "Signal that has one."
-        )
+    pulse = signal_adapter.require_choice("pulse", pulse, purpose=" (a Pulse or taps)")
     if isinstance(pulse, Pulse):
         sig = signal_adapter.signal
         if sig is None:

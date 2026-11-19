@@ -92,17 +92,9 @@ def compute_llr(
 
     signal_adapter = adapt_signal(symbols, function_name="compute_llr()")
     x = signal_adapter.symbol_array()
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
-    if constellation is None:
-        raise ValueError(
-            "compute_llr() needs a constellation: pass constellation= or a "
-            "Signal that has one."
-        )
-    if not isinstance(constellation, Constellation):
-        raise TypeError(
-            "compute_llr(): constellation must be a Constellation, got "
-            f"{type(constellation).__name__}; use e.g. Constellation.qam(16)."
-        )
+    constellation = signal_adapter.require_choice(
+        "constellation", constellation, kind=Constellation
+    )
     noise_var = _noise_variance(
         noise_var, esn0_db, constellation, x.dtype.kind != "c", "compute_llr()"
     )
