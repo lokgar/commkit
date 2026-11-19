@@ -308,15 +308,14 @@ class SignalInput(Generic[S]):
         ``metadata`` overrides (``sampling_rate=``, ...); the input is not
         modified and ``samples`` is not copied.  ``num_symbols`` keeps the
         first that many symbols of the reference, for a function that drops
-        trailing symbol periods (the alignment invariant).  For array input
-        both are unused, and ``samples`` (``None`` included) passes through.
-        ``None`` is invalid for Signal output.
+        trailing symbol periods (the alignment invariant); for array input
+        both are unused.  ``None`` raises ``ValueError``.
         """
+        if samples is None:
+            raise ValueError(f"{self.function_name}: no samples to return.")
         sig = self._signal
         if sig is None:
             return cast(S, samples)
-        if samples is None:
-            raise ValueError(f"{self.function_name}: input Signal field is empty.")
         if num_symbols is not None and sig.reference is not None:
             metadata["reference"] = sig.reference.head(num_symbols)
         return cast(S, sig.replace(samples=samples, **metadata))

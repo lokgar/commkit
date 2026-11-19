@@ -48,10 +48,11 @@ class TestSamples:
         assert out.sampling_rate == 1e6
         assert sig.sampling_rate == 2e6
 
-    def test_wrap_none_raises_for_signal(self, xp: Any) -> None:
-        inp = SignalInput(make_adapter_test_signal(xp), "f()")
-        with pytest.raises(ValueError, match=r"f\(\): input Signal field is empty"):
-            inp.wrap(None)
+    def test_wrap_none_raises(self, xp: Any) -> None:
+        """None is no result, for array and Signal input alike."""
+        for value in (xp.ones(4), make_adapter_test_signal(xp)):
+            with pytest.raises(ValueError, match=r"f\(\): no samples to return"):
+                SignalInput(value, "f()").wrap(None)
 
     def test_wrap_num_symbols_slices_the_reference(self, xp: Any) -> None:
         """num_symbols keeps the reference aligned with the kept periods."""
