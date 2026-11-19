@@ -133,7 +133,7 @@ class TestCSBlockKernel:
             bind(xp.asfortranarray(xp.zeros((C, H))), ptr, n, st, **kw)
 
         launch = bind(buf_y, ptr, n, st, **kw)
-        with pytest.raises(ValueError, match="phi_blk"):
+        with pytest.raises(TypeError, match="phi_blk"):
             launch(phi.astype(xp.float32), corr)
         with pytest.raises(ValueError, match="phi_blk"):
             launch(xp.zeros((C, B + 1)), xp.zeros((C, B + 1)))  # beyond max_block

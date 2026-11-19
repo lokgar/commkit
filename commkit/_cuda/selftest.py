@@ -26,8 +26,7 @@ def _selftest_scale_factory(dtype: str = "float32") -> Callable:
     def launch(x: Any, alpha: float) -> Any:
         """``alpha * x`` elementwise, in the factory's dtype."""
         x = cp.ascontiguousarray(x)
-        if x.dtype != np_dtype:
-            raise TypeError(f"expected {np_dtype} input, got {x.dtype}")
+        compiler.check_arrays(("x", x, np_dtype, (None,) * x.ndim))
         y = cp.empty_like(x)
         n = x.size
         grid = (n + block - 1) // block

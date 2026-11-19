@@ -13,17 +13,6 @@ LLR_MAX_K = 16
 LLR_THREADS = 128
 
 
-def _check_llr_arrays(arrays: tuple[tuple[str, Any, Any, tuple], ...]) -> None:
-    """Check the dtype, shape and contiguity of LLR kernel arguments."""
-    for label, arr, dtype, shape in arrays:
-        if arr.dtype != dtype:
-            raise TypeError(f"{label} must be {dtype}, got {arr.dtype}")
-        if arr.shape != shape:
-            raise ValueError(f"{label} must have shape {shape}, got {arr.shape}")
-        if not arr.flags.c_contiguous:
-            raise ValueError(f"{label} must be C-contiguous")
-
-
 def _llr_launch(cp: Any, kern: Any, n: int, k: int, head: tuple, tail: tuple) -> Any:
     """Launch an LLR kernel over ``n`` symbols; returns ``(n, k)`` float32.
 
@@ -73,13 +62,11 @@ def _llr_factory() -> Callable:
             raise ValueError(f"bits per symbol must be in [1, {LLR_MAX_K}], got {k}")
         n = x.shape[0]
         M = points.shape[0]
-        _check_llr_arrays(
-            (
-                ("x", x, cp.complex64, (n,)),
-                ("points", points, cp.complex64, (M,)),
-                ("log_pmf", log_pmf, cp.float32, (M,)),
-                ("labels", labels, cp.int32, (M,)),
-            ),
+        compiler.check_arrays(
+            ("x", x, cp.complex64, (n,)),
+            ("points", points, cp.complex64, (M,)),
+            ("log_pmf", log_pmf, cp.float32, (M,)),
+            ("labels", labels, cp.int32, (M,)),
         )
         return _llr_launch(
             cp,
@@ -135,7 +122,7 @@ def _llr_separable_factory() -> Callable:
                 (f"{name} positions", pos, cp.int32, (kb,)),
             ]
             axis_args += [lev, logp, lab, pos, cp.int32(L), cp.int32(kb)]
-        _check_llr_arrays(tuple(checks))
+        compiler.check_arrays(*checks)
         k = re[3].shape[0] + im[3].shape[0]
         if k > LLR_MAX_K:
             raise ValueError(f"bits per symbol must be at most {LLR_MAX_K}, got {k}")
@@ -198,7 +185,7 @@ def _llr_separable_maxlog_factory() -> Callable:
                 (f"{name} positions", pos, cp.int32, (kb,)),
             ]
             axis_args += [lev, lab, lo, hi, pos, cp.int32(L), cp.int32(kb)]
-        _check_llr_arrays(tuple(checks))
+        compiler.check_arrays(*checks)
         k = re[4].shape[0] + im[4].shape[0]
         if k > LLR_MAX_K:
             raise ValueError(f"bits per symbol must be at most {LLR_MAX_K}, got {k}")

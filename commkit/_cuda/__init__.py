@@ -8,7 +8,8 @@ raises: there is no slower path to fall back to, since the kernels are
 tested on a GPU before every release.
 
 The launch wrappers live by family in :mod:`.bps`, :mod:`.llr`,
-:mod:`.coding`, :mod:`.filters` and :mod:`.selftest`; this module holds the
+:mod:`.coding`, :mod:`.filters` and :mod:`.selftest` and check their
+arguments with :func:`.compiler.check_arrays`; this module holds the
 registry.
 
 Importing this package (or ``commkit``) never touches NVRTC: kernel sources

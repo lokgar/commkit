@@ -49,12 +49,10 @@ def _bps_min_d2_factory(mode: str = "table", return_argmin: bool = False) -> Cal
         """
         x = cp.ascontiguousarray(x)
         phasor = cp.ascontiguousarray(phasor)
-        if x.ndim != 2:
-            raise ValueError(f"x must be 2-D (C, N), got shape {x.shape}")
-        if x.dtype != cp.complex64 or phasor.dtype != cp.complex64:
-            raise TypeError(
-                f"x and phasor must be complex64, got {x.dtype}/{phasor.dtype}"
-            )
+        compiler.check_arrays(
+            ("x", x, cp.complex64, (None, None)),
+            ("phasor", phasor, cp.complex64, (None,)),
+        )
         C, N = x.shape
         P = int(phasor.size)
         if P < 1 or P > 128:
@@ -62,10 +60,9 @@ def _bps_min_d2_factory(mode: str = "table", return_argmin: bool = False) -> Cal
 
         if mode_id == 0:
             constellation = cp.ascontiguousarray(constellation)
-            if constellation.dtype != cp.complex64:
-                raise TypeError(
-                    f"constellation must be complex64, got {constellation.dtype}"
-                )
+            compiler.check_arrays(
+                ("constellation", constellation, cp.complex64, (None,))
+            )
             M = int(constellation.size)
             if M < 1 or M > 1024:
                 raise ValueError(f"constellation size must be in [1, 1024], got {M}")
@@ -148,18 +145,12 @@ def _cs_block_factory() -> Callable:
         """
         C = cs_buf_ptr.shape[0] if cs_buf_ptr.ndim == 1 else -1
         cs_H = int(cs_H)
-        for label, arr, dtype, shape in (
+        compiler.check_arrays(
             ("cs_buf_y", cs_buf_y, cp.float64, (C, cs_H)),
             ("cs_buf_ptr", cs_buf_ptr, cp.int64, (C,)),
             ("cs_buf_n", cs_buf_n, cp.int64, (C,)),
             ("cs_stats", cs_stats, cp.float64, (C, 4)),
-        ):
-            if arr.dtype != dtype:
-                raise TypeError(f"{label} must be {dtype}, got {arr.dtype}")
-            if arr.shape != shape:
-                raise ValueError(f"{label} must have shape {shape}, got {arr.shape}")
-            if not arr.flags.c_contiguous:
-                raise ValueError(f"{label} must be C-contiguous (mutated in place)")
+        )
         if max_block < 1:
             raise ValueError(f"max_block must be >= 1, got {max_block}")
         # Scratch for the largest block: the kernel strides by the actual B.
@@ -177,27 +168,13 @@ def _cs_block_factory() -> Callable:
             Both are ``(C, B)`` float64, ``1 <= B <= max_block``; the bound
             history buffers are updated in place.
             """
+            compiler.check_arrays(("phi_blk", phi_blk, cp.float64, (C, None)))
             shape = phi_blk.shape
-            if (
-                phi_blk.dtype != cp.float64
-                or len(shape) != 2
-                or shape[0] != C
-                or not 1 <= shape[1] <= max_block
-                or not phi_blk.flags.c_contiguous
-            ):
+            if not 1 <= shape[1] <= max_block:
                 raise ValueError(
-                    f"phi_blk must be C-contiguous float64 (C={C}, B<={max_block}), "
-                    f"got {phi_blk.dtype} {shape}"
+                    f"phi_blk must hold 1 to {max_block} symbols, got {shape[1]}"
                 )
-            if (
-                phi_corr.dtype != cp.float64
-                or phi_corr.shape != shape
-                or not phi_corr.flags.c_contiguous
-            ):
-                raise ValueError(
-                    f"phi_corr must be C-contiguous float64 {shape}, got "
-                    f"{phi_corr.dtype} {phi_corr.shape}"
-                )
+            compiler.check_arrays(("phi_corr", phi_corr, cp.float64, shape))
             kern(
                 (C,),
                 (256,),  # CS_THREADS in cs_block.cu
@@ -240,25 +217,17 @@ def _bps_anchor_factory() -> Callable:
         joint: bool,
     ) -> tuple[Any, Any]:
         """Anchored phase ``(C, n)`` float64 and the new ``(C, K-1)`` history."""
-        if y.ndim != 2:
-            raise ValueError(f"y must be 2-D (C, n), got shape {y.shape}")
+        compiler.check_arrays(("y", y, cp.complex64, (None, None)))
         C, n = y.shape
         if n < 1:
             raise ValueError("y must have at least one training column")
         H = hist.shape[-1]
-        for label, arr, dtype, shape in (
-            ("y", y, cp.complex64, (C, n)),
+        compiler.check_arrays(
             ("d", d, cp.complex64, (C, n)),
             ("hist", hist, cp.complex64, (C, H)),
             ("offset4", offset4, cp.float64, (C,)),
             ("prev4", prev4, cp.float64, (C,)),
-        ):
-            if arr.dtype != dtype:
-                raise TypeError(f"{label} must be {dtype}, got {arr.dtype}")
-            if arr.shape != shape:
-                raise ValueError(f"{label} must have shape {shape}, got {arr.shape}")
-            if not arr.flags.c_contiguous:
-                raise ValueError(f"{label} must be C-contiguous")
+        )
         phi = cp.empty((C, n), dtype=cp.float64)
         hist_out = cp.empty((C, H), dtype=cp.complex64)
         total = cp.zeros(n if joint else 0, dtype=cp.complex64)

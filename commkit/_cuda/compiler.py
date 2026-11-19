@@ -1,5 +1,7 @@
 """Lazy CUDA kernel compilation with in-process caching (private).
 
+Also :func:`check_arrays`, the argument check of the launch wrappers.
+
 Kernel sources are ``.cu`` files under ``commkit/_cuda/src/`` (shipped as
 package data), compiled through :class:`cupy.RawModule` with C++17 and
 templates for mode and dtype specialization; ``name_expressions`` resolves
@@ -13,6 +15,8 @@ from CuPy's on-disk NVRTC cache.
 
 from importlib import resources
 from typing import Any
+
+import numpy as np
 
 # No --use_fast_math by default: it changed neither the output nor the speed
 # of bps_min_d2 or cs_block (measured), and a kernel that gains from it
@@ -88,3 +92,24 @@ def get_raw_kernel(
     kernel = module.get_function(name_expression)
     _KERNEL_CACHE[key] = (module, kernel)
     return kernel
+
+
+def check_arrays(*arrays: tuple[str, Any, Any, tuple[int | None, ...]]) -> None:
+    """Check kernel arguments given as ``(label, array, dtype, shape)``.
+
+    A wrong dtype raises ``TypeError``; a wrong shape (``None`` matches any
+    size along its axis) or a non-C-contiguous array raises ``ValueError``.
+    Wrappers check rather than copy, as kernels write into some arguments.
+    """
+    for label, arr, dtype, shape in arrays:
+        if arr.dtype != dtype:
+            raise TypeError(f"{label} must be {np.dtype(dtype)}, got {arr.dtype}")
+        if arr.ndim != len(shape) or any(
+            want is not None and want != got
+            for want, got in zip(shape, arr.shape, strict=False)
+        ):
+            dims = ", ".join("n" if s is None else str(s) for s in shape)
+            dims += "," if len(shape) == 1 else ""
+            raise ValueError(f"{label} must have shape ({dims}), got {arr.shape}")
+        if not arr.flags.c_contiguous:
+            raise ValueError(f"{label} must be C-contiguous")

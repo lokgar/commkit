@@ -36,17 +36,12 @@ def _ldpc_layered_factory(sum_product: bool = False) -> Callable:
         early_stop: bool,
     ) -> tuple[Any, Any]:
         """Decode ``app`` ``(B, N)`` float32 in place; ``(iters, valid)``."""
-        if app.dtype != cp.float32 or app.ndim != 2 or not app.flags.c_contiguous:
-            raise ValueError(
-                f"app must be C-contiguous float32 (B, N), got {app.dtype} {app.shape}"
-            )
-        for label, arr in (
-            ("row_ptr", row_ptr),
-            ("cols", cols),
-            ("layer_ptr", layer_ptr),
-        ):
-            if arr.dtype != cp.int32 or arr.ndim != 1 or not arr.flags.c_contiguous:
-                raise ValueError(f"{label} must be C-contiguous int32 (n,)")
+        compiler.check_arrays(
+            ("app", app, cp.float32, (None, None)),
+            ("row_ptr", row_ptr, cp.int32, (None,)),
+            ("cols", cols, cp.int32, (None,)),
+            ("layer_ptr", layer_ptr, cp.int32, (None,)),
+        )
         B, N = app.shape
         m, E = row_ptr.size - 1, cols.size
         iters = cp.zeros(B, dtype=cp.int32)
@@ -97,28 +92,15 @@ def _algebraic_correct_factory() -> Callable:
         """Correct ``words`` ``(B, n m)`` int8 in place; ``valid`` ``(B,)``."""
         B = words.shape[0]
         n = locator_logs.size
-        for label, arr, ndim in (
-            ("s", s, 2),
-            ("exp", exp, 1),
-            ("log", log, 1),
-            ("locator_logs", locator_logs, 1),
-        ):
-            if arr.dtype != cp.int64 or arr.ndim != ndim or not arr.flags.c_contiguous:
-                raise ValueError(f"{label} must be C-contiguous int64 with {ndim} dims")
-        if s.shape != (B, 2 * t):
-            raise ValueError(f"s must be (B, 2t) = ({B}, {2 * t}), got {s.shape}")
+        compiler.check_arrays(
+            ("s", s, cp.int64, (B, 2 * t)),
+            ("exp", exp, cp.int64, (None,)),
+            ("log", log, cp.int64, (None,)),
+            ("locator_logs", locator_logs, cp.int64, (None,)),
+            ("words", words, cp.int8, (B, n * m)),
+        )
         if exp.size != 2 * log.size:
             raise ValueError("exp must be the doubled antilog table of log")
-        if (
-            words.dtype != cp.int8
-            or words.ndim != 2
-            or not words.flags.c_contiguous
-            or words.shape[1] != n * m
-        ):
-            raise ValueError(
-                f"words must be C-contiguous int8 (B, {n * m}), got {words.dtype} "
-                f"{words.shape}"
-            )
         valid = cp.zeros(B, dtype=cp.uint8)
         if B == 0:
             return valid.astype(bool)

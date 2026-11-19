@@ -64,15 +64,11 @@ def _iir_factory() -> Callable:
             )
         if x.dtype.name not in _IIR_TYPES:
             raise TypeError(f"x must be float32/64 or complex64/128, got {x.dtype}")
-        if x.ndim != 2 or not x.flags.c_contiguous:
-            raise ValueError(f"x must be a C-contiguous (C, N) array, got {x.shape}")
+        compiler.check_arrays(("x", x, x.dtype, (None, None)))
         S = sos.shape[0]
         C, N = x.shape
         state = cp.complex128 if x.dtype.kind == "c" else cp.float64
-        if zi.dtype != state or zi.shape != (C, S, 2) or not zi.flags.c_contiguous:
-            raise ValueError(
-                f"zi must be a C-contiguous ({C}, {S}, 2) {np.dtype(state)} array"
-            )
+        compiler.check_arrays(("zi", zi, state, (C, S, 2)))
         D = 2 * S
         if block < 1 or group < 1:
             raise ValueError(f"block and group must be >= 1, got {block}, {group}")
@@ -170,8 +166,7 @@ def _interpolate_factory(half: int = 24) -> Callable:
         ``knots`` ``(rows, K)`` float64, ``rows`` 1 or ``C``."""
         if x.dtype.name not in _INTERP_TYPES:
             raise TypeError(f"x must be float32/64 or complex64/128, got {x.dtype}")
-        if x.ndim != 2 or not x.flags.c_contiguous:
-            raise ValueError(f"x must be a C-contiguous (C, N) array, got {x.shape}")
+        compiler.check_arrays(("x", x, x.dtype, (None, None)))
         C, N = x.shape
         real = x.real.dtype
         null_i64 = cp.empty(0, dtype=cp.int64)
@@ -182,20 +177,13 @@ def _interpolate_factory(half: int = 24) -> Callable:
                 raise ValueError("give base and frac, or knots and sub")
             base = cp.ascontiguousarray(base)
             frac = cp.ascontiguousarray(frac)
-            if base.dtype != cp.int64 or frac.dtype != real:
-                raise TypeError(
-                    f"base must be int64 and frac {real}, got {base.dtype}/{frac.dtype}"
-                )
-            if base.ndim != 1 or base.shape != frac.shape:
-                raise ValueError(
-                    f"base and frac must be (M,) alike, got {base.shape}/{frac.shape}"
-                )
+            compiler.check_arrays(("base", base, cp.int64, (None,)))
+            compiler.check_arrays(("frac", frac, real, base.shape))
             M, mode, rows, K = base.shape[0], 0, 0, 0
             args = (base, frac, null_f64)
         else:
             knots = cp.ascontiguousarray(knots)
-            if knots.dtype != cp.float64 or knots.ndim != 2:
-                raise TypeError(f"knots must be 2-D float64, got {knots.dtype}")
+            compiler.check_arrays(("knots", knots, cp.float64, (None, None)))
             rows, K = knots.shape
             if rows not in (1, C) or K < 1 or sub < 1:
                 raise ValueError(
