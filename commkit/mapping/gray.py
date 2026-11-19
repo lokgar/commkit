@@ -96,24 +96,9 @@ def gray_to_binary(n: int) -> np.ndarray:
     return _read_only(inverse)
 
 
-def _is_square_qam(modulation: str, order: int) -> bool:
-    """True if ``(modulation, order)`` builds a square (not cross/8-rect) QAM grid.
-
-    Square QAM (order a perfect square, e.g. 4/16/64/256/1024) is a uniform
-    per-axis grid; 8-QAM and cross-QAM (odd bits-per-symbol orders, e.g.
-    32/128/512) are not.
-    """
-    if "qam" not in modulation.lower():
-        return False
-    if order == 8:
-        return False
-    k = int(np.log2(order))
-    return k % 2 == 0
-
-
 @lru_cache(maxsize=128)
 def _gray_points(
-    modulation: str,
+    family: str,
     order: int,
     normalize: bool = True,
     unipolar: bool = False,
@@ -124,68 +109,52 @@ def _gray_points(
 
     Parameters
     ----------
-    modulation : {"psk", "qam", "ask", "pam"}
-        Modulation family; a name containing ``"unipol"`` also sets
-        ``unipolar``.
+    family : {"qam", "psk", "pam"}
+        Constellation family, as :class:`Constellation` names it.
     order : int
-        Number of points, a power of 2.
+        Number of points, a power of 2.  QAM of an even number of bits is a
+        square grid; 8-QAM is a 4 x 2 rectangle, and higher odd orders are
+        cross constellations.
     normalize : bool, default True
-        Scale to unit average power ``Es = 1``, so that formats combined in
-        one frame (PSK pilots with a QAM payload) start at the same power.
+        Scale QAM and PAM to unit average power ``Es = 1``, so that formats
+        combined in one frame (PSK pilots with a QAM payload) start at the
+        same power.  PSK lies on the unit circle already.
     unipolar : bool, default False
-        Shift ASK/PAM points to non-negative values.
+        Shift PAM points to non-negative values.
 
     Returns
     -------
     numpy.ndarray
-        Points, ``(order,)``: complex for PSK and QAM, real for ASK.
+        Points, ``(order,)``: complex for PSK and QAM, real for PAM.
     """
     logger.debug(
-        "Generating Gray-coded constellation: modulation=%s, order=%s, normalize=%s",
-        modulation,
+        "Generating Gray-coded constellation: family=%s, order=%s, normalize=%s",
+        family,
         order,
         normalize,
     )
-    modulation = modulation.lower()
-
-    # Extract core modulation scheme
-    if "psk" in modulation:
-        modulation = "psk"
-    elif "qam" in modulation:
-        modulation = "qam"
-    elif "ask" in modulation or "pam" in modulation:
-        modulation = "ask"
-
     if order < 2:
         raise ValueError("Order must be at least 2 for modulation")
-
-    if modulation == "psk":
-        result = _gray_psk(order)
-    elif modulation == "ask":
-        result = _gray_ask(order, unipolar=unipolar)
-    elif modulation == "qam":
-        k = int(np.log2(order))
-        if 2**k != order:
-            raise ValueError(f"Order must be power of 2 for {modulation}")
-
-        # Check for 8-QAM
-        if order == 8:
-            result = _gray_qam_8_rect()
-        elif _is_square_qam(modulation, order):
-            result = _gray_qam_square(order)
-        else:
-            result = _gray_qam_cross(order)
-    else:
-        raise ValueError(f"Unsupported modulation type: {modulation}")
-
+    match family:
+        case "psk":
+            return _read_only(_gray_psk(order))
+        case "pam":
+            points = _gray_ask(order, unipolar=unipolar)
+        case "qam":
+            k = int(np.log2(order))
+            if 2**k != order:
+                raise ValueError("Order must be power of 2 for qam")
+            if order == 8:  # 4 x 2 rectangle: I from the two MSBs, Q from the LSB
+                points = (_gray_ask(4)[:, None] + 1j * _gray_ask(2)[None, :]).ravel()
+            elif k % 2 == 0:
+                points = _gray_qam_square(order)
+            else:
+                points = _gray_qam_cross(order)
+        case _:
+            raise ValueError(f"Unsupported modulation type: {family}")
     if normalize:
-        if modulation == "psk":
-            # PSK is already on unit circle (E_s = 1)
-            pass
-        else:
-            result = _normalize(result, mode="average_power")
-
-    return _read_only(result)
+        points = _normalize(points, mode="average_power")
+    return _read_only(points)
 
 
 # GPU input outside the kernel's limits (double precision, more than 1024
@@ -368,20 +337,6 @@ def _gray_qam_square(order: int) -> np.ndarray:
     constellation = i_vals + 1j * q_vals
 
     return np.asarray(constellation)
-
-
-def _gray_qam_8_rect() -> np.ndarray:
-    """Generate an 8-QAM constellation with Rectangular Gray mapping.
-
-    A 4-level Gray I axis (the two MSBs) times a 2-level Q axis (the LSB):
-    label ``b2 b1 b0`` sits at ``I = gray4[b2 b1]``, ``Q = gray2[b0]``.
-
-    Returns
-    -------
-    numpy.ndarray
-        Complex array of 8-QAM constellation points.
-    """
-    return (_gray_ask(4)[:, None] + 1j * _gray_ask(2)[None, :]).ravel()
 
 
 def _gray_qam_cross(order: int) -> np.ndarray:
