@@ -7,11 +7,10 @@ from typing import Any
 
 import numpy as np
 
-from ..backend import get_array_module
+from ..backend import _to_host, get_array_module
 from .theme import (
     _device_channels,
     _finish,
-    _host,
     _panel_grid,
     _select,
     _trace,
@@ -79,8 +78,8 @@ def plot_timing_correlation(
     corr = xp.abs(corr)  # on the device; only drawn points are transferred
     C = corr.shape[0]
     offset = estimate.search_start
-    peak_indices = np.atleast_1d(_host(estimate.integer)).ravel() - offset
-    norm_factors = _host(corr.mean(axis=-1)).ravel()
+    peak_indices = np.atleast_1d(_to_host(estimate.integer)).ravel() - offset
+    norm_factors = _to_host(corr.mean(axis=-1)).ravel()
 
     fig, axes = _panel_grid(ax, C, len(panels))
 
@@ -92,7 +91,7 @@ def plot_timing_correlation(
         abs_thresh = threshold * norm_val
         s_z = max(0, pk_idx - zoom_w)
         e_z = min(c_ch.shape[-1], pk_idx + zoom_w)
-        zoom = _host(c_ch[s_z:e_z])  # holds the peak
+        zoom = _to_host(c_ch[s_z:e_z])  # holds the peak
         peak_val = float(zoom[pk_idx - s_z])
         metric_val = peak_val / norm_val if norm_val > 0 else 0.0
         ch_suffix = f" - Ch {i}" if C > 1 else ""

@@ -13,7 +13,7 @@ import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..backend import get_array_module, to_device
+from ..backend import _to_host, get_array_module
 from ..logger import logger
 
 __all__ = ["apply_default_theme"]
@@ -439,7 +439,7 @@ def _trace(
     if x is None:
         x = xp.arange(y.shape[-1], dtype=np.float64) * dx + x0
     x, y = _decimate_minmax(x, y, max_points)
-    return _host(x), _host(y)
+    return _to_host(x), _to_host(y)
 
 
 _SI_PREFIXES = {
@@ -549,12 +549,7 @@ def _set_eng_formatter(ax, which: str) -> None:
 
 def _as_channels(arr) -> np.ndarray:
     """Bring to CPU and promote ``(N,)`` -> ``(1, N)``."""
-    return np.atleast_2d(np.asarray(to_device(arr, "cpu")))
-
-
-def _host(a: Any) -> np.ndarray:
-    """``a`` as a host NumPy array (one transfer for device input)."""
-    return np.asarray(to_device(a, "cpu"))
+    return np.atleast_2d(_to_host(arr))
 
 
 def _require(result: Any, field: str, name: str, what: str) -> Any:

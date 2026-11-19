@@ -11,14 +11,13 @@ from typing import Any
 import numpy as np
 
 from .. import _fft
-from ..backend import get_array_module, to_device
+from ..backend import _to_host, get_array_module, to_device
 from ..core._signal_adapter import adapt_signal
 from ..recovery import CarrierPhaseEstimate
 from .theme import (
     _device_channels,
     _finish,
     _get_axis,
-    _host,
     _panel_grid,
     _require,
     _select,
@@ -97,7 +96,7 @@ def plot_carrier_phase_trajectory(
         axi.plot(*_trace(phi_deg[i], max_points), label=curve_label)
 
     if block_centers is not None:
-        for tc in np.asarray(to_device(block_centers, "cpu")):
+        for tc in _to_host(block_centers):
             axi.axvline(tc, color="gray", alpha=0.4)
 
     if num_train_symbols > 0:
@@ -179,10 +178,10 @@ def plot_pilot_phase_estimate(
     name = "plot_pilot_phase_estimate()"
     pilot_phase = _require(estimate, "pilot_phase", name, "a pilot method")
     is_phase = isinstance(estimate, CarrierPhaseEstimate)
-    pilot_indices = _host(estimate.pilot_indices)
-    phi_pilots_u = _host(pilot_phase)
+    pilot_indices = _to_host(estimate.pilot_indices)
+    phi_pilots_u = _to_host(pilot_phase)
     phi_full = _device_channels(estimate.value) if is_phase else None
-    f_est = None if is_phase else np.atleast_1d(_host(estimate.value))
+    f_est = None if is_phase else np.atleast_1d(_to_host(estimate.value))
     pilot_indices = to_device(pilot_indices, "cpu").astype(float)
     if phi_pilots_u.ndim == 1:
         phi_pilots_u = phi_pilots_u[None, :]
@@ -355,7 +354,7 @@ def plot_pilot_tone_phase_estimate(
     mag = xp.fft.fftshift(xp.abs(_fft.fft(x, axis=-1)), axes=-1)
     mag_db = 20.0 * xp.log10(xp.maximum(mag, xp.finfo(mag.dtype).tiny))
     f_sorted = xp.fft.fftshift(xp.fft.fftfreq(N, d=1.0 / fs))
-    f_tones = np.atleast_1d(_host(tones)).astype(float)
+    f_tones = np.atleast_1d(_to_host(tones)).astype(float)
     tone_frequency = method.frequency
     bandwidth = method.bandwidth
 

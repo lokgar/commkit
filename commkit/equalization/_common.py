@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 
 from .._array import restore_1d
-from ..backend import dispatch, to_device
+from ..backend import _to_host, dispatch, to_device
 from ..core._signal_adapter import require_integer_sps
 from ..logger import logger
 from ..math import rms
@@ -122,7 +122,7 @@ def _build_padded_samples(
                 f"pad_left={pad_left}. Provide at least pad_left samples."
             )
         if eq_norm is not None:
-            nf_arr = np.asarray(to_device(eq_norm, "cpu"), dtype=np.float64).ravel()
+            nf_arr = _to_host(eq_norm, np.float64).ravel()
             if prefix.shape[0] == 1:
                 prefix = prefix / float(nf_arr[0])
             else:

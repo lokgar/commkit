@@ -13,7 +13,7 @@ import numpy as np
 from scipy.stats import chi2
 
 from ..._array import as_2d, broadcast_channels, to_report_scalar
-from ...backend import ArrayType, dispatch, to_device
+from ...backend import ArrayType, _to_host, dispatch, to_device
 from ...logger import logger
 from ...math import _next_pow2, normalize
 from .._common import (
@@ -147,7 +147,7 @@ class IncrementSubtract:
 
     def __post_init__(self) -> None:
         if self.noise_var is not None:
-            nv = np.atleast_1d(np.asarray(to_device(self.noise_var, "cpu"), float))
+            nv = np.atleast_1d(_to_host(self.noise_var, float))
             if nv.ndim != 1 or np.any(nv < 0):
                 raise ValueError(
                     "noise_var must be a non-negative scalar or (C,) array, "
@@ -348,8 +348,8 @@ def _beta_separation(
 
     # Transfer the plot-sized spectrum once, up front: every fence, mask,
     # fit and the area below are host-side arithmetic on these arrays.
-    f_cpu = np.asarray(to_device(f, "cpu"), dtype=np.float64)
-    S_cpu = np.asarray(to_device(S_f, "cpu"), dtype=np.float64)
+    f_cpu = _to_host(f, np.float64)
+    S_cpu = _to_host(S_f, np.float64)
     S2c = S_cpu[None, :] if S_cpu.ndim == 1 else S_cpu
     n_ch = S2c.shape[0]
 

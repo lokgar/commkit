@@ -21,8 +21,8 @@ from .backend import (
     PrecisionWarning,
     _is_cupy_array,
     _reject_foreign_array,
+    _to_host,
     get_array_module,
-    to_device,
 )
 
 # ---------------------------------------------------------------------------
@@ -286,7 +286,7 @@ def to_report_scalar(values: Any, *, was_1d: bool | None = None) -> float | np.n
     float or numpy.ndarray
         A Python float for ``(N,)`` input, otherwise a ``float64`` NumPy array.
     """
-    arr = np.asarray(to_device(values, "cpu"), dtype=np.float64)
+    arr = _to_host(values, np.float64)
     if was_1d is None:
         was_1d = arr.ndim == 0
     if not was_1d:

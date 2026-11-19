@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 
 from .. import _random
-from ..backend import _module_for, to_device
+from ..backend import _module_for, _to_host, to_device
 from ..logger import logger
 from ..mapping import Constellation
 from .base import _checked, _decode_blocks, _encode_blocks, _resolve_method
@@ -269,7 +269,7 @@ def error_rate_curve(
             f"{name}: a shaped constellation with a FEC code needs a distribution "
             "matcher: use code=PAS(code, constellation)."
         )
-    grid = np.asarray(to_device(esn0_db, "cpu"), dtype=np.float64)
+    grid = _to_host(esn0_db, np.float64)
     if grid.ndim != 1 or grid.size == 0 or not np.all(np.isfinite(grid)):
         raise ValueError(f"{name}: esn0_db must be 1-D, finite and not empty.")
     for arg, value in (

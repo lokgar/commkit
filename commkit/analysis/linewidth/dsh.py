@@ -12,7 +12,7 @@ import numpy as np
 
 from ... import _fft
 from ..._array import as_2d, restore_1d, to_report_scalar
-from ...backend import ArrayType, dispatch, to_device
+from ...backend import ArrayType, _to_host, dispatch, to_device
 from ...logger import logger
 from ...smoothing import moving_average
 from ...spectral import welch_psd
@@ -315,8 +315,8 @@ def _not_a_beat(x: ArrayType, f_shift: float | None, fs: float) -> np.ndarray:
     segs = x2[:, : k_seg * seg].reshape(x2.shape[0], k_seg, seg)
     psd = xp.mean(xp.abs(_fft.rfft(segs * xp.hanning(seg), axis=-1)) ** 2, axis=1)
     with np.errstate(invalid="ignore", divide="ignore"):
-        frac = np.asarray(to_device(low / xp.sum(power, axis=-1), "cpu"))
-    psd_cpu = np.asarray(to_device(psd, "cpu"))  # (C, seg/2 + 1), one transfer
+        frac = _to_host(low / xp.sum(power, axis=-1))
+    psd_cpu = _to_host(psd)  # (C, seg/2 + 1), one transfer
 
     f = np.fft.rfftfreq(seg, d=1.0 / fs)
     if f_shift:
@@ -405,8 +405,8 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmFit, fs: float) -> DshFmFitEsti
     nps = _dsh_nperseg(n_diff, m_samp, method.nperseg)
     f, S_beat = fm_noise_psd(dphi, sampling_rate=fs, nperseg=nps)
     # Summary layer: one transfer, host-side fit on the plot-sized spectrum.
-    f_cpu = np.asarray(to_device(f, "cpu"), dtype=np.float64)
-    S_cpu = np.asarray(to_device(S_beat, "cpu"), dtype=np.float64)
+    f_cpu = _to_host(f, np.float64)
+    S_cpu = _to_host(S_beat, np.float64)
     S2 = S_cpu[None, :] if S_cpu.ndim == 1 else S_cpu
     n_ch = S2.shape[0]
 
@@ -564,8 +564,8 @@ def _dsh_lorentzian(
     f, P = welch_psd(z2, sampling_rate=fs, nperseg=npseg, return_onesided=False)
     # From here on the work is scalar peak/width searching on an
     # nperseg-sized spectrum - host-side NumPy on purpose.
-    f_cpu = np.asarray(to_device(f, "cpu"), dtype=np.float64)
-    P_cpu = np.asarray(to_device(P, "cpu"), dtype=np.float64)
+    f_cpu = _to_host(f, np.float64)
+    P_cpu = _to_host(P, np.float64)
     P2 = P_cpu[None, :] if P_cpu.ndim == 1 else P_cpu
     c = P2.shape[0]
 

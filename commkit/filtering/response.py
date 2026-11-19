@@ -15,7 +15,7 @@ import numpy as np
 import scipy
 
 from .. import _fft
-from ..backend import ArrayType, dispatch, to_device
+from ..backend import ArrayType, _to_host, dispatch
 from ..math import _phasor
 from .linear import iir_filter
 
@@ -198,7 +198,7 @@ def _fir_default_samples(num_taps: int, *, step: bool) -> int:
 def _max_pole_radius(kind: str, b: ArrayType, a: ArrayType | None) -> float:
     """Largest pole magnitude from the denominator coefficients."""
     if kind == "sos":
-        dens = np.asarray(to_device(b[:, 3:], "cpu"))
+        dens = _to_host(b[:, 3:])
         dens = dens.astype(
             np.complex128 if np.iscomplexobj(dens) else np.float64, copy=False
         )
@@ -211,7 +211,7 @@ def _max_pole_radius(kind: str, b: ArrayType, a: ArrayType | None) -> float:
                 max_r = max(max_r, float(np.max(np.abs(roots))))
         return max_r
     assert a is not None
-    den = np.asarray(to_device(a, "cpu"))
+    den = _to_host(a)
     den = den.astype(np.complex128 if np.iscomplexobj(den) else np.float64, copy=False)
     if not np.all(np.isfinite(den)):
         return float("nan")
@@ -279,12 +279,12 @@ def _time_response(system: Any, num_samples: int | None, step: bool) -> ArrayTyp
     # their state transitions read float64 host sections; tf2sos is SciPy's
     # root finding): a few coefficients, while x stays on its device.
     if kind == "sos":
-        sos = np.asarray(to_device(b, "cpu"), dtype=np.float64)
+        sos = _to_host(b, np.float64)
         sos = sos / sos[:, 3:4]
     else:
         sos = scipy.signal.tf2sos(
-            np.asarray(to_device(b, "cpu"), dtype=np.float64),
-            np.asarray(to_device(a, "cpu"), dtype=np.float64),
+            _to_host(b, np.float64),
+            _to_host(a, np.float64),
         )
     # iir_filter keeps the sections and the state in double precision, which
     # poles near z = 1 need, and the samples in their own precision.

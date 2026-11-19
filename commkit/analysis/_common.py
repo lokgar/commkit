@@ -9,7 +9,7 @@ import numpy as np
 from scipy.optimize import nnls
 from scipy.stats import chi2
 
-from ..backend import to_device
+from ..backend import _to_host
 
 __all__ = [
     "_BETA_SLOPE",
@@ -283,7 +283,7 @@ def _increment_variance_fit(y2, lags, dt: float, xp):
     var = xp.stack(
         [xp.var(y2[:, int(a) :] - y2[:, : -int(a)], axis=-1) for a in lags], axis=0
     )  # (n_lag, C)
-    var_cpu = np.asarray(to_device(var, "cpu"), dtype=np.float64)
+    var_cpu = _to_host(var, np.float64)
     x_sec = np.asarray(lags, dtype=np.float64) * float(dt)
     coeffs = np.polyfit(x_sec, var_cpu, 1)  # (2, C): [slope, intercept]
     return coeffs[0], coeffs[1], var_cpu, x_sec

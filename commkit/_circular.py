@@ -11,7 +11,7 @@ delay.
 import numpy as np
 
 from . import _fft
-from .backend import ArrayType, dispatch, to_device
+from .backend import ArrayType, _to_host, dispatch
 
 
 def circular_kernel(
@@ -36,7 +36,7 @@ def circular_kernel(
     numpy.ndarray
         Kernel ``(length,)`` with the dtype of ``taps``.
     """
-    h = np.asarray(to_device(taps, "cpu"))
+    h = _to_host(taps)
     kernel = np.zeros(length, dtype=h.dtype)
     c = (h.size - 1) // 2 if center is None else center
     idx = (np.arange(h.size) - c) % length

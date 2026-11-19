@@ -23,7 +23,7 @@ import numpy as np
 from .._array import as_2d, restore_1d, warn_if_double
 from .._fft import fft
 from .._interpolation import interpolate_piecewise
-from ..backend import ArrayType, dispatch, to_device
+from ..backend import ArrayType, _to_host, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal, require_integer_sps
 from ..core.signal import Signal
 from ..logger import logger
@@ -545,7 +545,7 @@ def correct_sampling_clock_offset(
         )
         y = _resample_on_strobes(x, pos, sps_int)
     else:
-        ppm = np.atleast_1d(np.asarray(to_device(how.value, "cpu"), dtype=np.float64))
+        ppm = np.atleast_1d(_to_host(how.value, np.float64))
         if ppm.size not in (1, x.shape[0]):
             raise ValueError(
                 f"{function_name}: the estimate has {ppm.size} values for "

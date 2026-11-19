@@ -218,16 +218,13 @@ class TestDeviceReduction:
                 sizes.append(int(data.size))
             return real(data, device)
 
-        import commkit.plotting.analysis as analysis
-        import commkit.plotting.frequency as frequency
         import commkit.plotting.recovery as recovery
-        import commkit.plotting.theme as theme
 
+        # backend._to_host, the plots' host copy, calls backend.to_device;
+        # the recovery plots also call it directly.
         with (
-            patch.object(theme, "to_device", counting),
+            patch.object(backend, "to_device", counting),
             patch.object(recovery, "to_device", counting),
-            patch.object(frequency, "to_device", counting),
-            patch.object(analysis, "to_device", counting),
         ):
             self._cases(xp)[case]()
         plt.close("all")

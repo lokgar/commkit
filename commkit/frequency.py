@@ -23,7 +23,7 @@ import numpy as np
 from . import _fft
 from ._array import as_2d, broadcast_channels, restore_1d
 from ._peaks import parabolic_peak_offset
-from .backend import ArrayType, dispatch, to_device
+from .backend import ArrayType, _to_host, dispatch, to_device
 from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .core.signal import Signal
 from .logger import logger
@@ -560,7 +560,7 @@ def _mengali_morelli(
 
     # The bootstrap is a sequential scan over the lags; one transfer, then one
     # Numba call over all rows.
-    R_np = np.asarray(to_device(R_rows, "cpu"))
+    R_np = _to_host(R_rows)
     amp = np.abs(R_np)
     values = _get_numba_mm_bootstrap()(np.angle(R_np), amp, float(M), float(fs))
     weights = np.sum(amp**2, axis=-1)

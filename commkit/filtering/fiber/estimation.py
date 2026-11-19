@@ -25,7 +25,7 @@ from ..._dispersion import (
     beta2_length,
     spread_samples,
 )
-from ...backend import ArrayType, dispatch, to_device
+from ...backend import ArrayType, _to_host, dispatch, to_device
 from ...core._signal_adapter import (
     SignalAdapter,
     adapt_signal,
@@ -373,7 +373,7 @@ def _clock_tone(
     scan_plus = _fft.ifft(plus, n=size, axis=-1) * shift
     scan_minus = _fft.fft(minus, n=size, axis=-1) * xp.conj(shift)
     metric = xp.sum(xp.abs(scan_plus) ** 2 + xp.abs(scan_minus) ** 2, axis=0)
-    metric_cpu = np.asarray(to_device(metric, "cpu"), dtype=np.float64)
+    metric_cpu = _to_host(metric, np.float64)
     lag = np.arange(size)
     lag[lag >= size // 2] -= size
     tau = lag * nfft / (size * sampling_rate)  # s: β₂L·Ω
@@ -516,7 +516,7 @@ def _quadratic_phase_pass(
         average = xp.sum(cross * xp.exp(-1j * phase)[..., None], axis=1)
     response = average / xp.maximum(power, xp.finfo(power.dtype).tiny)
     diff = xp.sum(response[:, 1:] * xp.conj(response[:, :-1]) * power[:, 1:], axis=0)
-    diff = np.asarray(to_device(diff, "cpu"), dtype=np.complex128)
+    diff = _to_host(diff, np.complex128)
     f = np.fft.fftfreq(nfft, d=1.0 / sampling_rate)
     d_omega = 2.0 * np.pi * sampling_rate / nfft
     omega = 2.0 * np.pi * f[:-1] + d_omega / 2.0

@@ -17,7 +17,7 @@ from .. import _cuda, _fft
 from .._array import as_2d, restore_1d
 from .._circular import convolve_periodic
 from .._overlap_save import ols_apply
-from ..backend import ArrayType, dispatch, to_device
+from ..backend import ArrayType, _to_host, dispatch
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
 from ..math import _next_pow2, normalize
@@ -774,7 +774,7 @@ def iir_filter(
     """
     signal_adapter = adapt_signal(samples, function_name="iir_filter()")
     x, xp, _ = dispatch(signal_adapter.array)
-    sos_np = np.asarray(to_device(sos, "cpu"), dtype=np.float64)
+    sos_np = _to_host(sos, np.float64)
     if sos_np.ndim != 2 or sos_np.shape[1] != 6:
         raise ValueError(
             f"iir_filter(): sos must have shape (n_sections, 6), got {sos_np.shape}."
