@@ -6,12 +6,20 @@ PLL loop gains and block-phase estimation, used by the method modules.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any
 
 import numpy as np
 
 from ..backend import ArrayType, to_device
 from ..core._signal_adapter import require_choice
+
+
+def _numba() -> ModuleType:
+    """``recovery._numba_loops``, imported (with Numba) on first use."""
+    from . import _numba_loops
+
+    return _numba_loops
 
 
 def _resolve_pll_gains(

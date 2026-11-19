@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from types import ModuleType
 from typing import Any
 
 import numpy as np
@@ -18,7 +17,7 @@ from ...logger import logger
 from ...mapping._lattice import slicer_params
 from ...math import _unit_phasor
 from ...recovery import BPS, CycleSlip
-from .._common import _cpr_symmetry
+from .._common import _cpr_symmetry, _numba
 from ..result import (
     EqualizerResult,
     EqualizerState,
@@ -34,18 +33,6 @@ from ._engine import (
     _fdaf_gradient_update,
     _prepare_block,
 )
-
-
-def _loops() -> ModuleType:
-    """``equalization._numba_loops``, imported (with Numba) on first use."""
-    from .. import _numba_loops
-
-    return _numba_loops
-
-
-def _get_numba_cs_block() -> Any:
-    """The cycle-slip repair of one block of the block equalizers."""
-    return _loops().cs_block
 
 
 @dataclass
@@ -300,7 +287,7 @@ class _BlockBps:
             else:
                 phi_blk_np = to_device(phi_f64, "cpu").astype(np.float64)  # (C, B)
                 phi_corr_np = phi_blk_np.copy()
-                _get_numba_cs_block()(
+                _numba().cs_block(
                     phi_blk_np,
                     phi_corr_np,
                     self.cs_buf_y,

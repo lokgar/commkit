@@ -19,7 +19,7 @@ from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
 from ..math import _remove_linear_trend
-from ._common import _Context
+from ._common import _Context, _numba
 from .estimates import CarrierPhaseEstimate
 
 __all__ = [
@@ -203,13 +203,6 @@ def smooth_phase(
     return restore_1d(was_1d, phi_s)
 
 
-def _get_numba_cycle_slip() -> Any:
-    """The cycle-slip repair kernel."""
-    from . import _numba_loops
-
-    return _numba_loops.cycle_slip
-
-
 def correct_cycle_slips(
     phase: np.ndarray,
     *,
@@ -265,7 +258,7 @@ def correct_cycle_slips(
     if phase.ndim not in (1, 2):
         raise ValueError(f"phase must be (B,) or (C, B), got shape {phase.shape}.")
     host = np.array(to_device(phase, "cpu"), dtype=np.float64, ndmin=2)  # a copy
-    out = _get_numba_cycle_slip()(host, int(symmetry), int(history), float(threshold))
+    out = _numba().cycle_slip(host, int(symmetry), int(history), float(threshold))
     return xp.asarray(out.reshape(phase.shape))
 
 

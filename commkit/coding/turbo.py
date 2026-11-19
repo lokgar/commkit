@@ -25,12 +25,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any
 
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from .base import _CODECS, _Code, _Codec, _Decoded
+from .base import _CODECS, _Code, _Codec, _Decoded, _numba
 from .convolutional import _Trellis, _trellis
 
 __all__ = ["TurboCode", "TurboIterations"]
@@ -188,18 +187,11 @@ class TurboIterations:
             raise ValueError(f"scale must be in (0, 1], got {self.scale}.")
 
 
-def _get_numba_turbo(name: str) -> Any:
-    """Numba RSC encoder and turbo decoder, parallel over blocks."""
-    from . import _numba_loops
-
-    return getattr(_numba_loops, f"turbo_{name}")
-
-
 def _encode(code: TurboCode, bits: ArrayType) -> ArrayType:
     _, xp, _ = dispatch(bits)
     host = np.ascontiguousarray(to_device(bits, "cpu"), dtype=np.int8)
     out = np.empty((host.shape[0], code.n), dtype=np.int8)
-    _get_numba_turbo("encode")(
+    _numba().turbo_encode(
         host, code.interleaver, _RSC.next, _RSC.outputs, _RSC.tail, out
     )
     return to_device(out, "cpu" if xp is np else "gpu")
@@ -217,7 +209,7 @@ def _decode(code: TurboCode, llrs: ArrayType, method: TurboIterations) -> _Decod
     bits = np.empty((rows, code.k), dtype=np.int8)
     app = np.empty((rows, code.n), dtype=np.float32)
     used = np.empty(rows, dtype=np.int32)
-    _get_numba_turbo("decode")(
+    _numba().turbo_decode(
         host, code.interleaver, _RSC.next, _RSC.outputs, _RSC.tail, method.max_iterations,
         method.method == "exact", scale, bits, app, used,
     )  # fmt: skip

@@ -37,6 +37,7 @@ from .base import (
     _Decoded,
     _encode_blocks,
     _hard,
+    _numba,
     _resolve_method,
 )
 
@@ -426,7 +427,7 @@ def _decode_ml(
         for w0 in range(0, num_words, words_chunk):
             u = unpack_bits(np.arange(w0, min(w0 + words_chunk, num_words)), k)
             words = matmul_mod2(u, g)
-            _get_numba_ml()(
+            _numba().ml_search(
                 x, 1.0 - 2.0 * words.astype(np.float32), words.astype(np.bool_), w0,
                 method.soft, best_metric, best, m0, m1,
             )  # fmt: skip
@@ -439,15 +440,6 @@ def _decode_ml(
         xp.ones(rows, dtype=bool),
         xp.ones(rows, dtype=np.int32),
     )
-
-
-def _get_numba_ml() -> Any:
-    """Numba maximum-likelihood search over a chunk of codewords, parallel over
-    rows: each row's correlations with the chunk, its best codeword, and per
-    bit the best correlation with the bit 0 and with it 1."""
-    from . import _numba_loops
-
-    return _numba_loops.ml_search
 
 
 def _ml_gemm(

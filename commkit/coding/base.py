@@ -20,6 +20,7 @@ import dataclasses
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -27,6 +28,14 @@ import numpy as np
 from .._array import as_2d, restore_1d, validate_array, warn_if_double
 from ..backend import ArrayType, get_array_module, to_device
 from ..logger import logger
+
+
+def _numba() -> ModuleType:
+    """``coding._numba_loops``, imported (with Numba) on first use."""
+    from . import _numba_loops
+
+    return _numba_loops
+
 
 __all__ = ["DecodeResult", "decode", "encode"]
 

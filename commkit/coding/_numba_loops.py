@@ -7,11 +7,7 @@ list decoding (:func:`polar_scl`), Viterbi and BCJR on a trellis
 decoding (:func:`turbo_encode`, :func:`turbo_decode`), algebraic
 decoding from the syndromes (:func:`algebraic_correct`) and the CCDM
 (:func:`ccdm_match`, :func:`ccdm_dematch`).  Imported on first use through
-the ``_get_numba_*`` getters of :mod:`~commkit.coding.ldpc`,
-:mod:`~commkit.coding.polar`, :mod:`~commkit.coding.convolutional`,
-:mod:`~commkit.coding.turbo`, :mod:`~commkit.coding.algebraic` and
-:mod:`~commkit.coding.shaping`, which
-document each kernel, so ``import commkit`` does not load Numba.
+``coding.base._numba()``, so ``import commkit`` does not load Numba.
 
 The kernels sit at module level so that Numba's disk cache holds them: a
 kernel built inside a function and calling another kernel built there
@@ -115,7 +111,13 @@ def ldpc_layered(
     app, row_ptr, cols, sum_product, scale, offset, max_iterations,
     early_stop, iters, valid,
 ):  # fmt: skip
-    """Layered LDPC decoding of the rows of ``app`` in place (see ``_get_numba_ldpc``)."""
+    """Layered LDPC decoding of the rows of ``app`` in place.
+
+    Rows run in the schedule's order, each in the two passes of the CUDA
+    kernel (``ldpc.cu``), compiled without fast-math so min-sum matches the
+    kernel bit for bit.  ``app`` holds the channel LLRs on entry and the
+    a-posteriori LLRs on exit.
+    """
     m = row_ptr.shape[0] - 1
     for b in numba.prange(app.shape[0]):
         a = app[b]
@@ -246,7 +248,15 @@ def ascend(beta, scratch, i, bit, levels):
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def polar_scl(llrs, frozen, list_size, crc_g, crc_c, info, k_info, out_u, valid):
-    """SC list decoding of the rows of ``llrs``, CRC-aided when ``crc_g`` is not empty."""
+    """SC list decoding of the rows of ``llrs``, CRC-aided when ``crc_g`` is not empty.
+
+    ``list_size = 1`` is SC.  Per path: ``alpha`` (LLRs) and ``beta``
+    (partial sums of left children) in level order, offset ``2^s`` for level
+    ``s``; ``u`` the decisions and ``pm`` the path metric.  Bit ``i``
+    recomputes the LLRs from level ``ctz(i) + 1`` (``n`` for ``i = 0``)
+    down: ``g`` with the left child's partial sums where bit ``s - 1`` of
+    ``i`` is 1, ``f`` (min-sum) where it is 0.
+    """
     rows, n = llrs.shape
     levels = 0
     while (1 << levels) < n:
@@ -461,7 +471,10 @@ def tail_biting_start(llr, nxt, outputs, cur, new):
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def viterbi(llrs, nxt, outputs, tail_biting, info_steps, out_bits):
-    """Viterbi decoding of the rows of ``llrs`` (see ``_get_numba_trellis``).
+    """Viterbi decoding of the rows of ``llrs`` over a trellis's tables.
+
+    Maximizes ``sum (1 - 2 c) L`` over paths from state 0 back to state 0,
+    or once per start state when ``tail_biting`` (start and end equal).
 
     Tail-biting decoding scores every start state (ending in the same
     state) without decisions, then records them for the best start only.
@@ -625,7 +638,13 @@ def bcjr_outputs(nxt, outputs, exact, app_c, alpha, beta, gamma):
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def bcjr_blocks(llrs, nxt, outputs, tail, forced, start, end, exact, app_u, app_c):
-    """BCJR over the rows of ``llrs``, without a-priori information."""
+    """BCJR over the rows of ``llrs``, without a-priori information.
+
+    The step :func:`bcjr` is shared with the turbo decoder: per step a
+    channel LLR for each output and an a-priori LLR for the input,
+    ``forced[t]`` steps (termination tails) taking the tail input only.  It
+    returns the a-posteriori LLRs of the inputs and of the outputs.
+    """
     steps = llrs.shape[1]
     states = nxt.shape[0]
     apriori = np.zeros(steps)
@@ -659,7 +678,7 @@ def rsc(bits, nxt, outputs, tail, parity, tail_bits):
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def turbo_encode(bits, pi, nxt, outputs, tail, out):
-    """LTE turbo encoding of the rows of ``bits`` (see ``_get_numba_turbo``)."""
+    """LTE turbo encoding of the rows of ``bits`` (two RSC encoders)."""
     k = bits.shape[1]
     for row in numba.prange(bits.shape[0]):
         p1 = np.empty(k, dtype=np.int8)
@@ -698,7 +717,7 @@ def turbo_decode(
     out_llrs,
     iterations,
 ):
-    """Iterative turbo decoding of the rows of ``llrs`` (see ``_get_numba_turbo``).
+    """Iterative turbo decoding of the rows of ``llrs``.
 
     A row stops after the first iteration whose two decoders take the same
     hard decision on every information bit, or after ``max_iterations``;
@@ -824,6 +843,13 @@ def gf_eval(coef, count, x_log, exp, log, q1):
 def algebraic_correct(
     s, exp, log, locator_logs, t, first_root, m, binary, words, valid
 ):
+    """Correct the hard words of BCH or Reed-Solomon codes from their syndromes.
+
+    Per word: Berlekamp-Massey, a Chien search over the positions that stops
+    at the locator's degree, and for Reed-Solomon Forney's formula at the
+    roots; the word is corrected in place, or left as received where
+    decoding fails.  The CPU reference of ``algebraic.cu``.
+    """
     q1 = exp.shape[0] // 2 - 1  # exp is doubled: 2q entries
     width = 2 * t + 1
     for row in numba.prange(s.shape[0]):
@@ -935,7 +961,15 @@ def ccdm_shares(counts, rng, remaining, shares):
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def ccdm_match(bits, composition, out):
-    """Match the rows of ``bits`` to point indices of the composition (range coder)."""
+    """Match the rows of ``bits`` to point indices of the composition.
+
+    A range coder.  The interval of the current prefix is
+    ``[low, low + range 2^-S)``; ``range`` is kept in ``[2^31, 2^32)`` by
+    doubling it (``S += 1``).  Splitting gives point ``i`` the share
+    ``floor(range c_i / n_rem)``, plus the remainder for the most frequent
+    point (lowest index among equals).  The matcher tracks
+    ``D = floor((v - low) 2^S)`` for its input point ``v``.
+    """
     k = bits.shape[1]
     n = out.shape[1]
     for b in numba.prange(bits.shape[0]):
@@ -981,7 +1015,11 @@ def low_bit(low, j):
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def ccdm_dematch(symbols, composition, buffer_bits, bits, valid):
-    """Dematch the rows of ``symbols`` back to bits, flagging invalid rows."""
+    """Dematch the rows of ``symbols`` back to bits, flagging invalid rows.
+
+    The range coder of :func:`ccdm_match`, accumulating ``low`` exactly in a
+    bit array and rounding it up to ``k`` bits.
+    """
     k = bits.shape[1]
     n = symbols.shape[1]
     for b in numba.prange(symbols.shape[0]):

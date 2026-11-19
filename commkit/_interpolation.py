@@ -24,12 +24,20 @@ samples' real precision, shared by the channels that share the instant.
 Both return the input's dtype on its device.
 """
 
-from typing import Any
+from types import ModuleType
 
 import numpy as np
 
 from ._cuda import get_kernel
 from .backend import ArrayType, dispatch
+
+
+def _numba() -> ModuleType:
+    """``_numba_interpolation``, imported (with Numba) on first use."""
+    from . import _numba_interpolation
+
+    return _numba_interpolation
+
 
 # Half-width of the interpolator (2·HALF_WIDTH taps).  Measured error of a
 # complex tone: below -119 dB up to 0.4 cycles per sample (80 % of the
@@ -41,13 +49,6 @@ HALF_WIDTH = 24
 BLACKMAN_HARRIS = (0.35875, 0.48829, 0.14128, 0.01168)
 
 
-def _get_numba_interpolation() -> Any:
-    """The CPU kernels."""
-    from . import _numba_interpolation
-
-    return _numba_interpolation
-
-
 def interpolate_at(x: ArrayType, base: ArrayType, frac: ArrayType) -> ArrayType:
     """``x`` ``(C, N)`` at the instants ``base + frac``: ``base`` ``(M,)`` int64,
     ``frac`` ``(M,)`` in ``[0, 1)`` in ``x``'s real dtype; ``base`` may lie
@@ -55,7 +56,7 @@ def interpolate_at(x: ArrayType, base: ArrayType, frac: ArrayType) -> ArrayType:
     x, xp, _ = dispatch(x)
     if xp is np:
         out = np.empty((x.shape[0], base.shape[0]), dtype=x.dtype)
-        kernels = _get_numba_interpolation()
+        kernels = _numba()
         re, im, write_imag = _parts(out)
         kernels.interp_at(x, base, frac, HALF_WIDTH, re, im, write_imag)
         return out
@@ -72,7 +73,7 @@ def interpolate_piecewise(x: ArrayType, knots: np.ndarray, sub: int) -> ArrayTyp
     if xp is np:
         out = np.empty((x.shape[0], sub * (knots.shape[1] - 1)), dtype=x.dtype)
         if out.size:
-            kernels = _get_numba_interpolation()
+            kernels = _numba()
             re, im, write_imag = _parts(out)
             kernels.interp_piecewise(x, knots, sub, HALF_WIDTH, re, im, write_imag)
         return out

@@ -38,7 +38,7 @@ from ..backend import ArrayType, _device_tables, _to_host, dispatch
 from ..logger import logger
 from ._gf2 import inverse, matmul_mod2, rank, row_reduce
 from ._ldpc_tables import DVBS2, PON_BASE
-from .base import _CODECS, _Code, _Codec, _Decoded
+from .base import _CODECS, _Code, _Codec, _Decoded, _numba
 
 __all__ = ["LDPCCode", "MinSum", "SumProduct"]
 
@@ -546,7 +546,7 @@ def _decode(code: LDPCCode, llrs: ArrayType, method: MinSum | SumProduct) -> _De
     if xp is np:
         iters = np.empty(rows, dtype=np.int32)
         valid = np.empty(rows, dtype=np.bool_)
-        _get_numba_ldpc()(
+        _numba().ldpc_layered(
             app,
             row_ptr,
             cols,
@@ -582,19 +582,6 @@ def _decode(code: LDPCCode, llrs: ArrayType, method: MinSum | SumProduct) -> _De
         (info_dev,) = _device_tables(code, "info", xp, lambda: (info,))
         bits = (app[:, info_dev] < 0).astype(np.int8)
     return _Decoded(bits, app[:, : code.n], valid, iters)
-
-
-def _get_numba_ldpc() -> Any:
-    """Numba layered decoder for the CPU, parallel over codewords.
-
-    Rows run in the schedule's order, each in the two passes of the CUDA
-    kernel (``ldpc.cu``), compiled without fast-math so min-sum matches the
-    kernel bit for bit.  ``app`` holds the channel LLRs on entry and the
-    a-posteriori LLRs on exit.
-    """
-    from . import _numba_loops
-
-    return _numba_loops.ldpc_layered
 
 
 _CODECS[LDPCCode] = _Codec(

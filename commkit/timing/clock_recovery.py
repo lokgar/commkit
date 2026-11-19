@@ -16,6 +16,7 @@ trajectory ``τ_k`` is the strobe of symbol ``k`` minus ``k``, so its slope is
 import logging
 import math
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any, Literal
 
 import numpy as np
@@ -27,6 +28,14 @@ from ..backend import ArrayType, _to_host, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal, require_integer_sps
 from ..core.signal import Signal
 from ..logger import logger
+
+
+def _numba() -> ModuleType:
+    """``timing._numba_loops``, imported (with Numba) on first use."""
+    from . import _numba_loops
+
+    return _numba_loops
+
 
 __all__ = [
     "Gardner",
@@ -52,20 +61,6 @@ _MIN_CURVE_AMPLITUDE = 1e-3
 # that window up to the bandwidths where slips begin; a slip moves it by 1.
 _SLIP_WINDOW = 8.0
 _SLIP_THRESHOLD = 0.75
-
-
-def _get_numba_gardner() -> Any:
-    """The tracking loop."""
-    from . import _numba_loops
-
-    return _numba_loops.gardner_loop
-
-
-def _get_numba_ted_curve() -> Any:
-    """The open-loop detector means."""
-    from . import _numba_loops
-
-    return _numba_loops.ted_curve
 
 
 @dataclass(frozen=True)
@@ -255,7 +250,7 @@ def _track(
         num_cal, max(_CAL_MIN_BLOCK, int(_CAL_DRIFT / (how.max_offset_ppm * 1e-6)))
     )
     offsets = np.arange(_CAL_OFFSETS) / _CAL_OFFSETS
-    curves = _get_numba_ted_curve()(
+    curves = _numba().ted_curve(
         xn, pad, float(sps), offsets, block, num_cal // block, power
     )
     if how.joint_channels:
@@ -272,7 +267,7 @@ def _track(
     rows = curves.shape[0]
     nu_max = how.max_offset_ppm * 1e-6
     gains = np.array([how.gains(float(g)) for g in kd])
-    pos, err, count = _get_numba_gardner()(
+    pos, err, count = _numba().gardner_loop(
         xn,
         pad,
         float(sps),

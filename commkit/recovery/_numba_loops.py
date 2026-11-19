@@ -6,9 +6,8 @@ metrics of :class:`~commkit.recovery.BPS` (a search over the table, or the
 O(1) slicer of square QAM), the Rauch-Tung-Striebel smoother of
 :class:`~commkit.recovery.Tikhonov` and the cycle-slip repair of
 :func:`~commkit.recovery.correct_cycle_slips`.  Imported on first use
-through the ``_get_numba_*`` getters of ``recovery/pll.py``,
-``recovery/bps.py``, ``recovery/tikhonov.py`` and
-``recovery/corrections.py``, so ``import commkit`` does not load Numba.
+through ``recovery._common._numba()``, so ``import commkit`` does not load
+Numba.
 
 Phases, loop state and smoother state are float64; symbols are read in
 their own precision and widened as they are read.

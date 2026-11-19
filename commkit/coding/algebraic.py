@@ -39,7 +39,7 @@ from .._bits import pack_bits
 from ..backend import ArrayType, _device_tables, dispatch
 from ._galois import PRIMITIVE, _Field
 from ._gf2 import matmul_mod2
-from .base import _CODECS, _Code, _Codec, _Decoded, _hard, _resolve_method
+from .base import _CODECS, _Code, _Codec, _Decoded, _hard, _numba, _resolve_method
 from .crc import _remainders
 from .linear import Chase, _decode_chase, _HardWords
 
@@ -418,7 +418,7 @@ def _correct(code: Any, hard: ArrayType) -> tuple[ArrayType, ArrayType]:
         words = np.array(hard, dtype=np.int8, order="C")
         valid = np.empty(rows, dtype=np.bool_)
         exp, log = f._tables
-        _get_numba_algebraic()(
+        _numba().algebraic_correct(
             s, exp, log, code._locator_logs, t, code.first_root, bits, code.binary,
             words, valid,
         )  # fmt: skip
@@ -434,19 +434,6 @@ def _correct(code: Any, hard: ArrayType) -> tuple[ArrayType, ArrayType]:
         binary=code.binary,
     )  # fmt: skip
     return words, valid
-
-
-def _get_numba_algebraic() -> Any:
-    """Numba decoder from the syndromes for the CPU, parallel over words.
-
-    Per word: Berlekamp-Massey, a Chien search over the positions that
-    stops at the locator's degree, and for Reed-Solomon Forney's formula
-    at the roots; the word is corrected in place, or left as received
-    where decoding fails.  The CPU reference of ``algebraic.cu``.
-    """
-    from . import _numba_loops
-
-    return _numba_loops.algebraic_correct
 
 
 def _decode_bch(code: BCHCode, llrs: ArrayType, method: Any) -> _Decoded:

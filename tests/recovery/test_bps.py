@@ -194,7 +194,7 @@ class TestBPSNumbaTable:
 
     @pytest.mark.parametrize("dtype", [np.complex64, np.complex128])
     def test_block_metric_matches_brute_force(self, dtype):
-        from commkit.recovery.bps import _get_numba_bps_table
+        from commkit.recovery._common import _numba
 
         rng = np.random.default_rng(5)
         points = Constellation.qam(32).points
@@ -207,7 +207,7 @@ class TestBPSNumbaTable:
         ph = np.exp(-1j * theta)
         real = np.float32 if dtype == np.complex64 else np.float64
         out = np.empty((C, n_blocks, B))
-        _get_numba_bps_table()(
+        _numba().bps_table(
             np.ascontiguousarray(x.real, real),
             np.ascontiguousarray(x.imag, real),
             ph.real.astype(real),

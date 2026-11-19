@@ -4,8 +4,8 @@
 :mod:`commkit.equalization`.  ``_dd.py`` holds the trained and
 decision-directed ones (``lms``, ``rls``), ``_blind.py`` the blind ones
 (``cma``, ``rde``) and ``_setup.py`` their shared front end and result
-assembly; the kernels are in ``commkit/equalization/_numba_loops.py``, each
-fetched by a ``_get_numba_*`` getter in the module that calls it.
+assembly; the kernels are in ``commkit/equalization/_numba_loops.py``,
+reached through ``equalization._common._numba()``.
 """
 
 from __future__ import annotations

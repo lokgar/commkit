@@ -16,6 +16,7 @@ what a method estimates.
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any
 
 import numpy as np
@@ -30,12 +31,11 @@ from .logger import logger
 from .math import _derotate, _linear_trend_slope, _next_pow2
 
 
-def _get_numba_mm_bootstrap() -> Callable[..., np.ndarray]:
-    """The Mengali-Morelli bootstrap kernel."""
+def _numba() -> ModuleType:
+    """``_numba_frequency``, imported (with Numba) on first use."""
     from . import _numba_frequency
 
-    kernel: Callable[..., np.ndarray] = _numba_frequency.mm_bootstrap
-    return kernel
+    return _numba_frequency
 
 
 __all__ = [
@@ -555,7 +555,7 @@ def _mengali_morelli(
     # Numba call over all rows.
     R_np = _to_host(R_rows)
     amp = np.abs(R_np)
-    values = _get_numba_mm_bootstrap()(np.angle(R_np), amp, float(M), float(fs))
+    values = _numba().mm_bootstrap(np.angle(R_np), amp, float(M), float(fs))
     values, weights = xp.asarray(values), xp.asarray(np.sum(amp**2, axis=-1))
     if not shared_rows:
         return FrequencyOffsetEstimate(values, weights)

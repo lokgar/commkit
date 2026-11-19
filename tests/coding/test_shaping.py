@@ -17,7 +17,8 @@ from commkit.coding import (
     decode,
     encode,
 )
-from commkit.coding.shaping import _composition, _get_numba_ccdm
+from commkit.coding.base import _numba
+from commkit.coding.shaping import _composition
 from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation
 from tests.common.coding import random_bits
@@ -129,7 +130,7 @@ class TestCCDM:
         symbols = cc._match(to_device(random_bits(cc.k, np, seed=3), "cpu")[None])
         bits = np.empty((1, cc.k), dtype=np.int8)
         valid = np.empty(1, dtype=np.bool_)
-        dematch = _get_numba_ccdm("dematch")
+        dematch = _numba().ccdm_dematch
         dematch(symbols, cc.composition, cc._buffer_bits, bits, valid)
         assert valid[0]
         dematch(symbols, cc.composition, cc.k + 1, bits, valid)

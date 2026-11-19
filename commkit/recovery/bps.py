@@ -9,7 +9,7 @@ from ..backend import ArrayType, dispatch
 from ..logger import logger
 from ..mapping._lattice import slicer_params
 from ..math import normalize
-from ._common import _Context, _interp_block_phases, _num_blocks
+from ._common import _Context, _interp_block_phases, _num_blocks, _numba
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 from .estimates import BlockPhaseEstimate
 
@@ -66,20 +66,6 @@ class BPS:
             raise ValueError(f"BPS: test_phases must be >= 1, got {self.test_phases}.")
         if self.block_size < 1:
             raise ValueError(f"BPS: block_size must be >= 1, got {self.block_size}.")
-
-
-def _get_numba_bps_table() -> Any:
-    """The BPS block metric, nearest point by a search over the table."""
-    from . import _numba_loops
-
-    return _numba_loops.bps_table
-
-
-def _get_numba_bps_grid() -> Any:
-    """The BPS block metric of square QAM, nearest point by the O(1) slicer."""
-    from . import _numba_loops
-
-    return _numba_loops.bps_grid
 
 
 def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> BlockPhaseEstimate:
@@ -256,12 +242,10 @@ def _bps_metrics_numba(
         np.ascontiguousarray(phasors.imag, dtype=real),
     )
     if side > 0:
-        _get_numba_bps_grid()(
-            *data, real(lev_min), real(d_grid), side, block_size, metrics
-        )
+        _numba().bps_grid(*data, real(lev_min), real(d_grid), side, block_size, metrics)
     else:
         points = np.asarray(constellation.points, dtype=np.complex128)
-        _get_numba_bps_table()(
+        _numba().bps_table(
             *data,
             np.ascontiguousarray(points.real, dtype=real),
             np.ascontiguousarray(points.imag, dtype=real),

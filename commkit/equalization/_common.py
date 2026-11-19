@@ -6,6 +6,7 @@ sequential and the block equalizers.
 
 from __future__ import annotations
 
+from types import ModuleType
 from typing import Any
 
 import numpy as np
@@ -16,6 +17,14 @@ from ..core._signal_adapter import require_integer_sps
 from ..logger import logger
 from ..math import rms
 from .result import EqualizerResult, EqualizerState
+
+
+def _numba() -> ModuleType:
+    """``equalization._numba_loops``, imported (with Numba) on first use."""
+    from . import _numba_loops
+
+    return _numba_loops
+
 
 # -----------------------------------------------------------------------------
 # SHARED HELPERS

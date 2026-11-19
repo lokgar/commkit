@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from types import ModuleType
 from typing import Any
 
 import numpy as np
@@ -16,6 +15,7 @@ from ...core.signal import Signal
 from ...logger import logger
 from ...mapping._lattice import slicer_params
 from ...recovery import BPS, PLL
+from .._common import _numba
 from ..result import (
     EqualizerResult,
     EqualizerState,
@@ -31,30 +31,6 @@ from ._setup import (
     _run_resumable,
     _Snapshot,
 )
-
-
-def _loops() -> ModuleType:
-    """``equalization._numba_loops``, imported (with Numba) on first use."""
-    from .. import _numba_loops
-
-    return _numba_loops
-
-
-def _get_numba_lms() -> Any:
-    """Decision-directed LMS."""
-    return _loops().lms_loop
-
-
-def _get_numba_rls() -> Any:
-    """Decision-directed RLS."""
-    return _loops().rls_loop
-
-
-def _get_numba_cpr() -> Any:
-    """LMS or RLS with inline carrier recovery (PLL or BPS) and cycle-slip
-    repair."""
-    return _loops().cpr_loop
-
 
 # -----------------------------------------------------------------------------
 # ADAPTIVE equalization
@@ -330,7 +306,7 @@ def lms(
         def segment(start: int, stop: int) -> None:
             """Run the LMS kernel over symbols ``start`` to ``stop``."""
             x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
-            _get_numba_lms()(
+            _numba().lms_loop(
                 x,
                 train,
                 constellation_np,
@@ -362,7 +338,7 @@ def lms(
         def segment(start: int, stop: int) -> None:
             """Run LMS with inline carrier recovery from ``start`` to ``stop``."""
             x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
-            _get_numba_cpr()(
+            _numba().cpr_loop(
                 x,
                 train,
                 constellation_np,
@@ -633,7 +609,7 @@ def rls(
         def segment(start: int, stop: int) -> None:
             """Run the RLS kernel over symbols ``start`` to ``stop``."""
             x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
-            _get_numba_rls()(
+            _numba().rls_loop(
                 x,
                 train,
                 constellation_np,
@@ -668,7 +644,7 @@ def rls(
         def segment(start: int, stop: int) -> None:
             """Run RLS with inline carrier recovery from ``start`` to ``stop``."""
             x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
-            _get_numba_cpr()(
+            _numba().cpr_loop(
                 x,
                 train,
                 constellation_np,

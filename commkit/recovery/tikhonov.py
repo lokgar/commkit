@@ -16,6 +16,7 @@ from ._common import (
     _interp_block_phases,
     _mth_power_geometry,
     _num_blocks,
+    _numba,
     _vv_block_phase,
 )
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
@@ -23,13 +24,6 @@ from .estimates import BlockPhaseEstimate
 from .viterbi_viterbi import _warn_small_qam_block
 
 __all__ = ["Tikhonov"]
-
-
-def _get_numba_rts_smoother() -> Any:
-    """The Rauch-Tung-Striebel smoother kernel."""
-    from . import _numba_loops
-
-    return _numba_loops.rts_smoother
 
 
 def _sskf_smoother_1d(
@@ -69,7 +63,7 @@ def _sskf_smoother_1d(
     # filtfilt requires at least padlen * 2 + 1 samples; padlen = 3 * max(len(b), len(a)) = 6
     if len(phi_obs) < 7:
         phi_np = to_device(phi_obs, "cpu")
-        rts = _get_numba_rts_smoother()
+        rts = _numba().rts_smoother
         return xp.asarray(rts(phi_np, float(sigma_p2), float(sigma_v2)))
 
     # Steady-state prediction error covariance from discrete Riccati equation:
@@ -218,7 +212,7 @@ def _tikhonov(
 
     if method.smoother == "rts":
         phi_u_np = to_device(phi_u, "cpu")  # (R, N_blocks) float64
-        rts = _get_numba_rts_smoother()
+        rts = _numba().rts_smoother
         phi_smooth = xp.asarray(
             np.stack([rts(row, float(sigma_p2), float(sigma_v2)) for row in phi_u_np])
         )

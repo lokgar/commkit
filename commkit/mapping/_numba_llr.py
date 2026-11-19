@@ -1,12 +1,22 @@
 """Numba kernels of :func:`commkit.mapping.compute_llr` (private).
 
-The CPU LLR kernels, parallel over blocks of symbols, documented by the
-getter ``_get_numba_llr`` of ``commkit.mapping._demap``: :func:`llr_kernel`
-(the metrics of every point), :func:`llr_separable_kernel` (the metrics of
-the levels of each axis) and :func:`llr_separable_maxlog_kernel` (the
-closed form).  Imported on first use, so ``import commkit`` does not load
-Numba; at module level, so Numba's disk cache holds the kernels, which
-call each other's helpers.
+The CPU LLR kernels, parallel over blocks of symbols, in float32 as the GPU
+paths: :func:`llr_kernel` computes per symbol the M metrics
+``m = -|x - s|^2 / sigma^2 + log P(s)``, :func:`llr_separable_kernel` the
+sqrt(M) metrics of each axis of a separable constellation, and
+:func:`llr_separable_maxlog_kernel` the closed-form max-log LLRs of a
+uniform separable constellation (see ``commkit.mapping._demap``), 1 + 2k
+metrics per axis.  The first two take each bit's LLR from the metrics of
+the points whose bit is 0 and of those whose bit is 1:
+
+- max-log: the max over the first minus the max over the second;
+- exact: sums of ``e = exp(m - peak)``, computed once per point with the
+  symbol's peak metric (which cancels in the difference), so one
+  exponential per point instead of one per point and bit.
+
+Imported on first use through the ``_numba()`` of ``commkit.mapping._demap``,
+so ``import commkit`` does not load Numba; at module level, so Numba's disk
+cache holds the kernels, which call each other's helpers.
 """
 
 import numba
@@ -94,7 +104,7 @@ def llr_kernel(
     exact: bool,
     out: np.ndarray,
 ) -> None:
-    """LLRs from the metrics of every point (see ``_get_numba_llr``)."""
+    """LLRs from the metrics of every point (see the module docstring)."""
     n = x_re.shape[0]
     M = c_re.shape[0]
     k = idx.shape[1]
