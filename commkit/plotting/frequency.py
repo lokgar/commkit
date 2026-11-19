@@ -11,7 +11,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..backend import _to_host, get_array_module
-from ..frequency import correct_frequency_offset
+from ..frequency import (
+    BlockwiseFrequencyEstimate,
+    MengaliMorelliEstimate,
+    MthPowerEstimate,
+    correct_frequency_offset,
+)
 from .theme import (
     _decimate_minmax,
     _device_channels,
@@ -88,10 +93,10 @@ def plot_mm_autocorrelation(
     panels = _select(
         quantity, ("magnitude", "phase"), label=label, xlim=xlim, ylim=ylim
     )
-    r = _require(
-        estimate, "autocorrelation", "plot_mm_autocorrelation()", "MengaliMorelli"
+    estimate = _require(
+        estimate, MengaliMorelliEstimate, "plot_mm_autocorrelation()", "MengaliMorelli"
     )
-    R = _device_channels(r)
+    R = _device_channels(estimate.autocorrelation)
     xp = get_array_module(R)
     f_ests = [float(f) for f in np.atleast_1d(_to_host(estimate.value))]
     M = estimate.power
@@ -199,10 +204,10 @@ def plot_frequency_offset_spectrum(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    spectrum = _require(
-        estimate, "spectrum", "plot_frequency_offset_spectrum()", "MthPower"
+    estimate = _require(
+        estimate, MthPowerEstimate, "plot_frequency_offset_spectrum()", "MthPower"
     )
-    mag_spectrum = _device_channels(spectrum)
+    mag_spectrum = _device_channels(estimate.spectrum)
     freqs = np.asarray(estimate.spectrum_frequencies, dtype=float)
     M = estimate.power
     f_estimates = [float(f) for f in np.atleast_1d(_to_host(estimate.value))]
@@ -315,12 +320,13 @@ def plot_frequency_offset_blockwise_result(
         quantity, ("frequency", "phase"), label=label, xlim=xlim, ylim=ylim
     )
 
-    centers = _require(
+    estimate = _require(
         estimate,
-        "block_centers",
+        BlockwiseFrequencyEstimate,
         "plot_frequency_offset_blockwise_result()",
         "a blockwise method (block_size=)",
     )
+    centers = estimate.block_centers
     # The probe lives on the estimate's device, as the samples it was made from.
     xp = get_array_module(estimate.block_values)
     rotation = correct_frequency_offset(

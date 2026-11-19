@@ -157,7 +157,9 @@ class TestDeviceReduction:
         from types import SimpleNamespace as NS
 
         from commkit import plotting
-        from commkit.recovery import PilotTone
+        from commkit.analysis import FrequencyDrift
+        from commkit.frequency import MengaliMorelliEstimate, MthPowerEstimate
+        from commkit.recovery import PilotTone, PilotToneEstimate
 
         n = TestDeviceReduction.N
         rng = np.random.default_rng(0)
@@ -174,24 +176,29 @@ class TestDeviceReduction:
                 phase, phase * 0.5, symbol_rate=1e9
             ),
             "drift": lambda: plotting.plot_frequency_drift(
-                NS(df=phase), sampling_rate=1e9
+                FrequencyDrift(df=phase, std=0.0, peak_to_peak=0.0, max_abs=0.0),
+                sampling_rate=1e9,
             ),
             "spectrum": lambda: plotting.plot_frequency_offset_spectrum(
-                NS(
-                    spectrum=xp.abs(phase),
-                    power=4,
+                MthPowerEstimate(
                     value=value,
+                    weights=value,
+                    power=4,
+                    spectrum=xp.abs(phase),
                     spectrum_frequencies=np.arange(n) - n / 2.0,
-                )  # fmt: skip
+                )
             ),
             "autocorrelation": lambda: plotting.plot_mm_autocorrelation(
-                NS(autocorrelation=samples, power=4, value=value), sampling_rate=1e9
+                MengaliMorelliEstimate(
+                    value=value, weights=value, power=4, autocorrelation=samples
+                ),
+                sampling_rate=1e9,
             ),
             "timing": lambda: plotting.plot_timing_correlation(
                 NS(correlation=samples, integer=xp.asarray([50, 900]), search_start=10)
             ),
             "pilot tone": lambda: plotting.plot_pilot_tone_phase_estimate(
-                NS(tone_frequencies=np.array([1e6, 1e6]), value=phase),
+                PilotToneEstimate(value=phase, tone_frequencies=np.array([1e6, 1e6])),
                 samples,
                 method=PilotTone(frequency=1e6, bandwidth=1e5),
                 sampling_rate=1e9,

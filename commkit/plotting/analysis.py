@@ -11,6 +11,15 @@ from typing import Any
 
 import numpy as np
 
+from ..analysis import (
+    AllanDeviation,
+    BetaSeparationEstimate,
+    DshLorentzianEstimate,
+    FmNoiseFitEstimate,
+    FrequencyDrift,
+    IncrementEstimate,
+    IncrementSlopeEstimate,
+)
 from ..backend import _to_host
 from .theme import (
     _as_channels,
@@ -183,7 +192,7 @@ def plot_frequency_drift(
         shows the figure instead.
     """
     df_c = _device_channels(
-        _require(drift, "df", "plot_frequency_drift()", "a FrequencyDrift")
+        _require(drift, FrequencyDrift, "plot_frequency_drift()", "a FrequencyDrift").df
     )
     C = df_c.shape[0]
 
@@ -306,12 +315,16 @@ def plot_frequency_noise_psd(
         shows the figure instead.
     """
     name = "plot_frequency_noise_psd()"
-    S_f = _require(estimate, "fm_psd", name, "a BetaSeparation or DshFmFit estimate")
+    estimate = _require(
+        estimate, FmNoiseFitEstimate, name, "a BetaSeparation or DshFmFit estimate"
+    )
+    S_f = estimate.fm_psd
     f, band, used = estimate.frequencies, estimate.band, estimate.used
     # BetaSeparation only: the β-line, its region and the white-FM floor.
-    beta_line = getattr(estimate, "beta_line", None)
-    above = getattr(estimate, "above", None)
-    floor = getattr(estimate, "linewidth_floor", estimate.value)
+    beta = isinstance(estimate, BetaSeparationEstimate)
+    beta_line = estimate.beta_line if beta else None
+    above = estimate.above if beta else None
+    floor = estimate.linewidth_floor if beta else estimate.value
     f_c = _to_host(f, np.float64)
     S_c = _as_channels(S_f)
     C = S_c.shape[0]
@@ -363,7 +376,7 @@ def plot_frequency_noise_psd(
                 label=r"$\beta$-area (integrated region)",
             )
 
-        model = getattr(estimate, "fm_psd_model", None)
+        model = estimate.fm_psd_model
         m_i = None
         if model is not None:
             m_c = _as_channels(model)
@@ -494,7 +507,9 @@ def plot_allan_deviation(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    adev = _require(allan, "adev", "plot_allan_deviation()", "an AllanDeviation")
+    adev = _require(
+        allan, AllanDeviation, "plot_allan_deviation()", "an AllanDeviation"
+    ).adev
     tau = _to_host(allan.taus, np.float64)
     adv = _as_channels(adev)
     C = adv.shape[0]
@@ -580,15 +595,17 @@ def plot_increment_variance(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    var = _require(
+    estimate = _require(
         estimate,
-        "increment_var",
+        IncrementEstimate,
         "plot_increment_variance()",
         "an increment-method estimate",
     )
+    var = estimate.increment_var
     # IncrementSlope and DshIncrement only.
-    slope = getattr(estimate, "slope", None)
-    intercept = getattr(estimate, "intercept", None)
+    fit = isinstance(estimate, IncrementSlopeEstimate)
+    slope = estimate.slope if fit else None
+    intercept = estimate.intercept if fit else None
     lag = _to_host(estimate.lag_s, np.float64)
     v = _as_channels(var)
     C = v.shape[0]
@@ -678,7 +695,13 @@ def plot_dsh_beat_psd(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    psd = _require(estimate, "psd", "plot_dsh_beat_psd()", "a DshLorentzian estimate")
+    estimate = _require(
+        estimate,
+        DshLorentzianEstimate,
+        "plot_dsh_beat_psd()",
+        "a DshLorentzian estimate",
+    )
+    psd = estimate.psd
     f, f_peak = estimate.frequencies, estimate.peak_frequency
     linewidth, linewidth_3db = estimate.value, estimate.linewidth_3db
     level_db = float(estimate.method.level_db)

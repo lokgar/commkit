@@ -13,7 +13,14 @@ import numpy as np
 from .. import _fft
 from ..backend import _to_host, get_array_module, to_device
 from ..core._signal_adapter import adapt_signal
-from ..recovery import CarrierPhaseEstimate
+from ..frequency import PilotSlopeEstimate
+from ..recovery import (
+    BlockPhaseEstimate,
+    CarrierPhaseEstimate,
+    PilotInterpolationEstimate,
+    PilotToneEstimate,
+    PilotTonesEstimate,
+)
 from .theme import (
     _device_channels,
     _finish,
@@ -81,9 +88,10 @@ def plot_carrier_phase_trajectory(
     """
 
     if isinstance(phase, CarrierPhaseEstimate):
-        # Block methods only.
         phi_full = phase.value
-        block_centers = getattr(phase, "block_centers", None)
+        block_centers = (
+            phase.block_centers if isinstance(phase, BlockPhaseEstimate) else None
+        )
     else:
         phi_full, block_centers = phase, None
     phi_deg = _device_channels(phi_full) * (180.0 / np.pi)
@@ -176,7 +184,11 @@ def plot_pilot_phase_estimate(
         quantity, ("pilots", "trajectory"), label=label, xlim=xlim, ylim=ylim
     )
     name = "plot_pilot_phase_estimate()"
-    pilot_phase = _require(estimate, "pilot_phase", name, "a pilot method")
+    if not isinstance(estimate, PilotInterpolationEstimate | PilotSlopeEstimate):
+        raise ValueError(
+            f"{name} needs a pilot method (got {type(estimate).__name__})."
+        )
+    pilot_phase = estimate.pilot_phase
     is_phase = isinstance(estimate, CarrierPhaseEstimate)
     pilot_indices = _to_host(estimate.pilot_indices)
     phi_pilots_u = _to_host(pilot_phase)
@@ -329,7 +341,8 @@ def plot_pilot_tone_phase_estimate(
 
     _select(quantity, ("spectrum", "phase"), label=label, xlim=xlim, ylim=ylim)
     name = "plot_pilot_tone_phase_estimate()"
-    tones = _require(estimate, "tone_frequencies", name, "PilotTone")
+    estimate = _require(estimate, PilotToneEstimate, name, "PilotTone")
+    tones = estimate.tone_frequencies
     adapter = adapt_signal(samples, function_name=name)
     fs = float(adapter.resolve_fact("sampling_rate", sampling_rate))
     theta_deg = _device_channels(estimate.value) * (180.0 / np.pi)
@@ -473,12 +486,10 @@ def plot_pilot_tones_phase_estimate(
     panels = _select(
         quantity, ("differential", "phase"), label=label, xlim=xlim, ylim=ylim
     )
-    delta = _require(
-        estimate,
-        "differential_phase",
-        "plot_pilot_tones_phase_estimate()",
-        "PilotTones",
+    estimate = _require(
+        estimate, PilotTonesEstimate, "plot_pilot_tones_phase_estimate()", "PilotTones"
     )
+    delta = estimate.differential_phase
     phi_deg = _device_channels(estimate.value)[0] * (180.0 / np.pi)
     ref = int(estimate.reference_tone)
     used = tuple(estimate.used_tones)

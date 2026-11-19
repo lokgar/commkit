@@ -142,7 +142,7 @@ def _estimate_carrier_phase(
             f"estimate_carrier_phase(): {type(method).__name__} needs one "
             f"sample per symbol; the Signal has sps={sig.sps:g}."
         )
-    reference = getattr(method, "symbols", None)
+    reference = method.symbols if isinstance(method, ConstantPhase) else None
     if reference is None and sig is not None and sig.reference is not None:
         reference = sig.reference.symbols
     ctx = _Context(

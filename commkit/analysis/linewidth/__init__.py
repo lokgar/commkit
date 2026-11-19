@@ -154,7 +154,10 @@ def estimate_linewidth(
             )
         return _PHASE_METHODS[kind](x, method, fs)
     if kind in _BEAT_METHODS:
-        _warn_if_phase_trajectory(x, getattr(method, "f_shift", None), fs)
+        f_shift = (
+            method.f_shift if isinstance(method, DshFmFit | DshIncrement) else None
+        )
+        _warn_if_phase_trajectory(x, f_shift, fs)
         return _BEAT_METHODS[kind](x, method, fs)
     raise TypeError(
         f"{name}: method must be IncrementSlope, IncrementSubtract, "

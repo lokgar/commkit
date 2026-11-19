@@ -79,7 +79,7 @@ def plot_equalizer_result(
         ``None`` with ``show=True``.
     """
     error = result.error
-    phase_traj = getattr(result, "phase_trajectory", None)
+    phase_traj = result.phase_trajectory
     available = ("convergence", "taps") + (("phase",) if phase_traj is not None else ())
     if quantity == "phase" and phase_traj is None:
         raise ValueError("quantity='phase' requires a phase_trajectory")
@@ -129,8 +129,8 @@ def plot_equalizer_result(
             x_smooth, mse_db = _smooth_mse(mse, smoothing)
             ax_conv.plot(x_smooth, mse_db, label=label)
 
-        n_train = getattr(result, "num_train_symbols", 0)
-        if annotations and n_train and n_train > 0:
+        n_train = result.num_train_symbols
+        if annotations and n_train > 0:
             ax_conv.axvline(
                 n_train,
                 color="white",

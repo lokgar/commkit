@@ -6,7 +6,7 @@ decimation of long traces) are shared by the plot modules.
 """
 
 import re
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import matplotlib as mpl
 import matplotlib.font_manager as fm
@@ -552,11 +552,12 @@ def _as_channels(arr) -> np.ndarray:
     return np.atleast_2d(_to_host(arr))
 
 
-def _require(result: Any, field: str, name: str, what: str) -> Any:
-    """``result.<field>``; a result without it raises, naming what is needed."""
-    value = getattr(result, field, None)
-    if value is None:
-        raise ValueError(
-            f"{name} needs {what} (got {type(result).__name__} without {field})."
-        )
-    return value
+_R = TypeVar("_R")
+
+
+def _require(result: Any, kind: type[_R], name: str, what: str) -> _R:
+    """``result`` if it is a ``kind``; another result raises, naming what is
+    needed (a plot of one method's diagnostics given another's estimate)."""
+    if not isinstance(result, kind):
+        raise ValueError(f"{name} needs {what} (got {type(result).__name__}).")
+    return result
