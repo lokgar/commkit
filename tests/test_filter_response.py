@@ -46,8 +46,11 @@ def test_response_invalid_arguments():
         filtering.filter_response(np.ones(3), nfft=0)
     with pytest.raises(ValueError, match="sampling_rate"):
         filtering.filter_response(np.ones(3), sampling_rate=0)
-    with pytest.raises(ValueError, match="num_samples"):
-        filtering.step_response(np.ones(3), num_samples=0)
+    for bad in (0, -1, True, 1.5):
+        with pytest.raises(ValueError, match="num_samples"):
+            filtering.step_response(np.ones(3), num_samples=bad)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="num_samples"):
+            filtering.impulse_response(np.ones(3), num_samples=bad)  # type: ignore[arg-type]
 
 
 def test_zero_response_has_undefined_delay(xp):
@@ -209,3 +212,90 @@ def test_complex_fir_default_grid_is_two_sided(xp, xpt, num_taps):
         to_device(result.frequencies, "cpu")[int(xp.argmax(xp.abs(result.response)))]
     )
     assert peak == f0
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.complex64])
+def test_long_fir_default_time_responses(xp, xpt, dtype):
+    """Default FIR responses cover all 2001 taps (plus a settling tail for step)."""
+    taps_host = signal.firwin(2001, 0.2).astype(np.float32)
+    if dtype is np.complex64:
+        taps_host = taps_host.astype(np.complex64) * np.exp(
+            1j * np.linspace(-0.5, 0.5, 2001, dtype=np.float32)
+        )
+    taps = xp.asarray(taps_host)
+
+    impulse = filtering.impulse_response(taps)
+    assert impulse.size == 2001
+    xpt.assert_allclose(impulse, taps)
+
+    step = filtering.step_response(taps)
+    assert step.size > 2001
+    xpt.assert_allclose(step[:2001], xp.cumsum(taps), rtol=1e-6, atol=1e-6)
+    expected_final = xp.sum(taps)
+    xpt.assert_allclose(
+        step[2000:],
+        xp.full(step.size - 2000, expected_final, dtype=step.dtype),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+
+    assert filtering.impulse_response(taps, num_samples=100).size == 100
+    assert filtering.step_response(taps, num_samples=100).size == 100
+
+    ba_fir = (taps, xp.asarray([2.0], dtype=taps.dtype))
+    ba_impulse = filtering.impulse_response(ba_fir)
+    ba_step = filtering.step_response(ba_fir)
+    assert ba_impulse.size == 2001
+    assert ba_step.size == step.size
+    xpt.assert_allclose(ba_impulse, taps / 2.0, rtol=1e-6, atol=1e-6)
+
+
+def test_iir_default_lengths_follow_slowest_pole(xp):
+    """Default IIR lengths scale with pole radius and cover edge cases."""
+    slow_sos = xp.asarray(signal.butter(4, 1e-3, output="sos"))
+    slow_impulse = filtering.impulse_response(slow_sos)
+    slow_step = filtering.step_response(slow_sos)
+    assert slow_impulse.size > 5000
+    assert slow_step.size == slow_impulse.size
+    assert float(xp.abs(slow_impulse[-1]) / xp.max(xp.abs(slow_impulse))) < 1e-4
+    assert float(xp.abs(slow_step[-1] - 1.0)) < 1e-4
+
+    fast_ba = (xp.asarray([0.5]), xp.asarray([1.0, -0.5]))
+    fast_impulse = filtering.impulse_response(fast_ba)
+    assert fast_impulse.size == 17
+    assert float(xp.abs(fast_impulse[-1]) / xp.max(xp.abs(fast_impulse))) < 2e-5
+
+    complex_ba = (
+        xp.asarray([1.0], dtype=xp.float32),
+        xp.asarray([1.0, -0.99j], dtype=xp.complex64),
+    )
+    complex_impulse = filtering.impulse_response(complex_ba)
+    assert complex_impulse.dtype == xp.complex64
+    assert complex_impulse.size > 1000
+    assert float(xp.abs(complex_impulse[-1]) / xp.max(xp.abs(complex_impulse))) < 2e-5
+
+    num_25 = np.zeros(25, dtype=np.float64)
+    num_25[0] = 0.25
+    num_25[-1] = 0.25
+    improper_ba = (xp.asarray(num_25), xp.asarray([1.0, -0.5]))
+    improper_impulse = filtering.impulse_response(improper_ba)
+    improper_step = filtering.step_response(improper_ba)
+    assert improper_impulse.size == 41
+    assert improper_step.size == 41
+    assert float(xp.abs(improper_step[-1] - 1.0)) < 1e-5
+
+    taps_10 = xp.asarray(np.linspace(0.1, 1.0, 10, dtype=np.float32))
+    zero_poles = (taps_10, xp.asarray([1.0, 0.0, 0.0], dtype=np.float32))
+    assert filtering.impulse_response(zero_poles).size == 10
+    assert (
+        filtering.step_response(zero_poles).size
+        == filtering.step_response(taps_10).size
+    )
+
+    marginal = (xp.asarray([1.0]), xp.asarray([1.0, -1.0]))
+    unstable = (xp.asarray([1.0]), xp.asarray([1.0, -1.05]))
+    assert filtering.impulse_response(marginal).size == 500
+    assert filtering.step_response(unstable).size == 500
+
+    ultra_slow = (xp.asarray([1e-12]), xp.asarray([1.0, -(1.0 - 1e-12)]))
+    assert filtering.impulse_response(ultra_slow).size == 100_000

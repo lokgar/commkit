@@ -28,7 +28,7 @@ def plot_filter_response(
     sps: float = 1.0,
     sampling_rate: float | None = None,
     ax: Any | None = None,
-    num_impulse_samples: int = 500,
+    num_impulse_samples: int | None = None,
     quantity: str | None = None,
     nfft: int = 2048,
     frequencies: Any | None = None,
@@ -51,9 +51,12 @@ def plot_filter_response(
         Sampling rate in Hz. Without it, frequency is in cycles per sample.
     ax : matplotlib.axes.Axes or array_like of Axes, optional
         One axis for a selected quantity; four for the default dashboard.
-    num_impulse_samples : int, default 500
-        Number of samples for IIR impulse and step responses. The default
-        dashboard displays all FIR taps as its impulse response.
+    num_impulse_samples : int, optional
+        Number of samples for impulse and step plots. ``None`` derives the
+        length from the filter: all taps centred at zero for an FIR impulse
+        response, the taps plus a settling margin for an FIR step response,
+        and the decay of the slowest pole for an IIR filter. An explicit
+        integer is always honoured.
     quantity : {"impulse", "step", "magnitude", "phase", "group_delay"}, optional
         A single response to plot. ``None`` plots the four-panel dashboard.
     nfft : int, default 2048
@@ -90,6 +93,12 @@ def plot_filter_response(
     )
     if sps <= 0:
         raise ValueError("sps must be positive")
+    if num_impulse_samples is not None and (
+        isinstance(num_impulse_samples, bool)
+        or not isinstance(num_impulse_samples, (int, np.integer))
+        or num_impulse_samples <= 0
+    ):
+        raise ValueError("num_impulse_samples must be a positive integer")
     if quantity is None:
         selected: tuple[str, ...] = ("impulse", "magnitude", "phase", "group_delay")
         fig, grid = _panel_grid(ax, 2, 2)
@@ -103,23 +112,21 @@ def plot_filter_response(
         response = filter_response(
             system, nfft=nfft, sampling_rate=sampling_rate, frequencies=frequencies
         )
-    raw = system[0] if isinstance(system, tuple) else system
-    coeff, _, _ = dispatch(raw)
-    is_fir = not isinstance(system, tuple) and coeff.ndim == 1
     for q, axis in zip(selected, axes, strict=True):
         if q in ("impulse", "step"):
-            count = (
-                coeff.size
-                if q == "impulse" and is_fir and quantity is None
-                else num_impulse_samples
-            )
             y = (
-                impulse_response(system, num_samples=count)
+                impulse_response(system, num_samples=num_impulse_samples)
                 if q == "impulse"
-                else step_response(system, num_samples=count)
+                else step_response(system, num_samples=num_impulse_samples)
             )
+            is_fir = (
+                dispatch(system[1])[0].size == 1
+                if isinstance(system, tuple)
+                else dispatch(system)[0].ndim == 1
+            )
+            count = y.size
             t = np.arange(count, dtype=float)
-            if q == "impulse" and is_fir and quantity is None:
+            if q == "impulse" and is_fir and num_impulse_samples is None:
                 t -= (count - 1) / 2
             t /= sampling_rate if sampling_rate is not None else sps
             y = to_device(y, "cpu")
@@ -134,8 +141,8 @@ def plot_filter_response(
             axis.set_ylabel("Amplitude")
             if sampling_rate is not None:
                 _set_eng_formatter(axis, "x")
-            else:
-                axis.xaxis.set_major_locator(ticker.MultipleLocator(1))
+            elif count > 1 and t[-1] - t[0] >= 2:
+                axis.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
             default_title = "Impulse Response" if q == "impulse" else "Step Response"
         else:
             assert response is not None
@@ -179,10 +186,7 @@ def plot_filter_response(
         if ylim is not None:
             axis.set_ylim(ylim)
         if legend or (
-            legend is None
-            and quantity is None
-            and q == "impulse"
-            and np.iscomplexobj(y)
+            legend is None and q in ("impulse", "step") and np.iscomplexobj(y)
         ):
             axis.legend()
     return _finish((fig, tuple(axes) if quantity is None else axes[0]), show)

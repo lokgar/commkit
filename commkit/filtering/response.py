@@ -7,6 +7,7 @@ coefficients' device.  Frequencies are in cycles per sample unless a sampling
 rate in Hz is given.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -181,25 +182,92 @@ def filter_response(
     return FilterResponse(f, response, delay / scale)
 
 
-def _time_response(system: Any, num_samples: int, step: bool) -> ArrayType:
+_IIR_DECAY = 1e-5
+_IIR_FALLBACK_SAMPLES = 500
+_IIR_MAX_SAMPLES = 100_000
+_FIR_STEP_MIN_MARGIN = 16
+
+
+def _fir_default_samples(num_taps: int, *, step: bool) -> int:
+    """Default sample count for an FIR impulse or unit-step response."""
+    if not step:
+        return num_taps
+    return num_taps + max(_FIR_STEP_MIN_MARGIN, num_taps // 10)
+
+
+def _max_pole_radius(kind: str, b: ArrayType, a: ArrayType | None) -> float:
+    """Largest pole magnitude from the denominator coefficients."""
+    if kind == "sos":
+        dens = np.asarray(to_device(b[:, 3:], "cpu"))
+        dens = dens.astype(
+            np.complex128 if np.iscomplexobj(dens) else np.float64, copy=False
+        )
+        if not np.all(np.isfinite(dens)):
+            return float("nan")
+        max_r = 0.0
+        for row in dens:
+            roots = np.roots(row)
+            if roots.size:
+                max_r = max(max_r, float(np.max(np.abs(roots))))
+        return max_r
+    assert a is not None
+    den = np.asarray(to_device(a, "cpu"))
+    den = den.astype(np.complex128 if np.iscomplexobj(den) else np.float64, copy=False)
+    if not np.all(np.isfinite(den)):
+        return float("nan")
+    roots = np.roots(den)
+    return float(np.max(np.abs(roots))) if roots.size else 0.0
+
+
+def _default_num_samples(
+    kind: str, b: ArrayType, a: ArrayType | None, *, step: bool
+) -> int:
+    """Derive a default time-response length from the filter structure."""
+    if kind == "fir":
+        return _fir_default_samples(int(b.size), step=step)
+    num_len = 2 * int(b.shape[0]) + 1 if kind == "sos" else int(b.size)
+    min_len = _fir_default_samples(num_len, step=step)
+    r = _max_pole_radius(kind, b, a)
+    if r == 0.0:
+        return min_len
+    if not math.isfinite(r) or r >= 1.0:
+        return max(_IIR_FALLBACK_SAMPLES, min_len)
+    log_r = math.log(r)
+    if log_r >= 0.0:
+        return max(_IIR_FALLBACK_SAMPLES, min_len)
+    ratio = math.log(_IIR_DECAY) / log_r
+    decay = _IIR_MAX_SAMPLES if ratio >= _IIR_MAX_SAMPLES else int(math.ceil(ratio))
+    return min(max(min_len, (num_len - 1) + decay), max(_IIR_MAX_SAMPLES, min_len))
+
+
+def _time_response(system: Any, num_samples: int | None, step: bool) -> ArrayType:
     """Impulse (``step=False``) or unit-step response of ``num_samples``."""
-    if not isinstance(num_samples, (int, np.integer)) or num_samples <= 0:
+    if num_samples is not None and (
+        isinstance(num_samples, bool)
+        or not isinstance(num_samples, (int, np.integer))
+        or num_samples <= 0
+    ):
         raise ValueError("num_samples must be a positive integer")
     kind, b, a, xp, sp = _system(system)
     if kind == "ba" and a is not None and a.size == 1:
         kind, b = "fir", b / a[0]
+    n = (
+        _default_num_samples(kind, b, a, step=step)
+        if num_samples is None
+        else int(num_samples)
+    )
     dtype = xp.result_type(b.dtype, a.dtype if a is not None else b.dtype, xp.float32)
     if kind == "fir":
         # The impulse response of an FIR filter is its taps, the step response
         # their running sum: no recursion, so nothing to filter.
-        h = xp.zeros(num_samples, dtype=dtype)
-        count = min(num_samples, b.size)
+        h = xp.zeros(n, dtype=dtype)
+        count = min(n, b.size)
         h[:count] = b[:count]
         return xp.cumsum(h) if step else h
     if step:
-        x = xp.ones(num_samples, dtype=dtype)
+        x = xp.ones(n, dtype=dtype)
     else:
-        x = xp.zeros(num_samples, dtype=dtype)
+        x = xp.zeros(n, dtype=dtype)
         x[0] = 1
     if x.dtype.kind == "c":
         # iir_filter takes real sections; complex coefficients run through
@@ -223,20 +291,23 @@ def _time_response(system: Any, num_samples: int, step: bool) -> ArrayType:
     return iir_filter(x, sos)
 
 
-def impulse_response(system: Any, *, num_samples: int = 500) -> ArrayType:
+def impulse_response(system: Any, *, num_samples: int | None = None) -> ArrayType:
     """Calculate a filter's causal impulse response.
 
     Parameters
     ----------
     system : array_like or (b, a) tuple
         FIR taps, second-order sections, or transfer coefficients.
-    num_samples : int, default 500
+    num_samples : int, optional
         Number of output samples, including zeros after an FIR response.
+        ``None`` uses all taps for an FIR filter, or for an IIR filter the
+        decay of its slowest pole to ``1e-5`` (-100 dB), capped at 100 000
+        samples (falling back to 500 when a pole has magnitude ``>= 1``).
 
     Returns
     -------
     ndarray
-        Impulse response, ``(num_samples,)``, on the coefficients' device.
+        Impulse response, ``(N,)``, on the coefficients' device.
 
     Notes
     -----
@@ -249,20 +320,24 @@ def impulse_response(system: Any, *, num_samples: int = 500) -> ArrayType:
     return _time_response(system, num_samples, False)
 
 
-def step_response(system: Any, *, num_samples: int = 500) -> ArrayType:
+def step_response(system: Any, *, num_samples: int | None = None) -> ArrayType:
     """Calculate a filter's causal unit-step response.
 
     Parameters
     ----------
     system : array_like or (b, a) tuple
         FIR taps, second-order sections, or transfer coefficients.
-    num_samples : int, default 500
-        Number of output samples.
+    num_samples : int, optional
+        Number of output samples. ``None`` uses the FIR tap count plus a
+        settling margin (at least 16 samples or 10 % of the taps), or for an
+        IIR filter the decay of its slowest pole to ``1e-5`` (-100 dB),
+        capped at 100 000 samples (falling back to 500 when a pole has
+        magnitude ``>= 1``).
 
     Returns
     -------
     ndarray
-        Step response, ``(num_samples,)``, on the coefficients' device.
+        Step response, ``(N,)``, on the coefficients' device.
 
     Notes
     -----

@@ -118,3 +118,90 @@ def test_complex_denominator_impulse(xp: Any) -> None:
     _, ax = plot_filter_response((b, a), quantity="impulse", num_impulse_samples=10)
     assert len(ax.lines) == 2
     assert abs(ax.lines[1].get_ydata()[1]) > 0
+
+
+def test_long_fir_time_panels_reach_end(xp: Any) -> None:
+    """A 2001-tap FIR shows its full centred impulse and settled step response."""
+    import numpy as np
+
+    taps = xp.asarray(filtering.fir_taps(sampling_rate=1.0, num_taps=2001, cutoff=0.1))
+    taps_host = np.asarray(taps.get() if hasattr(taps, "get") else taps)
+
+    fig_dash, axes_dash = plot_filter_response(taps, sps=1.0, show=False)
+    fig_dash.canvas.draw()
+    imp_dash = axes_dash[0].lines[0]
+    x_dash = imp_dash.get_xdata()
+    y_dash = imp_dash.get_ydata()
+    assert len(x_dash) == 2001
+    assert x_dash[0] == -1000.0
+    assert x_dash[-1] == 1000.0
+    assert x_dash[int(np.argmax(np.abs(y_dash)))] == 0.0
+    np.testing.assert_allclose(y_dash, taps_host, rtol=1e-6, atol=1e-6)
+    plt.close(fig_dash)
+
+    fig_imp, ax_imp = plot_filter_response(
+        taps, quantity="impulse", sps=1.0, show=False
+    )
+    fig_imp.canvas.draw()
+    imp_line = ax_imp.lines[0]
+    x_imp = imp_line.get_xdata()
+    y_imp = imp_line.get_ydata()
+    assert len(x_imp) == 2001
+    assert x_imp[0] == -1000.0
+    assert x_imp[-1] == 1000.0
+    assert x_imp[int(np.argmax(np.abs(y_imp)))] == 0.0
+    np.testing.assert_allclose(y_imp, taps_host, rtol=1e-6, atol=1e-6)
+    plt.close(fig_imp)
+
+    fig_step, ax_step = plot_filter_response(taps, quantity="step", sps=1.0, show=False)
+    fig_step.canvas.draw()
+    step_line = ax_step.lines[0]
+    x_step = step_line.get_xdata()
+    y_step = step_line.get_ydata()
+    assert len(x_step) > 2001
+    assert x_step[0] == 0.0
+    assert x_step[-1] > 2000.0
+    np.testing.assert_allclose(
+        y_step[2000:],
+        np.full(len(y_step) - 2000, np.sum(taps_host)),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+    plt.close(fig_step)
+
+    for q in (None, "impulse", "step"):
+        fig_exp, ax_exp = plot_filter_response(
+            taps, quantity=q, num_impulse_samples=120, sps=1.0, show=False
+        )
+        target_ax = ax_exp[0] if q is None else ax_exp
+        x_exp = target_ax.lines[0].get_xdata()
+        assert len(x_exp) == 120
+        assert x_exp[0] == 0.0
+        assert x_exp[-1] == 119.0
+        plt.close(fig_exp)
+
+
+def test_slow_iir_time_panels_reach_end(xp: Any) -> None:
+    """A low-cutoff IIR extends past 500 samples until its response settles."""
+    import numpy as np
+    import scipy.signal
+
+    sos = xp.asarray(scipy.signal.butter(4, 1e-3, output="sos"))
+
+    fig_imp, ax_imp = plot_filter_response(sos, quantity="impulse", show=False)
+    y_imp = ax_imp.lines[0].get_ydata()
+    assert len(y_imp) > 5000
+    assert abs(y_imp[-1]) / np.max(np.abs(y_imp)) < 1e-4
+    plt.close(fig_imp)
+
+    fig_step, ax_step = plot_filter_response(sos, quantity="step", show=False)
+    y_step = ax_step.lines[0].get_ydata()
+    assert len(y_step) > 5000
+    assert abs(y_step[-1] - 1.0) < 1e-4
+    plt.close(fig_step)
+
+
+def test_invalid_num_impulse_samples_raises() -> None:
+    for bad in (0, -5, True):
+        with pytest.raises(ValueError, match="num_impulse_samples"):
+            plot_filter_response([1.0], num_impulse_samples=bad)  # type: ignore[arg-type]
