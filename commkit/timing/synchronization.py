@@ -616,12 +616,12 @@ def _timing_metrics(
     C, N = x.shape
     L = ref.shape[-1]
     e_ref = xp.full(C, xp.mean(xp.sum(xp.abs(ref) ** 2, axis=-1)))
-    # Batch the peak indices to the host once instead of one sync per channel.
-    peaks_np = to_device(peaks, "cpu")
-    e_s = xp.empty(C, dtype=x.real.dtype)
-    for ch in range(C):
-        pk = int(peaks_np[ch])
-        e_s[ch] = xp.sum(xp.abs(x[ch, pk : min(pk + L, N)]) ** 2)
+    # The window at each peak by one gather on the device, cut at the record's
+    # end: no host sync and no launch per channel.
+    idx = peaks[:, None] + xp.arange(L)[None, :]  # (C, L)
+    window = xp.take_along_axis(x, xp.minimum(idx, N - 1), axis=-1)
+    power = xp.where(idx < N, xp.abs(window) ** 2, 0)
+    e_s = xp.sum(power, axis=-1)
     norm_factors = xp.maximum(xp.sqrt(e_ref * e_s), 1e-12)
 
     peak_vals = xp.max(corr_mag, axis=-1)  # incoherent, as the peak search
