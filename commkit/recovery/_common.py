@@ -148,6 +148,17 @@ def _mth_power_geometry(constellation: Any) -> tuple[int, bool, float]:
     return M, project, bias
 
 
+def _mfold_unwrap(phi: ArrayType, M: int, xp: Any) -> ArrayType:
+    """Unwrap ``M``-fold phases along the last axis, in float64.
+
+    Scales into the 2π domain, unwraps and scales back, so steps of
+    ``2π/M`` count as wraps.  The float64 cast comes first: ``unwrap`` keeps
+    its input's dtype, and float32 rounding in the discontinuity test causes
+    spurious slips.
+    """
+    return xp.unwrap((phi * M).astype(xp.float64), axis=-1) / M
+
+
 def _vv_block_phase(
     symbols2d: ArrayType,
     xp: Any,
@@ -222,7 +233,7 @@ def _vv_block_phase(
         # Sum M-th-power phasors across channels -> single block-phase trajectory
         S_b_joint = xp.sum(S_b, axis=0)  # (N_blocks,)
         phi_raw_joint = xp.angle(S_b_joint) / M
-        phi_u_joint = xp.unwrap((phi_raw_joint * M).astype(xp.float64)) / M
+        phi_u_joint = _mfold_unwrap(phi_raw_joint, M, xp)
         if bias:
             phi_u_joint = phi_u_joint - bias
         phi_u = xp.broadcast_to(phi_u_joint, (C, N_blocks)).copy()
@@ -230,12 +241,7 @@ def _vv_block_phase(
         # Raw block phase in [-π/M, π/M)
         phi_raw = xp.angle(S_b) / M  # (C, N_blocks)
 
-        # M-fold unwrap: scale into 2π domain, unwrap, re-scale back.
-        # Cast to float64 before unwrap - cp.unwrap preserves input dtype so float32
-        # would lose precision during the discontinuity test (diff vs 2π threshold).
-        phi_u = (
-            xp.unwrap((phi_raw * M).astype(xp.float64), axis=-1) / M
-        )  # (C, N_blocks)
+        phi_u = _mfold_unwrap(phi_raw, M, xp)  # (C, N_blocks)
 
         if bias:
             phi_u = phi_u - bias
