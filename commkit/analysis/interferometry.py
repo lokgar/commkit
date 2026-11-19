@@ -93,7 +93,7 @@ import numpy as np
 from .. import _fft
 from .._array import as_2d, restore_1d, to_report_scalar
 from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import adapt_signal
+from ..core._signal_input import SignalInput
 from ..core.signal import Signal
 from ..frequency import correct_frequency_offset
 from ..logger import logger
@@ -303,7 +303,7 @@ def dsh_phase(
         heterodyne) or complex (IQ front-end).  A :class:`Signal` supplies
         ``sampling_rate``.
     sampling_rate : float, optional
-        Sampling rate in Hz (a fact).  Taken from a Signal; required for array
+        Sampling rate in Hz (a property).  Taken from a Signal; required for array
         input.  A value that disagrees with the Signal raises.
     f_shift : float, optional
         Known beat carrier in Hz (the AOM frequency).  ``None`` estimates the
@@ -349,9 +349,9 @@ def dsh_phase(
       delay fiber, phase noise of the AOM's RF synthesizer) cannot be told
       apart from laser phase noise here and adds to the low-frequency PSD.
     """
-    signal_adapter = adapt_signal(samples, function_name="dsh_phase()")
-    samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    inp = SignalInput(samples, "dsh_phase()")
+    samples = inp.samples
+    sampling_rate = inp.sampling_rate(sampling_rate)
 
     z, xp, _ = dispatch(samples)
     fs = float(sampling_rate)

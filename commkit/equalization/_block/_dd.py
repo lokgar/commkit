@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 
 from ...backend import ArrayType, to_device
-from ...core._signal_adapter import adapt_signal, require_choice, require_integer_sps
+from ...core._signal_input import SignalInput, require_value
 from ...core.signal import Signal
 from ...logger import logger
 from ...mapping._lattice import slicer_params
@@ -479,10 +479,10 @@ def block_lms(
         array input.  A WARNING is logged when the decided symbols of the
         last half of the decision-directed output lack its power by more
         than 1.5 dB: a lock at a wrong gain, or a constellation that does
-        not match the signal.  An explicit choice applies to this call
+        not match the signal.  An explicit constellation applies to this call
         only: ``signal`` of the result keeps the input Signal's
         ``constellation``, which describes its reference symbols, so pass
-        the same choice to the metrics, or set it on the Signal with
+        the same constellation to the metrics, or set it on the Signal with
         ``replace`` (with matching reference symbols) before equalizing.
     store_weights : bool, default False
         Record the weights at the start of every block in
@@ -608,11 +608,11 @@ def block_lms(
        ceiling is B times lower; the step that matches :func:`lms` is the
        same.
     """
-    signal_adapter = adapt_signal(samples, function_name="block_lms()")
-    x = signal_adapter.array
-    sig = signal_adapter.signal
-    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "block_lms()")
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    inp = SignalInput(samples, "block_lms()")
+    x = inp.samples
+    sig = inp.signal
+    sps = inp.integer_sps(sps)
+    constellation = inp.constellation(constellation)
 
     if cpr is not None and not isinstance(cpr, BPS):
         raise TypeError(
@@ -639,7 +639,7 @@ def block_lms(
     training = run.training
     mu = min(0.5 / block_size, 8e-3) / sps if step_size is None else step_size
 
-    require_choice(
+    require_value(
         constellation, "constellation", "block_lms()", purpose=" for its decisions"
     )
     constellation_np = np.ascontiguousarray(constellation.points, dtype=np.complex64)

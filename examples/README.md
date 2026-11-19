@@ -15,7 +15,7 @@ The notebooks run on the GPU when CuPy works and on the CPU otherwise. They are 
 
 | # | notebook | topics |
 | --- | --- | --- |
-| 00 | [Getting started](00-getting-started.ipynb) | `Signal` (facts, description, reference), `generate`, devices, functions that return new data, files, logging |
+| 00 | [Getting started](00-getting-started.ipynb) | `Signal` (properties, description, reference), `generate`, devices, functions that return new data, files, logging |
 | 01 | [Constellations and bit mapping](01-constellations-and-bit-mapping.ipynb) | QAM, PSK, PAM; Gray labels; mapping and hard decisions; rotational symmetry; probabilistic shaping |
 | 02 | [Spectral analysis](02-spectral-analysis.ipynb) | Welch PSD (resolution and variance), absolute levels, frequency shifts, pilot tones, spectrograms |
 | 03 | [Digital filters](03-digital-filters.ipynb) | FIR window design, overlap-save, IIR families and group delay, causal and zero-phase filtering, smoothing |

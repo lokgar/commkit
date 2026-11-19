@@ -17,7 +17,7 @@ from .. import _fft
 from .._array import as_2d, restore_1d
 from .._random import RNG, as_generator, standard_normal
 from ..backend import ArrayType, _module_for, dispatch
-from ..core._signal_adapter import S, adapt_signal, require_device
+from ..core._signal_input import S, SignalInput, require_device
 from ..logger import logger
 from ..math import _derotate
 
@@ -265,8 +265,8 @@ def apply_phase_noise(
     >>> noisy = apply_phase_noise(x, linewidth=100e3, sampling_rate=fs, rng=0)
     >>> noisy = apply_phase_noise(sig, linewidth=100e3)  # Signal input
     """
-    signal_adapter = adapt_signal(samples, function_name="apply_phase_noise()")
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    inp = SignalInput(samples, "apply_phase_noise()")
+    sampling_rate = inp.sampling_rate(sampling_rate)
 
     logger.info(
         "Applying phase noise (linewidth=%.3g Hz, flicker=%.3g Hz², shared_lo=%s, "
@@ -277,7 +277,7 @@ def apply_phase_noise(
         periodic,
     )
 
-    x, xp, _ = dispatch(signal_adapter.array)
+    x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
     C, N = x.shape
 
@@ -295,7 +295,7 @@ def apply_phase_noise(
     # x · e^{jφ} in the samples' precision ((1, N) broadcasts across channels).
     result = _derotate(x, -phase)
 
-    return signal_adapter.wrap_samples(restore_1d(was_1d, result))
+    return inp.wrap(restore_1d(was_1d, result))
 
 
 def apply_frequency_offset(
@@ -344,9 +344,9 @@ def apply_frequency_offset(
     >>> y = apply_frequency_offset(x, offset=150e6, sampling_rate=64e9)
     >>> y = apply_frequency_offset(sig, offset=[150e6, -20e6])  # per channel
     """
-    signal_adapter = adapt_signal(samples, function_name="apply_frequency_offset()")
-    fs = float(signal_adapter.resolve_fact("sampling_rate", sampling_rate))
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "apply_frequency_offset()")
+    fs = inp.sampling_rate(sampling_rate)
+    x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
     C, N = x.shape
     offsets = np.asarray(offset, dtype=np.float64).reshape(-1)
@@ -358,7 +358,7 @@ def apply_frequency_offset(
     logger.info("Applying frequency offset: %s Hz.", offsets.tolist())
     step = xp.asarray(offsets * (2.0 * np.pi / fs))[:, None]  # (1 or C, 1)
     result = _derotate(x, -step * xp.arange(N, dtype=xp.float64))
-    return signal_adapter.wrap_samples(restore_1d(was_1d, result))
+    return inp.wrap(restore_1d(was_1d, result))
 
 
 def apply_intensity_noise(
@@ -407,9 +407,9 @@ def apply_intensity_noise(
     --------
     >>> field = apply_intensity_noise(field, rin_db_hz=-145.0, rng=1)
     """
-    signal_adapter = adapt_signal(samples, function_name="apply_intensity_noise()")
-    fs = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "apply_intensity_noise()")
+    fs = inp.sampling_rate(sampling_rate)
+    x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
     var = 10 ** (rin_db_hz / 10) * fs / 2
     logger.info(
@@ -422,4 +422,4 @@ def apply_intensity_noise(
         as_generator(rng), (x.shape[-1],), dtype=real, xp=xp
     )
     factor = xp.sqrt(xp.maximum(1.0 + r, 0.0)).astype(real, copy=False)
-    return signal_adapter.wrap_samples(restore_1d(was_1d, x * factor[None, :]))
+    return inp.wrap(restore_1d(was_1d, x * factor[None, :]))

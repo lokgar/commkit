@@ -23,7 +23,7 @@ from .._array import as_2d, restore_1d
 from .._constants import ELEMENTARY_CHARGE
 from .._random import RNG, as_generator, complex_normal, standard_normal
 from ..backend import ArrayType, _to_host, dispatch
-from ..core._signal_adapter import S, SignalAdapter, adapt_signal
+from ..core._signal_input import S, SignalInput
 from ..logger import logger
 from ..math import db_to_linear
 
@@ -138,13 +138,13 @@ def apply_awgn(
     >>> noisy = apply_awgn(sig, snr_db=25)  # power ratio in the samples
     >>> floor = apply_awgn(sig, noise_var=1e-3)  # absolute, whatever the signal
     """
-    signal_adapter = adapt_signal(samples, function_name="apply_awgn()")
+    inp = SignalInput(samples, "apply_awgn()")
     given = [esn0_db is not None, snr_db is not None, noise_var is not None]
     if sum(given) != 1:
         raise ValueError(
             "apply_awgn(): give exactly one of esn0_db, snr_db and noise_var."
         )
-    x, xp, _ = dispatch(signal_adapter.array)
+    x, xp, _ = dispatch(inp.samples)
     num_channels = 1 if x.ndim == 1 else x.shape[0]
 
     if noise_var is not None:
@@ -157,7 +157,7 @@ def apply_awgn(
                     f"per channel ({num_channels},), got shape {var.shape}."
                 )
             var = var[:, None] if x.ndim == 2 else var
-        return signal_adapter.wrap_samples(x + _noise(x, xp, var, rng))
+        return inp.wrap(x + _noise(x, xp, var, rng))
 
     if snr_db is not None:
         logger.info("Adding AWGN (SNR target: %.2f dB).", snr_db)
@@ -165,19 +165,17 @@ def apply_awgn(
         if not per_channel:
             power = xp.mean(power)
         snr_linear = max(db_to_linear(snr_db, power=True), 1e-20)
-        return signal_adapter.wrap_samples(x + _noise(x, xp, power / snr_linear, rng))
+        return inp.wrap(x + _noise(x, xp, power / snr_linear, rng))
 
-    sps = signal_adapter.resolve_fact("sps", sps)
+    sps = inp.sps(sps)
     logger.info("Adding AWGN (Es/N0 target: %.2f dB).", esn0_db)
-    es = _symbol_energy(signal_adapter, x, xp, sps)
+    es = _symbol_energy(inp, x, xp, sps)
     if not per_channel:
         es = xp.mean(es)
     esn0_linear = max(db_to_linear(esn0_db, power=True), 1e-20)
     n0 = es / esn0_linear
     # Real samples carry the in-phase half of complex noise of density N0.
-    return signal_adapter.wrap_samples(
-        x + _noise(x, xp, n0 if xp.iscomplexobj(x) else n0 / 2, rng)
-    )
+    return inp.wrap(x + _noise(x, xp, n0 if xp.iscomplexobj(x) else n0 / 2, rng))
 
 
 def apply_ase(
@@ -259,10 +257,10 @@ def apply_ase(
     >>> field = sig.replace(domain="OPT", center_frequency=193.4e12)
     >>> noisy = apply_ase(field, osnr_db=18)  # in 12.5 GHz, both polarizations
     """
-    signal_adapter = adapt_signal(samples, function_name="apply_ase()")
-    x, xp, _ = dispatch(signal_adapter.array)
-    sig = signal_adapter.signal
-    if sig is None or sig.domain != "OPT" or not xp.iscomplexobj(x):
+    inp = SignalInput(samples, "apply_ase()")
+    x, xp, _ = dispatch(inp.samples)
+    sig = inp.signal
+    if sig is None or inp.domain() != "OPT" or not xp.iscomplexobj(x):
         raise ValueError(
             "apply_ase(): needs a complex optical Signal (domain='OPT'), whose "
             "sampling rate sets the noise bandwidth."
@@ -287,16 +285,16 @@ def apply_ase(
     logger.info(
         "Adding ASE noise (OSNR target: %.2f dB, %d modes).", osnr_db, noise_modes
     )
-    sps = float(sig.sps)
+    sps = inp.sps()
     # The ASE density is the same in every mode: one variance for all
     # channels, from their total power while the signal is present.
-    power = xp.sum(_symbol_energy(signal_adapter, x, xp, sps)) / sps
+    power = xp.sum(_symbol_energy(inp, x, xp, sps)) / sps
     noise_power = (
         power
-        * sig.sampling_rate
+        * inp.sampling_rate()
         / (noise_modes * reference_bandwidth * db_to_linear(osnr_db, power=True))
     )
-    return signal_adapter.wrap_samples(x + _noise(x, xp, noise_power, rng))
+    return inp.wrap(x + _noise(x, xp, noise_power, rng))
 
 
 def apply_coherent_detection(
@@ -431,9 +429,9 @@ def apply_coherent_detection(
             f"got {thermal_noise_density!r}."
         )
     function_name = "apply_coherent_detection()"
-    signal_adapter = adapt_signal(samples, function_name=function_name)
-    fs = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, function_name)
+    fs = inp.sampling_rate(sampling_rate)
+    x, xp, _ = dispatch(inp.samples)
     if not xp.iscomplexobj(x):
         x = x.astype(xp.complex64 if x.dtype == xp.float32 else xp.complex128)
     x, was_1d = as_2d(x, name="samples")
@@ -463,10 +461,10 @@ def apply_coherent_detection(
         rin_var = 10 ** (lo_rin_db_hz / 10) * fs / 2
         inv_snr = inv_snr + 2.0 * leak * leak * (p_lo / p_c) * rin_var
     if logger.isEnabledFor(logging.INFO):
-        sig = signal_adapter.signal
+        sig = inp.signal
         snr_db = -10 * np.log10(inv_snr)
-        if sig is not None and sig.symbol_rate:
-            esn0_db = snr_db + 10 * np.log10(fs / sig.symbol_rate)
+        if sig is not None and inp.symbol_rate():
+            esn0_db = snr_db + 10 * np.log10(fs / inp.symbol_rate())
             logger.info(
                 "Coherent detection: Es/N0 %s dB per channel (%.2f dBm received, "
                 "%.2f dBm LO).",
@@ -499,7 +497,7 @@ def apply_coherent_detection(
                 + xp.asarray(leak * np.sqrt(p_lo / p_c), dtype=real)[:, None] * lo_noise
             )
         y = y + (scale.astype(real) * term) * (1 + 1j)
-    return signal_adapter.wrap_samples(restore_1d(was_1d, y))
+    return inp.wrap(restore_1d(was_1d, y))
 
 
 def apply_photodetection(
@@ -607,9 +605,9 @@ def apply_photodetection(
         raise ValueError(
             f"{function_name}: saturation_current must be positive, got {saturation_current!r}."
         )
-    signal_adapter = adapt_signal(samples, function_name=function_name)
-    fs = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, function_name)
+    fs = inp.sampling_rate(sampling_rate)
+    x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
     real = x.real.dtype if xp.iscomplexobj(x) else x.dtype
     intensity = (xp.abs(x) ** 2).astype(real, copy=False)
@@ -640,26 +638,24 @@ def apply_photodetection(
         "" if not sum_channels else " (one diode)",
     )
     out = y[0] if (was_1d or sum_channels) else y
-    sig = signal_adapter.signal
+    sig = inp.signal
     if sig is None:
-        return signal_adapter.wrap_samples(out)
+        return inp.wrap(out)
     reference = sig.reference
     if sum_channels and reference is not None and reference.symbols.ndim > 1:
         reference = None
-    return signal_adapter.wrap_samples(
-        out, domain="DIG", center_frequency=0.0, reference=reference
-    )
+    return inp.wrap(out, domain="DIG", center_frequency=0.0, reference=reference)
 
 
 def _symbol_energy(
-    signal_adapter: SignalAdapter[Any], x: ArrayType, xp: Any, sps: float
+    inp: SignalInput[Any], x: ArrayType, xp: Any, sps: float
 ) -> ArrayType:
     """Energy per symbol of each channel in sample units, ``(C, 1)`` (``(1,)``
     for 1-D input): the channel's energy over the symbols the record
     carries (see :func:`apply_awgn`)."""
     num_periods = x.shape[-1] / sps
     num_symbols = num_periods
-    sig = signal_adapter.signal
+    sig = inp.signal
     if sig is not None:
         if sig.frame is not None:
             frame = sig.frame

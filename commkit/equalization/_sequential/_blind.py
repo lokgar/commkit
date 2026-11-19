@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from ...backend import ArrayType, to_device
-from ...core._signal_adapter import adapt_signal, require_integer_sps
+from ...core._signal_input import SignalInput
 from ...core.signal import Signal
 from ...logger import logger
 from .._common import (
@@ -87,14 +87,14 @@ def _blind_equalizer(
     there."""
     name = f"{kind}()"
     label = kind.upper()
-    signal_adapter = adapt_signal(samples, function_name=name)
-    x = signal_adapter.array
-    sig = signal_adapter.signal
-    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), name)
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    inp = SignalInput(samples, name)
+    x = inp.samples
+    sig = inp.signal
+    sps = inp.integer_sps(sps)
+    constellation = inp.constellation(constellation)
 
     pilot_ref, pilot_mask, pilot_gain_db = _check_pilots(
-        signal_adapter.array, sps, pilots, name, state
+        inp.samples, sps, pilots, name, state
     )
     use_pilots = pilot_ref is not None
     if kind == "cma":

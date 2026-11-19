@@ -6,7 +6,7 @@ Euclidean distance).  Both run on the data's device.
 """
 
 from ..backend import ArrayType
-from ..core._signal_adapter import adapt_signal, require_choice
+from ..core._signal_input import SignalInput, require_value
 from ..core.signal import Signal
 from .constellation import Constellation
 
@@ -32,7 +32,7 @@ def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
         Symbols, ``(..., n / k)``, on the bits' device: ``complex64``, or
         ``float32`` for a real constellation.
     """
-    require_choice(constellation, "constellation", "map_bits()", kind=Constellation)
+    require_value(constellation, "constellation", "map_bits()", kind=Constellation)
     return constellation.map(bits)
 
 
@@ -65,9 +65,7 @@ def demap_symbols(
         Without a constellation, or for a frame Signal or one not at one
         sample per symbol.
     """
-    signal_adapter = adapt_signal(symbols, function_name="demap_symbols()")
-    x = signal_adapter.symbol_array()
-    constellation = signal_adapter.require_choice(
-        "constellation", constellation, kind=Constellation
-    )
+    inp = SignalInput(symbols, "demap_symbols()")
+    x = inp.symbols()
+    constellation = inp.constellation(constellation, required=True)
     return constellation.demap(x)

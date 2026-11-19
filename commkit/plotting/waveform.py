@@ -4,8 +4,9 @@ from typing import Any
 
 import numpy as np
 
-from ..backend import _to_host, dispatch
-from ..core._signal_adapter import adapt_signal
+from ..backend import ArrayType, _to_host, dispatch
+from ..core._signal_input import SignalInput
+from ..core.signal import Signal
 from ..logger import logger
 from .theme import (
     _draw_channels,
@@ -17,7 +18,7 @@ __all__ = ["plot_time_domain"]
 
 
 def plot_time_domain(
-    samples: Any,
+    samples: ArrayType | Signal,
     *,
     sampling_rate: float | None = None,
     start_symbol: int = 0,
@@ -51,7 +52,7 @@ def plot_time_domain(
     num_symbols : int, optional
         Number of symbol periods drawn; needs ``sps``.
     sps : float, optional
-        Samples per symbol (a fact): taken from a Signal; for arrays, needed
+        Samples per symbol (a property): taken from a Signal; for arrays, needed
         to count in symbols, otherwise ``start_symbol`` counts samples.
     max_points : int or None, default 10000
         A longer view is drawn as its min/max envelope: the samples are cut
@@ -81,11 +82,11 @@ def plot_time_domain(
         The figure and the Axes (an array of Axes for several panels);
         ``None`` with ``show=True``, which shows the figure instead.
     """
-    signal_adapter = adapt_signal(samples, function_name="plot_time_domain()")
-    x = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    if signal_adapter.signal is not None:
-        sps = signal_adapter.resolve_fact("sps", sps)
+    inp = SignalInput(samples, "plot_time_domain()")
+    x = inp.samples
+    sampling_rate = inp.sampling_rate(sampling_rate)
+    if inp.signal is not None:
+        sps = inp.sps(sps)
     logger.debug("Generating time-domain plot.")
     x, xp, _ = dispatch(x)
 

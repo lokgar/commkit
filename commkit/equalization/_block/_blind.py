@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 
 from ...backend import ArrayType, to_device
-from ...core._signal_adapter import adapt_signal, require_integer_sps
+from ...core._signal_input import SignalInput
 from ...core.signal import Signal
 from ...logger import logger
 from .._common import (
@@ -278,12 +278,12 @@ def _block_blind(
 ) -> EqualizerResult:
     """The body of :func:`block_cma` and :func:`block_rde` (``kind``)."""
     name = f"block_{kind}()"
-    signal_adapter = adapt_signal(samples, function_name=name)
-    x = signal_adapter.array
-    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), name)
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    inp = SignalInput(samples, name)
+    x = inp.samples
+    sps = inp.integer_sps(sps)
+    constellation = inp.constellation(constellation)
     pilot_ref, pilot_mask, pilot_gain_db = _check_pilots(
-        signal_adapter.array, sps, pilots, name, state
+        inp.samples, sps, pilots, name, state
     )
     if kind == "cma":
         r2, radii_np = _godard_radius(constellation), None
@@ -313,7 +313,7 @@ def _block_blind(
         cuda_graph=cuda_graph,
         name=label if pilot_ref is None else f"{label}(PA)",
     )
-    return _attach_equalized_signal(result, signal_adapter.signal, state)
+    return _attach_equalized_signal(result, inp.signal, state)
 
 
 def block_cma(

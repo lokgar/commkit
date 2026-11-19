@@ -16,7 +16,7 @@ import numpy as np
 from . import _fft
 from ._array import as_2d, restore_1d
 from .backend import ArrayType, dispatch
-from .core._signal_adapter import S, adapt_signal
+from .core._signal_input import S, SignalInput
 from .core.signal import Signal
 from .logger import logger
 from .math import _derotate, _phasor
@@ -155,9 +155,9 @@ def shift_frequency(
         The shifted samples, complex, on the input's device.  The applied
         shift is ``grid_frequency(frequency, sampling_rate=fs, num_samples=N)``.
     """
-    signal_adapter = adapt_signal(samples, function_name="shift_frequency()")
-    x = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    inp = SignalInput(samples, "shift_frequency()")
+    x = inp.samples
+    sampling_rate = inp.sampling_rate(sampling_rate)
 
     x, xp, _ = dispatch(x)
 
@@ -182,7 +182,7 @@ def shift_frequency(
     phase = (2.0 * np.pi * actual_offset / sampling_rate) * xp.arange(
         n, dtype=xp.float64
     )
-    return signal_adapter.wrap_samples(_derotate(x, -phase))
+    return inp.wrap(_derotate(x, -phase))
 
 
 def add_pilot_tone(
@@ -258,9 +258,9 @@ def add_pilot_tone(
     is at most ``f_s/(2N)``.  The phase ramp is computed and wrapped in
     float64, so long records keep their phase accuracy in complex64.
     """
-    signal_adapter = adapt_signal(samples, function_name="add_pilot_tone()")
-    x = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    inp = SignalInput(samples, "add_pilot_tone()")
+    x = inp.samples
+    sampling_rate = inp.sampling_rate(sampling_rate)
 
     x, xp, _ = dispatch(x)
     x, was_1d = as_2d(x, name="samples")
@@ -354,7 +354,7 @@ def add_pilot_tone(
     )
 
     samples_out = restore_1d(was_1d, out)
-    return signal_adapter.wrap_samples(samples_out)
+    return inp.wrap(samples_out)
 
 
 def welch_psd(
@@ -429,9 +429,9 @@ def welch_psd(
         ``noverlap`` is not below ``nperseg``, ``nfft`` is below
         ``nperseg``, or ``average``, ``scaling`` or ``detrend`` is unknown.
     """
-    signal_adapter = adapt_signal(samples, function_name="welch_psd()")
-    x = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    inp = SignalInput(samples, "welch_psd()")
+    x = inp.samples
+    sampling_rate = inp.sampling_rate(sampling_rate)
     axis = -1
 
     x, xp, sp = dispatch(x)
@@ -664,9 +664,9 @@ def spectrogram(
     ValueError
         If ``return_onesided=True`` for complex input.
     """
-    signal_adapter = adapt_signal(samples, function_name="spectrogram()")
-    x = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    inp = SignalInput(samples, "spectrogram()")
+    x = inp.samples
+    sampling_rate = inp.sampling_rate(sampling_rate)
     axis = -1
 
     x, xp, sp = dispatch(x)

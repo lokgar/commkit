@@ -25,7 +25,7 @@ from . import _fft
 from ._array import as_2d, broadcast_channels, freeze_host, restore_1d
 from ._peaks import parabolic_peak_offset
 from .backend import ArrayType, _to_host, dispatch, to_device
-from .core._signal_adapter import S, adapt_signal, require_integer_sps
+from .core._signal_input import S, SignalInput, require_integer_sps
 from .core.signal import Signal
 from .logger import logger
 from .math import _derotate, _linear_trend_slope, _next_pow2
@@ -724,16 +724,16 @@ def estimate_frequency_offset(
             "estimate_frequency_offset(): method must be MthPower, MengaliMorelli, "
             f"PilotSlope or SpectralPeak, got {type(method).__name__}."
         )
-    signal_adapter = adapt_signal(samples, function_name="estimate_frequency_offset()")
-    fs = float(signal_adapter.resolve_fact("sampling_rate", sampling_rate))
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
-    return _estimate_frequency_offset(signal_adapter.array, method, fs, constellation)
+    inp = SignalInput(samples, "estimate_frequency_offset()")
+    fs = inp.sampling_rate(sampling_rate)
+    constellation = inp.constellation(constellation)
+    return _estimate_frequency_offset(inp.samples, method, fs, constellation)
 
 
 def _estimate_frequency_offset(
     samples: ArrayType, method: FrequencyMethod, fs: float, constellation: Any
 ) -> FrequencyOffsetEstimate:
-    """:func:`estimate_frequency_offset` on an array with resolved facts."""
+    """:func:`estimate_frequency_offset` on an array with resolved properties."""
     x, xp, _ = dispatch(samples)
     x, was_1d = as_2d(x, name="samples")
     C, N = x.shape
@@ -809,19 +809,19 @@ def correct_frequency_offset(
     A constant correction restarts its phasor at ``n = 0``; correcting
     sub-blocks separately breaks phase continuity.
     """
-    signal_adapter = adapt_signal(samples, function_name="correct_frequency_offset()")
-    fs = float(signal_adapter.resolve_fact("sampling_rate", sampling_rate))
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "correct_frequency_offset()")
+    fs = inp.sampling_rate(sampling_rate)
+    x, xp, _ = dispatch(inp.samples)
     if isinstance(how, FrequencyMethod):
-        constellation = signal_adapter.resolve_choice("constellation", None)
+        constellation = inp.constellation()
         how = _estimate_frequency_offset(x, how, fs, constellation)
 
     if isinstance(how, BlockwiseFrequencyEstimate):
         result = _correct_blockwise(x, fs, how.block_centers, how.block_values, xp)
-        return signal_adapter.wrap_samples(result)
+        return inp.wrap(result)
 
     offset = how.value if isinstance(how, FrequencyOffsetEstimate) else how
-    return signal_adapter.wrap_samples(_correct_static(x, fs, offset, xp))
+    return inp.wrap(_correct_static(x, fs, offset, xp))
 
 
 def _correct_static(x: ArrayType, fs: float, offset: Any, xp: Any) -> ArrayType:

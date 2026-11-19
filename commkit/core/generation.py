@@ -22,7 +22,7 @@ from .._circular import convolve_periodic
 from ..backend import ArrayType, dispatch, to_device
 from ..logger import logger
 from ..math import normalize
-from ._signal_adapter import require_device, require_integer_sps
+from ._signal_input import require_device, require_integer_sps
 from .signal import Reference, Signal
 
 __all__ = ["expand", "generate", "shape_pulse"]

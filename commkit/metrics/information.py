@@ -11,13 +11,12 @@ import numpy as np
 
 from .._array import to_report_scalar
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import adapt_signal
+from ..core._signal_input import SignalInput
 from ..core.signal import Signal
 from ..logger import logger
 from ..mapping import Constellation
 from ..mapping._demap import _noise_variance
 from ._common import (
-    _constellation,
     _log_per_channel,
     _paired,
     _reference,
@@ -48,17 +47,17 @@ def _gmi_loss(
     (``NGMI = 1 - loss``); returns the loss on the device, ``(...)``, and
     the constellation.
     """
-    adapter = adapt_signal(llrs, function_name=name)
-    received = adapter.symbol_array()
-    c = _constellation(adapter, constellation, name)
+    inp = SignalInput(llrs, name)
+    received = inp.symbols()
+    c = inp.constellation(constellation, required=True)
     k = c.bits_per_symbol
-    if adapter.signal is not None:
+    if inp.signal is not None:
         if noise_var is None and esn0_db is None:
             raise ValueError(
                 f"{name} needs noise_var or esn0_db to compute LLRs of a Signal."
             )
         received = _reference_scaled(
-            adapter, received, dispatch(received)[1], name, num_skip_symbols
+            inp, received, dispatch(received)[1], name, num_skip_symbols
         )
         nv = _noise_variance(noise_var, esn0_db, c, received.dtype.kind != "c", name)
         received = c.llr(received, noise_var=nv, method=method)
@@ -68,9 +67,7 @@ def _gmi_loss(
             "already contain the noise."
         )
     llr_arr, xp, _ = dispatch(received)
-    llr_arr, ref = _paired(
-        llr_arr, _reference(adapter, reference, "bits", name), xp, name
-    )
+    llr_arr, ref = _paired(llr_arr, _reference(inp, reference, "bits", name), xp, name)
     if llr_arr.shape[-1] % k:
         raise ValueError(
             f"{name}: the last axis ({llr_arr.shape[-1]}) is not a multiple of "
@@ -304,10 +301,10 @@ def mi(
         sample per symbol.
     """
     name = "mi()"
-    adapter = adapt_signal(symbols, function_name=name)
-    rx, xp, _ = dispatch(adapter.symbol_array())
-    c = _constellation(adapter, constellation, name)
-    rx = _reference_scaled(adapter, rx, xp, name, num_skip_symbols)
+    inp = SignalInput(symbols, name)
+    rx, xp, _ = dispatch(inp.symbols())
+    c = inp.constellation(constellation, required=True)
+    rx = _reference_scaled(inp, rx, xp, name, num_skip_symbols)
     # Per element in the symbols' precision (complex64 by default), summed in
     # float64: single precision changed no MI by more than 5e-8 bit (QAM 4
     # to 256, Es/N0 -5 to 30 dB), far below the Monte Carlo error.

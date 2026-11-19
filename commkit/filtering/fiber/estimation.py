@@ -26,9 +26,8 @@ from ..._dispersion import (
     spread_samples,
 )
 from ...backend import ArrayType, _to_host, dispatch, to_device
-from ...core._signal_adapter import (
-    SignalAdapter,
-    adapt_signal,
+from ...core._signal_input import (
+    SignalInput,
     require_integer_sps,
 )
 from ...core.signal import Signal
@@ -665,11 +664,9 @@ def estimate_chromatic_dispersion(
     ...     dispersion_ps_nm=float(est.value), center_wavelength_nm=1550.0,
     ...     sampling_rate=64e9)
     """
-    signal_adapter = adapt_signal(
-        samples, function_name="estimate_chromatic_dispersion()"
-    )
+    inp = SignalInput(samples, "estimate_chromatic_dispersion()")
     return _estimate_chromatic_dispersion(
-        signal_adapter,
+        inp,
         method,
         center_wavelength_nm=center_wavelength_nm,
         sampling_rate=sampling_rate,
@@ -678,7 +675,7 @@ def estimate_chromatic_dispersion(
 
 
 def _estimate_chromatic_dispersion(
-    signal_adapter: SignalAdapter[Any],
+    inp: SignalInput[Any],
     method: ClockToneScan | FourthMomentScan | QuadraticPhaseFit,
     *,
     center_wavelength_nm: float | None,
@@ -692,15 +689,12 @@ def _estimate_chromatic_dispersion(
             "estimate_chromatic_dispersion(): method must be a ClockToneScan, "
             f"FourthMomentScan or QuadraticPhaseFit, got {type(method).__name__}."
         )
-    fs = float(signal_adapter.resolve_fact("sampling_rate", sampling_rate))
-    rs = float(signal_adapter.resolve_fact("symbol_rate", symbol_rate))
-    lam = signal_adapter.resolve_wavelength_nm(center_wavelength_nm)
-    x, xp, _ = dispatch(signal_adapter.array)
+    fs = inp.sampling_rate(sampling_rate)
+    rs = inp.symbol_rate(symbol_rate)
+    lam = inp.wavelength_nm(center_wavelength_nm)
+    x, xp, _ = dispatch(inp.samples)
     x2, was_1d = as_2d(x, name="samples")
-    signal = signal_adapter.signal
-    reference = None
-    if signal is not None and signal.reference is not None:
-        reference = signal.reference.symbols
+    reference = inp.reference_symbols()
     est = estimator(
         x2,
         method,
@@ -710,7 +704,7 @@ def _estimate_chromatic_dispersion(
         reference=reference,
     )
     value = est.value
-    rolloff = getattr(getattr(signal, "pulse", None), "rolloff", None)
+    rolloff = getattr(inp.pulse(), "rolloff", None)
     if isinstance(method, ClockToneScan) and rolloff is not None and rolloff < 0.05:
         logger.warning(
             "estimate_chromatic_dispersion(): ClockToneScan needs an excess band, "

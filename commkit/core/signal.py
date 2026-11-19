@@ -1,6 +1,6 @@
 """The :class:`Signal` container and its :class:`Reference` ground truth.
 
-A Signal is a waveform plus the facts and descriptions needed to process it:
+A Signal is a waveform plus the properties and description needed to process it:
 sampling and symbol rate, center frequency, the constellation and pulse it
 was built with, the transmitted reference and the frame layout.  It never
 holds pipeline results.
@@ -223,7 +223,7 @@ class Reference:
 
 @dataclass(frozen=True, eq=False, kw_only=True)
 class Signal:
-    """A sampled waveform with its facts, description and ground truth.
+    """A sampled waveform with its properties, description and ground truth.
 
     Parameters
     ----------
@@ -231,9 +231,9 @@ class Signal:
         IQ (or real) samples, NumPy or CuPy, ``(N,)`` for one channel or
         ``(C, N)`` for C channels.  Time is always the last axis.
     sampling_rate : float
-        Sampling rate in Hz (a fact).
+        Sampling rate in Hz (a property).
     symbol_rate : float
-        Symbol rate in Hz (a fact).  ``sps`` is derived from the two rates.
+        Symbol rate in Hz (a property).  ``sps`` is derived from the two rates.
     constellation : Constellation, optional
         The constellation the symbols were drawn from.  Functions use it as
         their default decision constellation; an explicit argument wins.
@@ -247,10 +247,10 @@ class Signal:
     frame : SingleCarrierFrame, optional
         The frame that generated the samples (a layout snapshot).
     center_frequency : float, default 0.0
-        Carrier frequency in Hz (a fact), used to label spectra.  Only an
+        Carrier frequency in Hz (a property), used to label spectra.  Only an
         ``"RF"`` or ``"OPT"`` signal has a carrier; a ``"DIG"`` one keeps 0.
     domain : {"DIG", "RF", "OPT"}, default "DIG"
-        Where the samples live (a fact): ``"DIG"`` a digital baseband signal,
+        Where the samples live (a property): ``"DIG"`` a digital baseband signal,
         ``"RF"`` the complex envelope of a radio-frequency signal and
         ``"OPT"`` that of an optical field, both around
         ``center_frequency``.  Spectra of an RF or optical signal are drawn

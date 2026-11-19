@@ -9,8 +9,9 @@ import numpy as np
 
 from .. import spectral
 from .._constants import SPEED_OF_LIGHT
-from ..backend import _to_host, dispatch, to_device
-from ..core._signal_adapter import adapt_signal
+from ..backend import ArrayType, _to_host, dispatch, to_device
+from ..core._signal_input import SignalInput
+from ..core.signal import Signal
 from ..logger import logger
 from .theme import (
     _draw_channels,
@@ -22,7 +23,7 @@ __all__ = ["plot_psd", "plot_spectrogram"]
 
 
 def plot_psd(
-    samples: Any,
+    samples: ArrayType | Signal,
     *,
     sampling_rate: float | None = None,
     nperseg: int = 256,
@@ -95,10 +96,10 @@ def plot_psd(
         The figure and the Axes (an array of Axes for several panels);
         ``None`` with ``show=True``, which shows the figure instead.
     """
-    signal_adapter = adapt_signal(samples, function_name="plot_psd()")
-    x = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    center_frequency, domain = _resolve_band(signal_adapter, center_frequency, domain)
+    inp = SignalInput(samples, "plot_psd()")
+    x = inp.samples
+    sampling_rate = inp.sampling_rate(sampling_rate)
+    center_frequency, domain = _resolve_band(inp, center_frequency, domain)
     logger.debug("Generating PSD plot (sampling_rate=%s Hz).", sampling_rate)
     x, _, _ = dispatch(x)
 
@@ -166,16 +167,14 @@ def plot_psd(
 
 
 def _resolve_band(
-    signal_adapter: Any, center_frequency: float | None, domain: str | None
+    inp: SignalInput[Any], center_frequency: float | None, domain: str | None
 ) -> tuple[float, str]:
     """The carrier and domain of the samples: the Signal's, or those given."""
-    if signal_adapter.signal is not None:
-        center_frequency = signal_adapter.resolve_fact(
-            "center_frequency", center_frequency
-        )
+    if inp.signal is not None:
+        center_frequency = inp.center_frequency(center_frequency)
         if domain is not None:
             domain = _check_domain(domain)
-        return center_frequency, signal_adapter.resolve_fact("domain", domain)
+        return center_frequency, inp.domain(domain)
     center_frequency = 0.0 if center_frequency is None else float(center_frequency)
     if domain is None:
         return center_frequency, "RF" if center_frequency else "DIG"
@@ -195,7 +194,7 @@ def _check_domain(domain: Any) -> str:
 
 
 def plot_spectrogram(
-    samples: Any,
+    samples: ArrayType | Signal,
     *,
     sampling_rate: float | None = None,
     window: str | tuple[Any, ...] | Any = "hann",
@@ -259,10 +258,10 @@ def plot_spectrogram(
         The figure and the Axes (an array of Axes for several panels);
         ``None`` with ``show=True``, which shows the figure instead.
     """
-    signal_adapter = adapt_signal(samples, function_name="plot_spectrogram()")
-    x = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    center_frequency, domain = _resolve_band(signal_adapter, center_frequency, domain)
+    inp = SignalInput(samples, "plot_spectrogram()")
+    x = inp.samples
+    sampling_rate = inp.sampling_rate(sampling_rate)
+    center_frequency, domain = _resolve_band(inp, center_frequency, domain)
     logger.debug("Generating spectrogram plot (sampling_rate=%s Hz).", sampling_rate)
     x, _, _ = dispatch(x)
 

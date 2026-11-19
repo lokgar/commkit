@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, to_device
-from ..core._signal_adapter import require_choice
+from ..core._signal_input import require_value
 
 
 def _numba() -> ModuleType:
@@ -64,7 +64,7 @@ class _Context:
 
     def need_constellation(self, method: object) -> Any:
         """The constellation, or raise naming the method that needs it."""
-        return require_choice(
+        return require_value(
             self.constellation,
             "constellation",
             "estimate_carrier_phase()",

@@ -24,7 +24,7 @@ from fractions import Fraction
 from typing import Any
 
 from .backend import ArrayType, dispatch, to_device
-from .core._signal_adapter import S, adapt_signal, require_integer_sps
+from .core._signal_input import S, SignalInput
 from .logger import logger
 from .math import normalize as _normalize
 
@@ -65,24 +65,18 @@ def decimate_to_symbol_rate(
     ndarray or Signal
         Symbols at one sample per symbol, ``(..., ceil((N - offset) / sps))``.
     """
-    signal_adapter = adapt_signal(samples, function_name="decimate_to_symbol_rate()")
-    sps_int = require_integer_sps(
-        signal_adapter.resolve_fact("sps", sps), "decimate_to_symbol_rate()"
-    )
+    inp = SignalInput(samples, "decimate_to_symbol_rate()")
+    sps_int = inp.integer_sps(sps)
     _check_offset(offset, sps_int, "decimate_to_symbol_rate()")
-    if signal_adapter.signal is None:
-        return signal_adapter.wrap_samples(
+    if inp.signal is None:
+        return inp.wrap(
             _decimate_to_symbol_rate_array(
-                signal_adapter.array, sps_int, offset, bool(normalize)
+                inp.samples, sps_int, offset, bool(normalize)
             )
         )
     do_norm = True if normalize is None else normalize
-    result = _decimate_to_symbol_rate_array(
-        signal_adapter.array, sps_int, offset, do_norm
-    )
-    return signal_adapter.wrap_samples(
-        result, sampling_rate=signal_adapter.signal.symbol_rate
-    )
+    result = _decimate_to_symbol_rate_array(inp.samples, sps_int, offset, do_norm)
+    return inp.wrap(result, sampling_rate=inp.symbol_rate())
 
 
 def _check_offset(offset: int, sps: int, function_name: str) -> None:
@@ -138,13 +132,13 @@ def upsample(
         Upsampled samples, ``(..., N * factor)``.
     """
     factor = _check_factor(factor, "upsample()")
-    signal_adapter = adapt_signal(samples, function_name="upsample()")
+    inp = SignalInput(samples, "upsample()")
     metadata: dict[str, Any] = {}
-    if signal_adapter.signal is not None:
+    if inp.signal is not None:
         correct_power = True if correct_power is None else correct_power
-        metadata["sampling_rate"] = signal_adapter.signal.sampling_rate * factor
+        metadata["sampling_rate"] = inp.sampling_rate() * factor
 
-    arr, _, sp = dispatch(signal_adapter.array)
+    arr, _, sp = dispatch(inp.samples)
     if periodic:
         out = _resample_periodic(arr, factor, 1, sp, "upsample()")
     else:
@@ -152,7 +146,7 @@ def upsample(
         out = _resample_poly(arr, factor, 1, sp)
     if correct_power:
         out = out * (factor**-0.5)
-    return signal_adapter.wrap_samples(out, **metadata)
+    return inp.wrap(out, **metadata)
 
 
 def decimate(
@@ -201,14 +195,14 @@ def decimate(
         raise ValueError(
             f"Unknown decimation method: {method!r}. Use 'decimate' or 'polyphase'."
         )
-    signal_adapter = adapt_signal(samples, function_name="decimate()")
+    inp = SignalInput(samples, "decimate()")
     metadata: dict[str, Any] = {}
-    if signal_adapter.signal is not None:
+    if inp.signal is not None:
         correct_power = True if correct_power is None else correct_power
-        metadata["sampling_rate"] = signal_adapter.signal.sampling_rate / factor
+        metadata["sampling_rate"] = inp.sampling_rate() / factor
 
     logger.debug("Decimating by factor %s (method: %s).", factor, method)
-    arr, _, sp = dispatch(signal_adapter.array)
+    arr, _, sp = dispatch(inp.samples)
     if method == "decimate":
         out = sp.signal.decimate(
             arr, factor, ftype=ftype, axis=-1, zero_phase=zero_phase
@@ -218,7 +212,7 @@ def decimate(
 
     if correct_power:
         out = out * (factor**0.5)
-    return signal_adapter.wrap_samples(out, **metadata)
+    return inp.wrap(out, **metadata)
 
 
 def resample(
@@ -276,7 +270,7 @@ def resample(
         ``sps_out / sps_in`` has no fraction with terms up to 1000, or if
         ``periodic`` and ``N * up / down`` is not an integer.
     """
-    signal_adapter = adapt_signal(samples, function_name="resample()")
+    inp = SignalInput(samples, "resample()")
     by_factors = up is not None or down is not None
     if by_factors and (sps_in is not None or sps_out is not None):
         raise ValueError("resample(): give either (up, down) or sps_out, not both.")
@@ -286,24 +280,23 @@ def resample(
         up = _check_factor(up, "resample()")
         down = _check_factor(down, "resample()")
     elif sps_out is not None:
-        if signal_adapter.signal is None and sps_in is None:
+        if inp.signal is None and sps_in is None:
             raise ValueError("resample() requires sps_in with sps_out for array input.")
-        sps_in = signal_adapter.resolve_fact("sps", sps_in)
+        sps_in = inp.sps(sps_in)
         up, down = _sps_ratio(sps_out, sps_in)
     else:
         raise ValueError("resample(): give either (up, down) or sps_out.")
 
     metadata: dict[str, Any] = {}
-    sig = signal_adapter.signal
-    if sig is not None:
+    if inp.signal is not None:
         correct_power = True if correct_power is None else correct_power
         metadata["sampling_rate"] = (
-            sig.sampling_rate * up / down
+            inp.sampling_rate() * up / down
             if sps_out is None
-            else sps_out * sig.symbol_rate
+            else sps_out * inp.symbol_rate()
         )
 
-    arr, _, sp = dispatch(signal_adapter.array)
+    arr, _, sp = dispatch(inp.samples)
     if periodic:
         out = _resample_periodic(arr, up, down, sp, "resample()")
     else:
@@ -312,7 +305,7 @@ def resample(
     if correct_power:
         # sps_after / sps_before = up / down  ->  gain = sqrt(down/up).
         out = out * (down / up) ** 0.5
-    return signal_adapter.wrap_samples(out, **metadata)
+    return inp.wrap(out, **metadata)
 
 
 # Largest up or down factor that ``sps_out`` may reduce to: the polyphase

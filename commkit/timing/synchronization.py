@@ -21,11 +21,9 @@ from .._peaks import parabolic_peak_offset
 from .._sequences import barker_sequence, zadoff_chu_sequence
 from ..backend import ArrayType, dispatch, to_device
 from ..core import Preamble, Signal
-from ..core._signal_adapter import (
+from ..core._signal_input import (
     S,
-    SignalAdapter,
-    adapt_signal,
-    require_integer_sps,
+    SignalInput,
 )
 from ..filtering.pulses import Pulse
 from ..logger import logger
@@ -348,8 +346,8 @@ def apply_delay(samples: S, *, delay: float | ArrayType) -> S:
     ``Y[k] = X[k] · exp(-j 2π k · delay / N)`` with ``k`` the signed FFT bin
     index.
     """
-    signal_adapter = adapt_signal(samples, function_name="apply_delay()")
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "apply_delay()")
+    x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
 
     C, N = x.shape
@@ -383,7 +381,7 @@ def apply_delay(samples: S, *, delay: float | ArrayType) -> S:
         # Complex input: ifft may return complex128 from complex64 input
         result = result.astype(x.dtype)
 
-    return signal_adapter.wrap_samples(restore_1d(was_1d, result))
+    return inp.wrap(restore_1d(was_1d, result))
 
 
 @dataclass(frozen=True)
@@ -484,10 +482,10 @@ def estimate_timing(
         If no template is available or no channel's peak reaches
         ``threshold``.
     """
-    signal_adapter = adapt_signal(samples, function_name="estimate_timing()")
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "estimate_timing()")
+    x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
-    ref = _timing_template(signal_adapter, template, sps, pulse, xp)  # (C_tx, L)
+    ref = _timing_template(inp, template, sps, pulse, xp)  # (C_tx, L)
 
     offset = 0
     if search_range is not None:
@@ -536,7 +534,7 @@ def estimate_timing(
 
 
 def _timing_template(
-    signal_adapter: SignalAdapter[Any],
+    inp: SignalInput[Any],
     template: ArrayType | Preamble | None,
     sps: float | None,
     pulse: Pulse | ArrayType | None,
@@ -547,7 +545,7 @@ def _timing_template(
     The argument, else the preamble of the Signal's frame; a Preamble is
     shaped at the resolved ``sps`` with the resolved ``pulse``.
     """
-    sig = signal_adapter.signal
+    sig = inp.signal
     if template is None and sig is not None and sig.frame is not None:
         template = sig.frame.preamble
     if template is None:
@@ -558,10 +556,8 @@ def _timing_template(
     if isinstance(template, Preamble):
         if sig is None and sps is None:
             raise ValueError("SPS must be provided when using a Preamble template.")
-        sps_int = require_integer_sps(
-            signal_adapter.resolve_fact("sps", sps), "estimate_timing()"
-        )
-        pulse = signal_adapter.resolve_choice("pulse", pulse)
+        sps_int = inp.integer_sps(sps)
+        pulse = inp.pulse(pulse)
         ref = xp.asarray(
             template.to_signal(sps=sps_int, symbol_rate=1.0, pulse=pulse).samples
         )
@@ -728,8 +724,8 @@ def correct_timing(
         raise ValueError(
             f"Unknown mode {mode!r}. Choose 'zero', 'circular', or 'slice'."
         )
-    signal_adapter = adapt_signal(samples, function_name="correct_timing()")
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "correct_timing()")
+    x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
     if isinstance(how, TimingEstimate):
         integer_offset = xp.asarray(how.integer)
@@ -819,11 +815,7 @@ def correct_timing(
     )
 
     out = restore_1d(was_1d, x)
-    sig = signal_adapter.signal
-    if mode == "slice" and sig is not None and sig.reference is not None:
-        # Alignment invariant: keep only the symbol periods still present.
-        num_symbols = int(out.shape[-1] // sig.sps)
-        return signal_adapter.wrap_samples(
-            out, reference=sig.reference.head(num_symbols)
-        )
-    return signal_adapter.wrap_samples(out)
+    if mode != "slice" or inp.signal is None:
+        return inp.wrap(out)
+    # Alignment invariant: keep only the symbol periods still present.
+    return inp.wrap(out, num_symbols=int(out.shape[-1] // inp.sps()))

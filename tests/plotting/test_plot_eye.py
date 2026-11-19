@@ -204,7 +204,7 @@ def test_eye_axis_limits(xp: Any) -> None:
 
 
 def test_selected_eye_component_keeps_signal_facts(xp: Any) -> None:
-    """One complex component uses the Signal's samples-per-symbol fact."""
+    """One complex component uses the Signal's samples per symbol."""
     from commkit.core import Signal
     from commkit.plotting import plot_eye_diagram
 

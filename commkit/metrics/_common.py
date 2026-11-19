@@ -12,8 +12,8 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, to_device
-from ..core._signal_adapter import SignalAdapter, require_choice
-from ..core.signal import Reference, Signal
+from ..core._signal_input import SignalInput, reference_of
+from ..core.signal import Reference
 from ..logger import logger
 from ..mapping import Constellation
 from ..math import normalize
@@ -62,12 +62,12 @@ def _log_per_channel(
 
 
 def _reference(
-    adapter: SignalAdapter, reference: Any, field: str, name: str, hint: str = ""
+    inp: SignalInput[Any], reference: Any, field: str, name: str, hint: str = ""
 ) -> Any:
     """The explicit reference, else the Signal's ``reference.<field>``."""
     if reference is not None:
         return reference
-    ref = None if adapter.signal is None else adapter.signal.reference
+    ref = None if inp.signal is None else inp.signal.reference
     value = None if ref is None else getattr(ref, field)
     if value is None:
         raise ValueError(
@@ -85,7 +85,7 @@ def _decoded(bits: Any, reference: Any, name: str) -> tuple[Any, Any, Any] | Non
 
     if not isinstance(bits, DecodeResult):
         return None
-    ref = reference.reference if isinstance(reference, Signal) else reference
+    ref = reference_of(reference)
     if isinstance(ref, Reference):
         info = ref.info_bits if ref.info_bits is not None else ref.bits
         if info is None:
@@ -97,12 +97,6 @@ def _decoded(bits: Any, reference: Any, name: str) -> tuple[Any, Any, Any] | Non
             "or the information bits as reference."
         )
     return bits.bits, ref, None
-
-
-def _constellation(adapter: SignalAdapter, constellation: Any, name: str) -> Any:
-    """The decision constellation: the argument, else the Signal's."""
-    constellation = adapter.resolve_choice("constellation", constellation)
-    return require_choice(constellation, "constellation", name, kind=Constellation)
 
 
 @functools.lru_cache(maxsize=64)
@@ -193,7 +187,7 @@ def _gain(
 
 
 def _reference_scaled(
-    adapter: SignalAdapter, rx: ArrayType, xp: Any, name: str, num_skip: int
+    inp: SignalInput[Any], rx: ArrayType, xp: Any, name: str, num_skip: int
 ) -> ArrayType:
     """Divide a Signal's symbols by their data-aided gain.
 
@@ -201,10 +195,10 @@ def _reference_scaled(
     ``num_skip``.  Arrays and Signals without a reference are returned as
     given.
     """
-    sig = adapter.signal
-    if sig is None or sig.reference is None:
+    reference = inp.reference_symbols()
+    if reference is None:
         return rx
-    _, ref = _paired(rx, sig.reference.symbols, xp, name)
+    _, ref = _paired(rx, reference, xp, name)
     measured = _skip(rx, num_skip, name)
     return rx / _gain(measured, _skip(ref, num_skip, name), xp)
 

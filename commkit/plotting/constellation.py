@@ -10,8 +10,9 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..backend import _to_host, dispatch, to_device
-from ..core._signal_adapter import adapt_signal, require_choice
+from ..backend import ArrayType, _to_host, dispatch, to_device
+from ..core._signal_input import SignalInput, require_value
+from ..core.signal import Signal
 from ..logger import logger
 from ..mapping import Constellation
 from ..math import rms
@@ -66,7 +67,7 @@ def plot_ideal_constellation(
         shows the figure instead.
     """
 
-    require_choice(
+    require_value(
         constellation,
         "constellation",
         "plot_ideal_constellation()",
@@ -145,7 +146,7 @@ def plot_ideal_constellation(
 
 
 def plot_constellation(
-    samples: Any,
+    samples: ArrayType | Signal,
     *,
     bins: int = 100,
     cmap: str = "inferno",
@@ -201,18 +202,13 @@ def plot_constellation(
         The figure and the Axes (an array of Axes for several panels);
         ``None`` with ``show=True``, which shows the figure instead.
     """
-    signal_adapter = adapt_signal(samples, function_name="plot_constellation()")
-    sig = signal_adapter.signal
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
-    if overlay_ideal:
-        require_choice(
-            constellation,
-            "constellation",
-            "plot_constellation()",
-            purpose=" for overlay_ideal",
-        )
+    inp = SignalInput(samples, "plot_constellation()")
+    sig = inp.signal
+    constellation = inp.constellation(
+        constellation, required=overlay_ideal, purpose=" for overlay_ideal"
+    )
     logger.debug("Generating constellation density plot.")
-    x, xp, _ = dispatch(signal_adapter.array)
+    x, xp, _ = dispatch(inp.samples)
 
     def draw(ax: Any, row: Any, title: str | None) -> None:
         # Ensure row are complex

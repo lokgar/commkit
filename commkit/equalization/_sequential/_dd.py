@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from ...backend import ArrayType
-from ...core._signal_adapter import adapt_signal, require_integer_sps
+from ...core._signal_input import SignalInput
 from ...core.signal import Signal
 from ...logger import logger
 from ...mapping._lattice import slicer_params
@@ -106,10 +106,10 @@ def lms(
         array input.  A WARNING is logged when the decided symbols of the
         last half of the decision-directed output lack its power by more
         than 1.5 dB: a lock at a wrong gain, or a constellation that does
-        not match the signal.  An explicit choice applies to this call
+        not match the signal.  An explicit constellation applies to this call
         only: ``signal`` of the result keeps the input Signal's
         ``constellation``, which describes its reference symbols, so pass
-        the same choice to the metrics, or set it on the Signal with
+        the same constellation to the metrics, or set it on the Signal with
         ``replace`` (with matching reference symbols) before equalizing.
     store_weights : bool, default False
         Record the weights of every symbol in ``weights_history``.
@@ -262,11 +262,11 @@ def lms(
     input is copied to the host once and the outputs back once; the result's
     arrays are on the input's device.
     """
-    signal_adapter = adapt_signal(samples, function_name="lms()")
-    x = signal_adapter.array
-    sig = signal_adapter.signal
-    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "lms()")
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    inp = SignalInput(samples, "lms()")
+    x = inp.samples
+    sig = inp.signal
+    sps = inp.integer_sps(sps)
+    constellation = inp.constellation(constellation)
 
     inline = _inline_cpr(cpr, constellation, "lms()")
 
@@ -474,10 +474,10 @@ def rls(
         array input.  A WARNING is logged when the decided symbols of the
         last half of the decision-directed output lack its power by more
         than 1.5 dB: a lock at a wrong gain, or a constellation that does
-        not match the signal.  An explicit choice applies to this call
+        not match the signal.  An explicit constellation applies to this call
         only: ``signal`` of the result keeps the input Signal's
         ``constellation``, which describes its reference symbols, so pass
-        the same choice to the metrics, or set it on the Signal with
+        the same constellation to the metrics, or set it on the Signal with
         ``replace`` (with matching reference symbols) before equalizing.
     store_weights : bool, default False
         Record the weights of every symbol in ``weights_history``.
@@ -540,11 +540,11 @@ def rls(
        the null subspace, where ``P``'s eigenvalues grow for fractionally
        spaced (``sps > 1``) input.
     """
-    signal_adapter = adapt_signal(samples, function_name="rls()")
-    x = signal_adapter.array
-    sig = signal_adapter.signal
-    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "rls()")
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    inp = SignalInput(samples, "rls()")
+    x = inp.samples
+    sig = inp.signal
+    sps = inp.integer_sps(sps)
+    constellation = inp.constellation(constellation)
     if sps > 1:
         logger.debug(
             "RLS is mathematically ill-conditioned for fractionally-spaced "

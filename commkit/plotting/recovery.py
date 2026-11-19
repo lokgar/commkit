@@ -12,7 +12,7 @@ import numpy as np
 
 from .. import _fft
 from ..backend import _to_host, get_array_module, to_device
-from ..core._signal_adapter import adapt_signal
+from ..core._signal_input import SignalInput
 from ..frequency import PilotSlopeEstimate
 from ..recovery import (
     BlockPhaseEstimate,
@@ -309,7 +309,7 @@ def plot_pilot_tone_phase_estimate(
     method : PilotTone
         The method used (its ``frequency`` and ``bandwidth`` are drawn).
     sampling_rate : float, optional
-        Sampling rate in Hz (a fact): taken from a Signal, required for
+        Sampling rate in Hz (a property): taken from a Signal, required for
         arrays.
     quantity : {"spectrum", "phase"}, optional
         Select one panel; ``None`` draws both.
@@ -343,8 +343,8 @@ def plot_pilot_tone_phase_estimate(
     name = "plot_pilot_tone_phase_estimate()"
     estimate = _require(estimate, PilotToneEstimate, name, "PilotTone")
     tones = estimate.tone_frequencies
-    adapter = adapt_signal(samples, function_name=name)
-    fs = float(adapter.resolve_fact("sampling_rate", sampling_rate))
+    inp = SignalInput(samples, name)
+    fs = inp.sampling_rate(sampling_rate)
     theta_deg = _device_channels(estimate.value) * (180.0 / np.pi)
     if quantity == "phase":
         fig, axis = _get_axis(ax)
@@ -361,7 +361,7 @@ def plot_pilot_tone_phase_estimate(
         return _finish((fig, axis), show, xlim=xlim, ylim=ylim, legend=legend)
     # The spectrum on the samples' device, in ascending frequency; only the
     # drawn envelope is transferred.
-    x = _device_channels(adapter.array)
+    x = _device_channels(inp.samples)
     xp = get_array_module(x)
     C, N = x.shape
     mag = xp.fft.fftshift(xp.abs(_fft.fft(x, axis=-1)), axes=-1)

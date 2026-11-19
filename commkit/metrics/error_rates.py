@@ -11,12 +11,11 @@ import numpy as np
 
 from .._array import to_report_scalar
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import adapt_signal
+from ..core._signal_input import SignalInput
 from ..core.signal import Reference, Signal
 from ..logger import logger
 from ..mapping import Constellation
 from ._common import (
-    _constellation,
     _decoded,
     _log_per_channel,
     _paired,
@@ -77,15 +76,15 @@ def ber(
                 f"{name}: num_skip_symbols does not apply to decoded bits."
             )
         bits, reference, _ = post
-    adapter = adapt_signal(bits, function_name=name)
-    received = adapter.symbol_array()
-    if adapter.signal is not None or num_skip_symbols:
-        c = _constellation(adapter, constellation, name)
+    inp = SignalInput(bits, name)
+    received = inp.symbols()
+    if inp.signal is not None or num_skip_symbols:
+        c = inp.constellation(constellation, required=True)
         k = c.bits_per_symbol
-        if adapter.signal is not None:
+        if inp.signal is not None:
             received = c.demap(received)
     rx, xp, _ = dispatch(received)
-    rx, tx = _paired(rx, _reference(adapter, reference, "bits", name), xp, name)
+    rx, tx = _paired(rx, _reference(inp, reference, "bits", name), xp, name)
     if num_skip_symbols:
         rx = _skip(rx, num_skip_symbols * k, name)
         tx = _skip(tx, num_skip_symbols * k, name)
@@ -119,7 +118,9 @@ def fer(
     ----------
     bits : array_like or DecodeResult
         Received bits (0 and 1), ``(N,)`` or ``(C, N)``, with ``N`` a multiple
-        of ``info_bits``, or a :class:`~commkit.coding.DecodeResult`.
+        of ``info_bits``, or a :class:`~commkit.coding.DecodeResult`.  Not a
+        Signal, unlike :func:`ber`'s: blocks are decoder output, never
+        samples.
     reference : array_like, Signal or Reference
         Transmitted bits, same shape.  With a DecodeResult, the transmitted
         Signal or its :class:`~commkit.core.Reference`, whose ``info_bits``
@@ -224,10 +225,10 @@ def ser(
         selection, or a frame Signal or one not at one sample per symbol.
     """
     name = "ser()"
-    adapter = adapt_signal(symbols, function_name=name)
-    rx, xp, _ = dispatch(adapter.symbol_array())
-    c = _constellation(adapter, constellation, name)
-    rx, tx = _paired(rx, _reference(adapter, reference, "symbols", name), xp, name)
+    inp = SignalInput(symbols, name)
+    rx, xp, _ = dispatch(inp.symbols())
+    c = inp.constellation(constellation, required=True)
+    rx, tx = _paired(rx, _reference(inp, reference, "symbols", name), xp, name)
     rx = _skip(rx, num_skip_symbols, name)
     tx = _skip(tx, num_skip_symbols, name)
 

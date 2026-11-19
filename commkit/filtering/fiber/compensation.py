@@ -52,9 +52,9 @@ from ..._dispersion import (
 )
 from ..._fiber import Fiber, check_link, propagate, to_watts
 from ...backend import ArrayType, _to_host, dispatch
-from ...core._signal_adapter import (
+from ...core._signal_input import (
     S,
-    adapt_signal,
+    SignalInput,
 )
 from ...logger import logger
 from ...math import _next_pow2
@@ -126,7 +126,7 @@ def correct_chromatic_dispersion(
     how : ChromaticDispersionEstimate or method object, optional
         An estimate of :func:`estimate_chromatic_dispersion`, or one of its
         methods (:class:`ClockToneScan`, :class:`FourthMomentScan`,
-        :class:`QuadraticPhaseFit`), estimated first with the Signal's facts
+        :class:`QuadraticPhaseFit`), estimated first with the Signal's properties
         (estimate first for array input).  Give ``how`` or ``dispersion_ps_nm``, not both.
     dispersion_ps_nm : float, optional
         Known accumulated dispersion of the link ``D·L`` in ps/nm (standard
@@ -213,12 +213,10 @@ def correct_chromatic_dispersion(
     >>> y = correct_chromatic_dispersion(  # a circularly simulated record
     ...     sig, dispersion_ps_nm=1360.0, method="whole_record")
     """
-    signal_adapter = adapt_signal(
-        samples, function_name="correct_chromatic_dispersion()"
-    )
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    center_wavelength_nm = signal_adapter.resolve_wavelength_nm(center_wavelength_nm)
     name = "correct_chromatic_dispersion()"
+    inp = SignalInput(samples, name)
+    sampling_rate = inp.sampling_rate(sampling_rate)
+    center_wavelength_nm = inp.wavelength_nm(center_wavelength_nm)
     if (how is None) == (dispersion_ps_nm is None):
         raise ValueError(
             f"{name}: give the dispersion as an estimate or method (how) or as "
@@ -226,7 +224,7 @@ def correct_chromatic_dispersion(
         )
     if isinstance(how, (ClockToneScan, FourthMomentScan, QuadraticPhaseFit)):
         how = _estimate_chromatic_dispersion(
-            signal_adapter,
+            inp,
             how,
             center_wavelength_nm=center_wavelength_nm,
             sampling_rate=sampling_rate,
@@ -258,13 +256,13 @@ def correct_chromatic_dispersion(
             center_wavelength_nm,
         )
         result = apply_dispersion(
-            signal_adapter.array,
+            inp.samples,
             sampling_rate=sampling_rate,
             dispersion_ps_nm=dispersion_ps_nm,
             center_wavelength_nm=center_wavelength_nm,
             inverse=True,
         )
-        return signal_adapter.wrap_samples(result)
+        return inp.wrap(result)
     taps = dispersion_compensation_taps(
         dispersion_ps_nm=dispersion_ps_nm,
         center_wavelength_nm=center_wavelength_nm,
@@ -278,8 +276,8 @@ def correct_chromatic_dispersion(
         center_wavelength_nm,
         taps.size,
     )
-    x, _, _ = dispatch(signal_adapter.array)
-    return signal_adapter.wrap_samples(fir_filter(x, taps))
+    x, _, _ = dispatch(inp.samples)
+    return inp.wrap(fir_filter(x, taps))
 
 
 #: Default length over the spread: a filter exactly as long as the spread
@@ -515,9 +513,9 @@ def correct_fiber_propagation(
     ...     launch_power_dbm=2.0)
     """
     name = "correct_fiber_propagation()"
-    signal_adapter = adapt_signal(samples, function_name=name)
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    center_wavelength_nm = signal_adapter.resolve_wavelength_nm(center_wavelength_nm)
+    inp = SignalInput(samples, name)
+    sampling_rate = inp.sampling_rate(sampling_rate)
+    center_wavelength_nm = inp.wavelength_nm(center_wavelength_nm)
     link = check_link(
         fiber=fiber,
         span_length_km=span_length_km,
@@ -534,7 +532,7 @@ def correct_fiber_propagation(
         raise ValueError(
             f"{name}: nonlinear_scale must be finite, got {nonlinear_scale!r}."
         )
-    x, xp, _ = dispatch(signal_adapter.array)
+    x, xp, _ = dispatch(inp.samples)
     field, was_1d, scale = to_watts(x, xp, launch_power_dbm, name)
     logger.info(
         "DBP: %d x %.4g km, %.3g dBm, %d steps/span, xi=%.3g.",
@@ -562,7 +560,7 @@ def correct_fiber_propagation(
             field, xp, guard=_link_guard(link, sampling_rate), run=backpropagate
         )
     out *= out.real.dtype.type(1.0 / scale)
-    return signal_adapter.wrap_samples(restore_1d(was_1d, out))
+    return inp.wrap(restore_1d(was_1d, out))
 
 
 #: Smallest block of the overlap-save backpropagation; blocks are at least

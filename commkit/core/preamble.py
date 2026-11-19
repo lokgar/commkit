@@ -15,7 +15,7 @@ from .._sequences import barker_sequence, zadoff_chu_sequence, zc_mimo_root
 from ..backend import ArrayType, to_device
 from ..filtering.pulses import Pulse
 from . import generation
-from ._signal_adapter import require_device, require_integer_sps
+from ._signal_input import require_device, require_integer_sps
 from .signal import Signal
 
 __all__ = ["Preamble"]
