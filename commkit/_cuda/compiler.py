@@ -104,9 +104,14 @@ def check_arrays(*arrays: tuple[str, Any, Any, tuple[int | None, ...]]) -> None:
     for label, arr, dtype, shape in arrays:
         if arr.dtype != dtype:
             raise TypeError(f"{label} must be {np.dtype(dtype)}, got {arr.dtype}")
-        if arr.ndim != len(shape) or any(
-            want is not None and want != got
-            for want, got in zip(shape, arr.shape, strict=False)
+        # The tuple compare settles exact shapes; the per-axis walk, several
+        # times slower and run on every launch, only shapes with ``None``.
+        if arr.shape != shape and (
+            arr.ndim != len(shape)
+            or any(
+                want is not None and want != got
+                for want, got in zip(shape, arr.shape, strict=False)
+            )
         ):
             dims = ", ".join("n" if s is None else str(s) for s in shape)
             dims += "," if len(shape) == 1 else ""
