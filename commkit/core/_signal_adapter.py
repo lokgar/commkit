@@ -14,18 +14,24 @@ and fully resolved scalar metadata.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, cast
 
-import numpy as np
+from ._signal_input import S, require_device, require_integer_sps
+from ._signal_input import _same_value as _same_fact
+from ._signal_input import require_value as require_choice
 
 if TYPE_CHECKING:
     from ..backend import ArrayType
     from .signal import Signal
 
-#: Type of a transform's waveform argument and result: ``def f(x: S) -> S``
-#: returns a Signal for a Signal and an array for an array.  CuPy has no type
-#: stubs, so a CuPy array is ``Any`` to the checker and gives ``Any`` back.
-S = TypeVar("S", bound="np.ndarray | Signal")
+__all__ = [
+    "S",
+    "SignalAdapter",
+    "adapt_signal",
+    "require_choice",
+    "require_device",
+    "require_integer_sps",
+]
 
 
 @dataclass(frozen=True)
@@ -165,69 +171,3 @@ def adapt_signal(
     if isinstance(value, Signal):
         return SignalAdapter(getattr(value, field), value, function_name)
     return SignalAdapter(value, None, function_name)
-
-
-# Relative tolerance for facts derived by floating-point arithmetic, e.g.
-# sps = sampling_rate / symbol_rate = 3.0000000000000004.
-_FACT_RTOL = 1e-9
-
-
-def _same_fact(a: Any, b: Any) -> bool:
-    try:
-        return bool(np.isclose(float(a), float(b), rtol=_FACT_RTOL, atol=0.0))
-    except (TypeError, ValueError):
-        return bool(a == b)
-
-
-def require_choice(
-    value: Any, field: str, function_name: str, *, purpose: str = "", kind: Any = None
-) -> Any:
-    """``value``, a resolved choice; ``None`` raises ``ValueError``.
-
-    The message names the function, the ``field`` and what it is needed for
-    (``purpose``, such as ``" for its decisions"``).  With ``kind`` a value
-    of another type raises ``TypeError``.
-    """
-    if value is None:
-        raise ValueError(
-            f"{function_name} needs a {field}{purpose}: pass {field}= or a Signal "
-            "that has one."
-        )
-    if kind is not None and not isinstance(value, kind):
-        raise TypeError(
-            f"{function_name}: {field} must be a {kind.__name__}, got "
-            f"{type(value).__name__}."
-        )
-    return value
-
-
-def require_device(device: str, function_name: str) -> str:
-    """Validate a factory's ``device`` and return it lower-cased.
-
-    Factories have no input data whose device they could follow, so they are
-    the only functions that take ``device=``.
-    """
-    if isinstance(device, str) and device.lower() in ("cpu", "gpu"):
-        return device.lower()
-    raise ValueError(
-        f'{function_name} requires device to be "cpu" or "gpu"; got {device!r}.'
-    )
-
-
-def require_integer_sps(value: float, function_name: str) -> int:
-    """Validate a positive integral SPS and return it as ``int``.
-
-    Values within a relative 1e-9 of an integer are accepted, since an SPS
-    computed as ``sampling_rate / symbol_rate`` carries rounding error.  A
-    genuinely fractional SPS (1.5) raises; it is never truncated.
-    """
-    if not np.isfinite(value) or value < 1:
-        raise ValueError(
-            f"{function_name} requires sps to be a positive integer; got {value!r}."
-        )
-    nearest = round(float(value))
-    if abs(value - nearest) > _FACT_RTOL * nearest:
-        raise ValueError(
-            f"{function_name} requires sps to be a positive integer; got {value!r}."
-        )
-    return int(nearest)
