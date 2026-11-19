@@ -20,7 +20,7 @@ from .._overlap_save import ols_apply
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
-from ..math import normalize
+from ..math import _next_pow2, normalize
 from .pulses import Pulse
 
 __all__ = [
@@ -496,8 +496,8 @@ def _overlap_save_filter(
     """
     L = taps.size
     guard = L - 1 - center  # lags -center .. L - 1 - center
-    nfft = max(1024, 1 << (max(1, 4 * L) - 1).bit_length())
-    nfft = max(nfft, 1 << (2 * guard).bit_length())
+    # The power of two above 2 * guard keeps at least half of each block.
+    nfft = max(1024, _next_pow2(max(1, 4 * L)), _next_pow2(2 * guard + 1))
     real = not xp.iscomplexobj(rows) and not xp.iscomplexobj(taps)
     kernel = xp.zeros(nfft, dtype=taps.dtype)
     kernel[:L] = taps

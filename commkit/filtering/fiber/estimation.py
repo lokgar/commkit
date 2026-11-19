@@ -33,7 +33,7 @@ from ...core._signal_adapter import (
 )
 from ...core.signal import Signal
 from ...logger import logger
-from ...math import _phasor
+from ...math import _next_pow2, _phasor
 
 __all__ = [
     "ChromaticDispersionEstimate",
@@ -325,7 +325,7 @@ def _scan_block(method: Any, wavelength_nm: float, fs: float, minimum: int) -> i
         for v in (lo, hi)
     )
     spread = spread_samples(b_max, sampling_rate=fs, bandwidth=fs)
-    return max(minimum, 1 << max(int(math.ceil(8.0 * spread)) - 1, 1).bit_length())
+    return max(minimum, _next_pow2(max(math.ceil(8.0 * spread), 2)))
 
 
 def _clock_tone(
@@ -564,7 +564,7 @@ def _quadratic_phase(
         # 0.8 π up to omega_max (the band edge, where the weights are
         # smallest); smaller blocks average more of them.
         need = 2.5 * abs(b2l) * omega_max * sampling_rate
-        return max(1024, 1 << max(int(math.ceil(need)) - 1, 1).bit_length())
+        return max(1024, _next_pow2(max(math.ceil(need), 2)))
 
     b2l_max = beta2_length(
         dispersion_ps_nm=method.max_dispersion_ps_nm, center_wavelength_nm=wavelength_nm

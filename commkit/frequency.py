@@ -27,7 +27,7 @@ from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .core.signal import Signal
 from .logger import logger
-from .math import _derotate, _linear_trend_slope
+from .math import _derotate, _linear_trend_slope, _next_pow2
 
 
 def _get_numba_mm_bootstrap() -> Callable[..., np.ndarray]:
@@ -478,7 +478,7 @@ def _mth_power(
             f"Signal too short for spectral FOE (N={N}). Minimum 8 samples required."
         )
     M = _resolve_power(method.power, constellation, None)
-    nfft = method.nfft or 1 << int(np.ceil(np.log2(N)))
+    nfft = method.nfft or _next_pow2(N)
 
     # In the samples' precision: complex128 changed no estimate by more than
     # 0.005 Hz (16-QAM, 2^16 symbols, 15 dB; the error itself is 726 Hz rms).
@@ -550,7 +550,7 @@ def _mengali_morelli(
 
     # Autocorrelation at all lags 1..L via Wiener-Khinchin (2 FFTs), linear
     # because of the zero-padding to nfft >= N + L.
-    nfft_r = 1 << int(np.ceil(np.log2(N + L)))
+    nfft_r = _next_pow2(N + L)
     Y_r = _fft.fft(y, n=nfft_r, axis=-1)
     R_all = _fft.ifft(Y_r * xp.conj(Y_r), axis=-1)
     # Lags in the data's precision: a float64 array would promote the
@@ -625,7 +625,7 @@ def _bias_tone(x: ArrayType, fs: float, method: SpectralPeak) -> _Rows:
         raise ValueError(
             f"Segment too short for bias tone search (N={N}). Minimum 4 samples required."
         )
-    nfft = 1 << int(np.ceil(np.log2(N)))
+    nfft = _next_pow2(N)
     mag = xp.abs(_fft.fft(x, n=nfft, axis=-1))  # (R, nfft)
     freqs = xp.fft.fftfreq(nfft, d=1.0 / fs)
     search = mag

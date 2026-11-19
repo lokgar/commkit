@@ -24,7 +24,7 @@ from ..core import Preamble, Signal
 from ..core._signal_adapter import S, adapt_signal, require_integer_sps
 from ..filtering.pulses import Pulse
 from ..logger import logger
-from ..math import _derotate
+from ..math import _derotate, _next_pow2
 
 __all__ = [
     "TimingEstimate",
@@ -94,9 +94,7 @@ def cross_correlate(
     full_len = N + L - 1
 
     # Smallest power-of-2 >= full_len for FFT efficiency.
-    # `(full_len - 1).bit_length()` is the canonical integer-only formula;
-    # `full_len.bit_length()` would round up even when full_len is already a power of 2.
-    n_fft = 1 << (full_len - 1).bit_length()
+    n_fft = _next_pow2(full_len)
 
     # FFT-based correlation: R[k] = IFFT(FFT(samples) * conj(FFT(template)))
     # Circular correlation places positive lags at 0..N-1 and negative lags
@@ -530,7 +528,7 @@ def estimate_timing(
         # transform of the signal: corr_all[rx, tx, lag], (C_rx, C_tx, N_lag),
         # the positive lags of cross_correlate.
         N_lag = sig_processing.shape[-1]
-        n_fft = 1 << (N_lag + L - 2).bit_length()
+        n_fft = _next_pow2(N_lag + L - 1)
         SIG = _fft.fft(sig_processing, n_fft, axis=-1)[:, None, :]
         TPL = _fft.fft(ref_waveform, n_fft, axis=-1)[None, :, :]
         corr_all = _fft.ifft(SIG * xp.conj(TPL), axis=-1)[..., :N_lag]

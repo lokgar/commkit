@@ -57,6 +57,7 @@ from ...core._signal_adapter import (
     adapt_signal,
 )
 from ...logger import logger
+from ...math import _next_pow2
 from ..linear import fir_filter
 from .estimation import (
     ChromaticDispersionEstimate,
@@ -620,7 +621,7 @@ def _overlap_save_blocks(
     aside, as the previous batch overwrites it.
     """
     C, N = field.shape
-    length = max(_MIN_BLOCK, 1 << (8 * guard - 1).bit_length())
+    length = max(_MIN_BLOCK, _next_pow2(max(8 * guard, 1)))
     hop = length - 2 * guard
     num_blocks = -(-N // hop)
     batch = _BATCH_SAMPLES_CPU if xp is np else _BATCH_SAMPLES_GPU

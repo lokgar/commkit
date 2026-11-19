@@ -5,6 +5,7 @@ They read a real phase trajectory in radians, e.g. the output of
 ``carrier_phase_trajectory`` or ``separate_drift_phase_noise``.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,7 +15,7 @@ from scipy.stats import chi2
 from ..._array import as_2d, broadcast_channels, to_report_scalar
 from ...backend import ArrayType, dispatch, to_device
 from ...logger import logger
-from ...math import normalize
+from ...math import _next_pow2, normalize
 from .._common import (
     _BETA_SLOPE,
     _FWHM_FROM_AREA,
@@ -434,7 +435,7 @@ def _beta_separation(
                 f_cross,
                 c,
                 fmin,
-                int(2 ** np.ceil(np.log2(_BETA_MIN_BINS * fs / max(f_cross, 1e-300)))),
+                _next_pow2(math.ceil(_BETA_MIN_BINS * fs / max(f_cross, 1e-300))),
                 _BETA_MIN_BINS,
             )
 

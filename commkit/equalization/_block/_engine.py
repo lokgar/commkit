@@ -23,6 +23,7 @@ from ..._array import as_2d, warn_if_double
 from ..._cuda.graphs import GraphRunner
 from ...backend import ArrayType, dispatch, to_device
 from ...logger import logger
+from ...math import _next_pow2
 from .._common import (
     _build_padded_samples,
     _init_butterfly_weights,
@@ -252,7 +253,7 @@ def _prepare_block(
 
     # Overlap-save FFT size: the next power of 2 >= block_size*sps + T - 1.
     ols_min = block_size * sps + num_taps - 1
-    fftsize = 1 << (ols_min - 1).bit_length()
+    fftsize = _next_pow2(ols_min)
 
     if state is None:
         c_tap = num_taps // 2

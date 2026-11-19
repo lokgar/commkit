@@ -20,6 +20,7 @@ from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import S, adapt_signal, require_integer_sps
 from ..core.signal import Signal
 from ..logger import logger
+from ..math import _next_pow2
 from ._common import _build_padded_samples, _normalize_inputs
 
 __all__ = ["ChannelEstimate", "apply_taps", "correct_channel", "estimate_channel"]
@@ -143,7 +144,7 @@ def correct_channel(
 
     # N_fft must satisfy discard = N_fft//4 >= L so the IIR filter's causal
     # and anti-causal tails both decay within the discarded guard regions.
-    N_fft = max(1024, 1 << (max(1, 4 * L) - 1).bit_length())
+    N_fft = max(1024, _next_pow2(max(1, 4 * L)))
 
     logger.debug(
         "ZF/MMSE internals: N=%s, L=%s, num_ch=%s, N_fft=%s", N, L, num_ch, N_fft
@@ -323,7 +324,7 @@ def apply_taps(
             _at_eq_norm,
             sps,
         )
-    N_fft = max(1024, 1 << (4 * num_taps - 1).bit_length())
+    N_fft = max(1024, _next_pow2(4 * num_taps))
     # h[k] at index k mod N_fft, so H = conj(FFT of W placed at -shift + t).
     kernel = xp.zeros((C, C, N_fft), dtype=dtype)
     kernel[..., :num_taps] = weights
