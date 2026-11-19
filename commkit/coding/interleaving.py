@@ -19,8 +19,8 @@ from typing import Any
 
 import numpy as np
 
-from .._array import validate_array
-from ..backend import ArrayType, _device_tables, get_array_module
+from .._array import freeze_host, validate_array
+from ..backend import ArrayType, _device_tables, _to_host, get_array_module
 from .base import _Value
 
 __all__ = ["Interleaver", "deinterleave", "interleave"]
@@ -40,14 +40,12 @@ class Interleaver(_Value):
     permutation: np.ndarray
 
     def __post_init__(self) -> None:
-        p = np.asarray(self.permutation)
+        p = _to_host(self.permutation)
         if p.ndim != 1 or p.size == 0 or p.dtype.kind not in "iu":
             raise ValueError("permutation must be a non-empty 1-D integer array.")
         if not np.array_equal(np.sort(p), np.arange(p.size)):
             raise ValueError("permutation must contain each of 0 ... L - 1 once.")
-        p = p.astype(np.int64)
-        p.setflags(write=False)
-        object.__setattr__(self, "permutation", p)
+        freeze_host(self, "permutation", p, np.int64)
 
     @property
     def length(self) -> int:

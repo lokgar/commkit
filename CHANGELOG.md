@@ -4,6 +4,10 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+### Changes that may need code updates
+
+- `Constellation`, `LinearBlockCode`, `LDPCCode`, `PolarCode`, `Punctured` and `Interleaver` accept CuPy arrays for their array fields and copy them to the host, as the pilot, carrier-phase and EXIT value objects already did; `Constellation` raised `TypeError` on device points, labels or a pmf. Code that relied on the error to catch device input no longer gets it.
+
 ## [3.8.0] - 2026-11-12
 
 The fixes of a full review of 3.7.1. Gardner clock recovery holds its loop bandwidth up to the largest offset it accepts, resampling keeps its accuracy at any record length, block backpropagation bounds its memory, and the fibre kernels form their phase in double precision. One interpolation kernel serves clock offset, jitter and Gardner on both devices, and `fir_filter`, `apply_taps`, `welch_psd` and the trace plots are several times faster. Names follow the verb rules: an estimator returns the estimate subclass of its method, with no field left `None`, and `cma` takes its default step from the constellation and warns where the constant-modulus criterion cannot work. The migration list below comes first.

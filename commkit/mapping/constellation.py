@@ -17,8 +17,8 @@ or from arbitrary points (natural-binary labels unless given)::
     Constellation(points, bit_labels=labels)
 
 Instances are immutable, hashable, compare by value, and hold read-only
-NumPy arrays.  They live on the host; methods that take data run on the
-data's device.
+NumPy arrays: they live on the host (device arrays given to the constructor
+are copied there), and methods that take data run on the data's device.
 """
 
 from dataclasses import dataclass, replace
@@ -27,9 +27,9 @@ from typing import Any
 
 import numpy as np
 
-from .._array import warn_if_double
+from .._array import freeze_host, warn_if_double
 from .._bits import pack_bits, unpack_bits
-from ..backend import ArrayType, _device_tables, dispatch
+from ..backend import ArrayType, _device_tables, _to_host, dispatch
 from ._demap import _llr, _llr_separable, _llr_separable_gpu
 from ._lattice import Axis, find_separable_axes, find_square_grid
 from .gray import _gray_points, _nearest_index
@@ -83,7 +83,7 @@ class Constellation:
     family: str | None = None
 
     def __post_init__(self) -> None:
-        points = _host_array(self.points, "points")
+        points = _to_host(self.points)
         if points.ndim != 1 or points.size < 2:
             raise ValueError(
                 f"points must have shape (M,) with M >= 2, got {points.shape}."
@@ -105,7 +105,7 @@ class Constellation:
         if self.bit_labels is None:
             labels = unpack_bits(np.arange(order, dtype=np.int32), k)
         else:
-            labels = _host_array(self.bit_labels, "bit_labels")
+            labels = _to_host(self.bit_labels)
             if labels.shape != (order, k):
                 raise ValueError(
                     f"bit_labels must have shape ({order}, {k}), got {labels.shape}."
@@ -118,7 +118,7 @@ class Constellation:
 
         pmf = None
         if self.pmf is not None:
-            pmf = _host_array(self.pmf, "pmf").astype(np.float64)
+            pmf = _to_host(self.pmf, np.float64)
             if pmf.shape != (order,):
                 raise ValueError(f"pmf must have shape ({order},), got {pmf.shape}.")
             if not np.all(np.isfinite(pmf)) or np.any(pmf < 0):
@@ -134,10 +134,10 @@ class Constellation:
         if self.family is not None and self.family not in _FAMILIES:
             raise ValueError(f"family must be one of {_FAMILIES} or None.")
 
-        for name, value in (("points", points), ("bit_labels", labels), ("pmf", pmf)):
-            if value is not None:
-                value.setflags(write=False)
-            object.__setattr__(self, name, value)
+        freeze_host(self, "points", points)
+        freeze_host(self, "bit_labels", labels)
+        if pmf is not None:
+            freeze_host(self, "pmf", pmf)
 
     # -- factories -----------------------------------------------------------
 
@@ -418,13 +418,6 @@ class Constellation:
         points[pack_bits(self.bit_labels)] = self.points
         points.setflags(write=False)
         return points
-
-
-def _host_array(value: object, name: str) -> np.ndarray:
-    """``value`` as a NumPy array; device arrays are rejected by name."""
-    if type(value).__module__.split(".")[0] == "cupy":
-        raise TypeError(f"{name} must be a host (NumPy) array; use .get() first.")
-    return np.array(value, copy=True)
 
 
 @cache

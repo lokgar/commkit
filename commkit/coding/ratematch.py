@@ -19,7 +19,8 @@ from typing import Any
 
 import numpy as np
 
-from ..backend import ArrayType, _device_tables, dispatch
+from .._array import freeze_host
+from ..backend import ArrayType, _device_tables, _to_host, dispatch
 from .base import (
     _CODECS,
     _checked,
@@ -63,16 +64,15 @@ class Punctured(_Code):
 
     def __post_init__(self) -> None:
         _codec(self.code, "Punctured()")
-        p = np.unique(np.asarray(self.positions))
-        if p.size != np.size(self.positions) or p.size == 0:
+        raw = _to_host(self.positions)
+        p = np.unique(raw)
+        if p.size != raw.size or p.size == 0:
             raise ValueError("positions must be distinct and not empty.")
         if p.dtype.kind not in "iu" or p[0] < 0 or p[-1] >= self.code.n:
             raise ValueError(f"positions must be integers in [0, {self.code.n}).")
         if p.size >= self.code.n:
             raise ValueError("positions cannot cover the whole codeword.")
-        p = p.astype(np.int64)
-        p.setflags(write=False)
-        object.__setattr__(self, "positions", p)
+        freeze_host(self, "positions", p, np.int64)
 
     @property
     def n(self) -> int:

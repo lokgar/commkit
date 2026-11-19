@@ -1,5 +1,6 @@
 """Tests for the encode/decode verbs and DecodeResult (coding/base.py)."""
 
+import dataclasses
 import logging
 import os
 import pickle
@@ -23,6 +24,7 @@ from commkit.coding import (
     Chase,
     Concatenated,
     ConvolutionalCode,
+    Interleaver,
     LDPCCode,
     LinearBlockCode,
     MaximumLikelihood,
@@ -169,6 +171,7 @@ class TestDecodeLogging:
 
 
 H16 = LinearBlockCode.hamming(4, extended=True)  # (16, 11), distance 4
+LDPC74 = LDPCCode.from_parity_check(H74.parity_check)
 
 # (code, method, checked): whether each decoder's valid can be False.
 CHECKED_CASES = [
@@ -250,6 +253,31 @@ class TestCodeValue:
     def test_arrays_are_read_only(self) -> None:
         with pytest.raises(ValueError):
             H74.generator[0, 0] = 1
+
+    @pytest.mark.parametrize(
+        "build",
+        [
+            lambda a: LinearBlockCode(generator=a(H74.generator)),
+            lambda a: LDPCCode(a(LDPC74.checks), a(LDPC74.variables), 3, 7),
+            lambda a: PolarCode(8, a(np.array([3, 5, 6, 7]))),
+            lambda a: Punctured(H74, a(np.array([6]))),
+            lambda a: Interleaver(a(np.array([2, 0, 3, 1]))),
+        ],
+        ids=["linear", "ldpc", "polar", "punctured", "interleaver"],
+    )
+    def test_device_arrays_become_host_copies(self, xp: Any, build: Any) -> None:
+        """Array fields given on the device equal the host-built object and
+        are read-only NumPy copies; a NumPy argument stays writable."""
+        on_device = build(xp.asarray)
+        on_host = build(np.array)
+        assert on_device == on_host
+        for f in dataclasses.fields(on_device):
+            value = getattr(on_device, f.name)
+            if hasattr(value, "shape"):
+                assert isinstance(value, np.ndarray) and not value.flags.writeable
+        mine = np.array(H74.generator)
+        LinearBlockCode(generator=mine)
+        assert mine.flags.writeable
 
     def test_pickle_leaves_the_hash_behind(self) -> None:
         """A hash of bytes is valid in its own process only."""

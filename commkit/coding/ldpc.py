@@ -33,7 +33,8 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from .. import _cuda
-from ..backend import ArrayType, _device_tables, dispatch
+from .._array import freeze_host
+from ..backend import ArrayType, _device_tables, _to_host, dispatch
 from ..logger import logger
 from ._gf2 import inverse, matmul_mod2, rank, row_reduce
 from ._ldpc_tables import DVBS2, PON_BASE
@@ -80,8 +81,8 @@ class LDPCCode(_Code):
     punctured: int = 0
 
     def __post_init__(self) -> None:
-        rows = np.asarray(self.checks)
-        cols = np.asarray(self.variables)
+        rows = _to_host(self.checks)
+        cols = _to_host(self.variables)
         for name in ("num_checks", "num_variables", "punctured"):
             v = getattr(self, name)
             if isinstance(v, bool) or not isinstance(v, int | np.integer):
@@ -108,9 +109,8 @@ class LDPCCode(_Code):
         p = int(self.punctured)
         if p < 0:
             raise ValueError(f"punctured must be >= 0, got {p}.")
-        for name, value in (("checks", rows), ("variables", cols)):
-            value.setflags(write=False)
-            object.__setattr__(self, name, value)
+        freeze_host(self, "checks", rows)
+        freeze_host(self, "variables", cols)
         object.__setattr__(self, "num_checks", m)
         object.__setattr__(self, "num_variables", n)
         object.__setattr__(self, "punctured", p)

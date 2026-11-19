@@ -24,8 +24,9 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
+from .._array import freeze_host
 from .._bits import pack_bits, unpack_bits
-from ..backend import ArrayType, _device_tables, dispatch
+from ..backend import ArrayType, _device_tables, _to_host, dispatch
 from ._gf2 import matmul_mod2, null_space, row_reduce
 from .base import (
     _CODECS,
@@ -75,7 +76,7 @@ class LinearBlockCode(_Code):
     generator: np.ndarray
 
     def __post_init__(self) -> None:
-        g = np.array(self.generator, copy=True)
+        g = _to_host(self.generator)
         if g.ndim != 2 or g.shape[0] < 1 or g.shape[1] < g.shape[0]:
             raise ValueError(
                 f"generator must have shape (k, n) with 1 <= k <= n, got {g.shape}."
@@ -85,8 +86,7 @@ class LinearBlockCode(_Code):
         g = g.astype(np.int8)
         if row_reduce(g)[1].size != g.shape[0]:
             raise ValueError("generator must have full row rank over GF(2).")
-        g.setflags(write=False)
-        object.__setattr__(self, "generator", g)
+        freeze_host(self, "generator", g)
 
     @property
     def n(self) -> int:

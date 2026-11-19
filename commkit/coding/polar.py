@@ -28,7 +28,8 @@ from typing import Any
 
 import numpy as np
 
-from ..backend import ArrayType, dispatch, to_device
+from .._array import freeze_host
+from ..backend import ArrayType, _to_host, dispatch, to_device
 from .base import _CODECS, _Code, _Codec, _Decoded, _encode_blocks
 from .crc import CRC
 
@@ -140,14 +141,13 @@ class PolarCode(_Code):
         n = self.length
         if isinstance(n, bool) or not isinstance(n, int) or n < 2 or n & (n - 1):
             raise ValueError(f"length must be a power of two >= 2, got {n!r}.")
-        p = np.unique(np.asarray(self.info_positions))
-        if p.size != np.size(self.info_positions) or p.size == 0:
+        raw = _to_host(self.info_positions)
+        p = np.unique(raw)
+        if p.size != raw.size or p.size == 0:
             raise ValueError("info_positions must be distinct and not empty.")
         if p.dtype.kind not in "iu" or p[0] < 0 or p[-1] >= n:
             raise ValueError(f"info_positions must be integers in [0, {n}).")
-        p = p.astype(np.int64)
-        p.setflags(write=False)
-        object.__setattr__(self, "info_positions", p)
+        freeze_host(self, "info_positions", p, np.int64)
         if self.crc is not None:
             if not isinstance(self.crc, CRC):
                 raise TypeError("crc must be a CRC or None.")
