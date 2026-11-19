@@ -14,11 +14,11 @@ from tests.common.metrics import (
 )
 from tests.common.signals import (
     apply_phase_ramp,
-    make_adapter_test_signal,
     make_ambiguous_qam16,
     make_channel_signal,
     make_dsh_beat,
     make_isi_distorted_signal,
+    make_signal_input_test_signal,
     make_test_frame_signal,
     make_test_mimo_samples,
     make_test_mimo_signal,
@@ -36,7 +36,7 @@ __all__ = [
     "calc_mse_db",
     "calc_rms_phase_error",
     "device_of",
-    "make_adapter_test_signal",
+    "make_signal_input_test_signal",
     "make_ambiguous_qam16",
     "make_channel_signal",
     "make_dsh_beat",

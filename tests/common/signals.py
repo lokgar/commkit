@@ -439,8 +439,8 @@ def make_dsh_beat(
     return z, dphi
 
 
-def make_adapter_test_signal(xp: Any = None, **metadata: Any) -> Signal:
-    """Construct a dummy Signal for adapter testing."""
+def make_signal_input_test_signal(xp: Any = None, **metadata: Any) -> Signal:
+    """A small 2-SPS Signal for the SignalInput tests."""
     if xp is None:
         xp = np
     return Signal(

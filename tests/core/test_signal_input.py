@@ -15,7 +15,7 @@ from commkit.core._signal_input import (
 )
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
-from tests.common.signals import make_adapter_test_signal
+from tests.common.signals import make_signal_input_test_signal
 
 
 class TestSamples:
@@ -29,7 +29,7 @@ class TestSamples:
         assert inp.function_name == "example()"
 
     def test_signal_input_unwraps_samples(self, xp: Any) -> None:
-        sig = make_adapter_test_signal(xp)
+        sig = make_signal_input_test_signal(xp)
         inp = SignalInput(sig, "example()")
         assert inp.samples is sig.samples
         assert inp.signal is sig
@@ -40,7 +40,7 @@ class TestSamples:
         assert inp.wrap(out, sampling_rate=5.0, num_symbols=1) is out
 
     def test_wrap_signal_replaces_samples_and_metadata(self, xp: Any) -> None:
-        sig = make_adapter_test_signal(xp)
+        sig = make_signal_input_test_signal(xp)
         replacement = xp.zeros(8, dtype=xp.complex64)
         out = SignalInput(sig, "example()").wrap(replacement, sampling_rate=1e6)
         assert out is not sig
@@ -50,14 +50,14 @@ class TestSamples:
 
     def test_wrap_none_raises(self, xp: Any) -> None:
         """None is no result, for array and Signal input alike."""
-        for value in (xp.ones(4), make_adapter_test_signal(xp)):
+        for value in (xp.ones(4), make_signal_input_test_signal(xp)):
             with pytest.raises(ValueError, match=r"f\(\): no samples to return"):
                 SignalInput(value, "f()").wrap(None)
 
     def test_wrap_num_symbols_slices_the_reference(self, xp: Any) -> None:
         """num_symbols keeps the reference aligned with the kept periods."""
         symbols = xp.arange(8, dtype=xp.complex64)
-        sig = make_adapter_test_signal(xp, reference=Reference(symbols=symbols))
+        sig = make_signal_input_test_signal(xp, reference=Reference(symbols=symbols))
         out = SignalInput(sig, "f()").wrap(sig.samples[:10], num_symbols=5)
         assert out.reference is not None
         xp.testing.assert_array_equal(out.reference.symbols, symbols[:5])
@@ -65,14 +65,14 @@ class TestSamples:
         assert kept.reference is sig.reference
 
     def test_wrap_num_symbols_without_reference(self, xp: Any) -> None:
-        sig = make_adapter_test_signal(xp)
+        sig = make_signal_input_test_signal(xp)
         assert SignalInput(sig, "f()").wrap(sig.samples, num_symbols=3).reference is (
             None
         )
 
     def test_symbols_requires_one_sample_per_symbol(self, xp: Any) -> None:
         """symbols() passes arrays and 1-SPS Signals, rejects the rest."""
-        sig = make_adapter_test_signal(xp)  # 2 samples per symbol
+        sig = make_signal_input_test_signal(xp)  # 2 samples per symbol
         with pytest.raises(ValueError, match=r"example\(\) needs one sample"):
             SignalInput(sig, "example()").symbols()
         one = sig.replace(sampling_rate=sig.symbol_rate)
@@ -94,7 +94,7 @@ class TestProperties:
         ],
     )
     def test_from_signal(self, xp: Any, method: str, value: Any) -> None:
-        inp = SignalInput(make_adapter_test_signal(xp), "f()")
+        inp = SignalInput(make_signal_input_test_signal(xp), "f()")
         assert getattr(inp, method)() == value
         assert getattr(inp, method)(value) == value
 
@@ -117,7 +117,7 @@ class TestProperties:
             getattr(inp, method)()
 
     def test_conflict_raises(self, xp: Any) -> None:
-        inp = SignalInput(make_adapter_test_signal(xp), "f()")
+        inp = SignalInput(make_signal_input_test_signal(xp), "f()")
         with pytest.raises(
             ValueError, match=r"f\(\): sampling_rate=1000000.0 conflicts"
         ):
@@ -127,13 +127,13 @@ class TestProperties:
 
     def test_relative_tolerance(self, xp: Any) -> None:
         """Values within a relative 1e-9 agree, beyond it they conflict."""
-        inp = SignalInput(make_adapter_test_signal(xp), "f()")
+        inp = SignalInput(make_signal_input_test_signal(xp), "f()")
         assert inp.sps(2.0 * (1 + 1e-12)) == 2.0
         with pytest.raises(ValueError, match="conflicts"):
             inp.sps(2.0 * (1 + 1e-8))
 
     def test_integer_sps(self, xp: Any) -> None:
-        assert SignalInput(make_adapter_test_signal(xp), "f()").integer_sps() == 2
+        assert SignalInput(make_signal_input_test_signal(xp), "f()").integer_sps() == 2
         inp = SignalInput(xp.ones(4), "f()")
         assert inp.integer_sps(3.0000000000000004) == 3
         with pytest.raises(ValueError, match=r"f\(\) requires sps to be a positive"):
@@ -142,7 +142,7 @@ class TestProperties:
             inp.integer_sps()
 
     def test_wavelength_from_optical_signal(self, xp: Any) -> None:
-        sig = make_adapter_test_signal(xp, domain="OPT", center_frequency=193.4e12)
+        sig = make_signal_input_test_signal(xp, domain="OPT", center_frequency=193.4e12)
         inp = SignalInput(sig, "f()")
         carrier = sig.center_wavelength_nm
         assert inp.wavelength_nm() == carrier
@@ -151,7 +151,7 @@ class TestProperties:
             inp.wavelength_nm(carrier * (1 + 1.1e-4))
 
     def test_wavelength_needs_argument_without_optical_carrier(self, xp: Any) -> None:
-        for value in (xp.ones(4), make_adapter_test_signal(xp)):
+        for value in (xp.ones(4), make_signal_input_test_signal(xp)):
             inp = SignalInput(value, "f()")
             assert inp.wavelength_nm(1550) == 1550.0
             with pytest.raises(ValueError, match=r"f\(\) requires center_wavelength"):
@@ -162,7 +162,7 @@ class TestDefaults:
     """Defaults: from the Signal, an explicit argument wins silently."""
 
     def test_constellation_explicit_wins_silently(self, xp: Any, caplog: Any) -> None:
-        sig = make_adapter_test_signal(xp, constellation=Constellation.qam(16))
+        sig = make_signal_input_test_signal(xp, constellation=Constellation.qam(16))
         inp = SignalInput(sig, "f()")
         assert inp.constellation() == Constellation.qam(16)
         assert inp.constellation(Constellation.psk(4)) == Constellation.psk(4)
@@ -189,7 +189,7 @@ class TestDefaults:
 
     def test_pulse(self, xp: Any) -> None:
         pulse = RRC(rolloff=0.1)
-        inp = SignalInput(make_adapter_test_signal(xp, pulse=pulse), "f()")
+        inp = SignalInput(make_signal_input_test_signal(xp, pulse=pulse), "f()")
         assert inp.pulse() is pulse
         taps = np.ones(3)
         assert inp.pulse(taps) is taps
@@ -201,18 +201,18 @@ class TestDefaults:
     def test_reference_symbols(self, xp: Any) -> None:
         symbols = xp.ones(8, dtype=xp.complex64)
         own = xp.zeros(8, dtype=xp.complex64)
-        sig = make_adapter_test_signal(xp, reference=Reference(symbols=symbols))
+        sig = make_signal_input_test_signal(xp, reference=Reference(symbols=symbols))
         inp = SignalInput(sig, "f()")
         assert inp.reference_symbols() is symbols
         assert inp.reference_symbols(own) is own
-        bare = SignalInput(make_adapter_test_signal(xp), "f()")
+        bare = SignalInput(make_signal_input_test_signal(xp), "f()")
         assert bare.reference_symbols() is None
         with pytest.raises(ValueError, match=r"f\(\) needs reference symbols"):
             bare.reference_symbols(required=True)
 
     def test_reference_of(self, xp: Any) -> None:
         ref = Reference(symbols=xp.ones(8, dtype=xp.complex64))
-        sig: Signal = make_adapter_test_signal(xp, reference=ref)
+        sig: Signal = make_signal_input_test_signal(xp, reference=ref)
         assert reference_of(sig) is ref
         assert reference_of(ref) is ref
         assert reference_of(None) is None
