@@ -74,7 +74,7 @@ _DOCUMENTED: dict[str, str] = {
     "equalization/_block/_engine.py::_block_state": _STATE,
     "equalization/_block/_engine.py::_prepare_block": _HOST_VALUE
     + " (training symbols, pilot mask)",
-    "equalization/_common.py::_unpack_result_numpy": _RECURSION,
+    "equalization/_common.py::_unpack_result": _RECURSION,
     "equalization/polarization.py::_jones_at_grid_points": _HOST_VALUE + " (taps)",
     "equalization/_sequential/_setup.py::_assemble_sequential": _RECURSION,
     "equalization/_sequential/_setup.py::_prepare_sequential": _RECURSION,

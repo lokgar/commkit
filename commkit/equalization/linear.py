@@ -291,9 +291,7 @@ def apply_taps(
 
     _at_eq_norm = None
     if normalize:
-        x, _, _at_eq_norm = _normalize_inputs(
-            x, None, input_norm_factor=input_norm_factor
-        )
+        x, _at_eq_norm = _normalize_inputs(x, input_norm_factor=input_norm_factor)
 
     if weights.ndim != 3 or weights.shape[:2] != (C, C):
         raise ValueError(
