@@ -449,19 +449,6 @@ def _data_aided(
 # Both correct a Signal's samples against reference.symbols.
 
 
-def _reference_symbols(inp: Any, reference: Any, name: str) -> Any:
-    """The explicit reference, else the Signal's ``reference.symbols``."""
-    if reference is not None:
-        return reference
-    sig = inp.signal
-    if sig is None or sig.reference is None:
-        raise ValueError(
-            f"{name} needs reference symbols: pass reference= or a Signal that "
-            "has a reference."
-        )
-    return sig.reference.symbols
-
-
 def _pairing_scores(y, s, xp, metric: str):
     """``(C_out, C_ref)`` match scores between output and reference streams.
 
@@ -562,7 +549,7 @@ def resolve_channel_permutation(
     x = inp.symbols()
     resolved = _resolve_channel_permutation_array(
         x,
-        _reference_symbols(inp, reference, name),
+        inp.reference_symbols(reference, required=True),
         num_skip_symbols=num_skip_symbols,
         metric=metric,
     )
@@ -690,7 +677,7 @@ def resolve_phase_ambiguity(
         raise ValueError(f"{name} requires constellation or symmetry.")
     resolved = _resolve_phase_ambiguity_array(
         x,
-        _reference_symbols(inp, reference, name),
+        inp.reference_symbols(reference, required=True),
         constellation,
         symmetry=symmetry,
         num_skip_symbols=num_skip_symbols,

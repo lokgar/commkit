@@ -694,10 +694,7 @@ def _estimate_chromatic_dispersion(
     lam = inp.wavelength_nm(center_wavelength_nm)
     x, xp, _ = dispatch(inp.samples)
     x2, was_1d = as_2d(x, name="samples")
-    signal = inp.signal
-    reference = None
-    if signal is not None and signal.reference is not None:
-        reference = signal.reference.symbols
+    reference = inp.reference_symbols()
     est = estimator(
         x2,
         method,
@@ -707,7 +704,7 @@ def _estimate_chromatic_dispersion(
         reference=reference,
     )
     value = est.value
-    rolloff = getattr(getattr(signal, "pulse", None), "rolloff", None)
+    rolloff = getattr(inp.pulse(), "rolloff", None)
     if isinstance(method, ClockToneScan) and rolloff is not None and rolloff < 0.05:
         logger.warning(
             "estimate_chromatic_dispersion(): ClockToneScan needs an excess band, "

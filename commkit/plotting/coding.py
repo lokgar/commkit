@@ -20,7 +20,8 @@ import numpy as np
 from .._array import validate_array
 from ..backend import dispatch, to_device
 from ..coding import DecodeResult, ErrorRateCurve, ExitChart, LDPCCode, LinearBlockCode
-from ..core.signal import Reference, Signal
+from ..core._signal_input import reference_of
+from ..core.signal import Reference
 from ..logger import logger
 from .theme import (
     _finish,
@@ -59,7 +60,7 @@ def _decoded_llrs(llrs: Any, bits: Any) -> tuple[Any, Any]:
             "plot_llr_distribution(): the DecodeResult has no LLRs; its decoder "
             "gives hard decisions only (see DecodeResult)."
         )
-    ref = bits.reference if isinstance(bits, Signal) else bits
+    ref = reference_of(bits)
     if isinstance(ref, Reference):
         if ref.bits is None:
             raise ValueError("plot_llr_distribution(): the reference has no bits.")

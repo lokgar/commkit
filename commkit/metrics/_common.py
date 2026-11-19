@@ -12,8 +12,8 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, to_device
-from ..core._signal_input import SignalInput
-from ..core.signal import Reference, Signal
+from ..core._signal_input import SignalInput, reference_of
+from ..core.signal import Reference
 from ..logger import logger
 from ..mapping import Constellation
 from ..math import normalize
@@ -85,7 +85,7 @@ def _decoded(bits: Any, reference: Any, name: str) -> tuple[Any, Any, Any] | Non
 
     if not isinstance(bits, DecodeResult):
         return None
-    ref = reference.reference if isinstance(reference, Signal) else reference
+    ref = reference_of(reference)
     if isinstance(ref, Reference):
         info = ref.info_bits if ref.info_bits is not None else ref.bits
         if info is None:
@@ -195,10 +195,10 @@ def _reference_scaled(
     ``num_skip``.  Arrays and Signals without a reference are returned as
     given.
     """
-    sig = inp.signal
-    if sig is None or sig.reference is None:
+    reference = inp.reference_symbols()
+    if reference is None:
         return rx
-    _, ref = _paired(rx, sig.reference.symbols, xp, name)
+    _, ref = _paired(rx, reference, xp, name)
     measured = _skip(rx, num_skip, name)
     return rx / _gain(measured, _skip(ref, num_skip, name), xp)
 

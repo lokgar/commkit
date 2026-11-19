@@ -81,14 +81,7 @@ def carrier_phase_trajectory(
     name = "carrier_phase_trajectory()"
     inp = SignalInput(symbols, name)
     y, xp, _ = dispatch(inp.symbols())
-    if reference is None:
-        sig = inp.signal
-        if sig is None or sig.reference is None:
-            raise ValueError(
-                f"{name} needs reference symbols: pass reference= or a Signal "
-                "that has a reference."
-            )
-        reference = sig.reference.symbols
+    reference = inp.reference_symbols(reference, required=True)
 
     y2, was_1d = as_2d(y, name="symbols")
     c = y2.shape[0]

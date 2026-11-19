@@ -142,9 +142,9 @@ def _estimate_carrier_phase(
             f"estimate_carrier_phase(): {type(method).__name__} needs one "
             f"sample per symbol; the Signal has sps={sig.sps:g}."
         )
-    reference = method.symbols if isinstance(method, ConstantPhase) else None
-    if reference is None and sig is not None and sig.reference is not None:
-        reference = sig.reference.symbols
+    reference = inp.reference_symbols(
+        method.symbols if isinstance(method, ConstantPhase) else None
+    )
     ctx = _Context(
         constellation=inp.constellation(constellation),
         sampling_rate=fs,
