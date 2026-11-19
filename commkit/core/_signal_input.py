@@ -1,21 +1,22 @@
 """The array-or-Signal argument of a Signal-aware function (private).
 
 Every Signal-aware function of the package, and user code through
-``commkit.core.SignalInput``, starts from :class:`SignalInput`, which unwraps the argument once, resolves what the function
-needs from the Signal through one typed method per field, and returns
-results through :meth:`SignalInput.wrap`.  :data:`S` is the TypeVar of a
-transform's argument and result.  Also :func:`reference_of` (the
-:class:`Reference` of a Signal passed as a reference argument),
-:func:`require_value` (a value that must be there), :func:`require_device`
-and :func:`require_integer_sps`.
+``commkit.core.SignalInput``, starts from :class:`SignalInput`, which
+unwraps the argument once, resolves what the function needs from the
+Signal through one typed method per field, and returns results through
+:meth:`SignalInput.wrap`.  :data:`S` is the TypeVar of a transform's
+argument and result.  Also :func:`reference_of` (the :class:`Reference` of
+a Signal passed as a reference argument), :func:`require_value` (a value
+that must be there), :func:`require_device` and
+:func:`require_integer_sps`.
 
 Two rules, the same for every field.  A **property** of the samples
 (``sampling_rate``, ``symbol_rate``, ``sps``, ``center_frequency``,
-``domain``, the carrier wavelength) comes
-from a Signal: an argument that disagrees with it raises ``ValueError``, an
-equal one is accepted, and array input needs the argument.  A **default**
-(``constellation``, ``pulse``, the reference symbols) comes from a Signal
-too, but an explicit argument wins.  Neither case warns.
+``domain``, the carrier wavelength) comes from a Signal: an argument that
+disagrees with it raises ``ValueError``, an equal one is accepted, and
+array input needs the argument.  A **default** (``constellation``,
+``pulse``, the reference symbols) comes from a Signal too, but an explicit
+argument wins.  Neither case warns.
 
 This module holds container adaptation only: numerical code receives arrays
 and fully resolved scalar metadata.
