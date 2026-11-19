@@ -55,7 +55,7 @@ from . import backend as _backend
 from . import core as _core
 from . import filtering
 from .core import Reference, Signal
-from .core._signal_adapter import require_device
+from .core._signal_input import require_device
 from .logger import logger
 from .mapping import Constellation
 

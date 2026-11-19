@@ -19,7 +19,7 @@ from ..logger import logger
 from ..mapping import Constellation
 from ..math import db_to_linear, normalize
 from . import generation
-from ._signal_adapter import _same_fact, require_device, require_integer_sps
+from ._signal_input import _same_value, require_device, require_integer_sps
 from .preamble import Preamble, _check_int
 from .signal import Reference, Signal
 
@@ -908,7 +908,7 @@ def extract_payload(signal: Signal) -> Signal:
     frame = signal.frame
     if frame is None:
         raise ValueError("extract_payload(): the Signal has no frame.")
-    if not _same_fact(signal.sps, 1):
+    if not _same_value(signal.sps, 1):
         raise ValueError(
             f"extract_payload() needs one sample per symbol, got sps={signal.sps}; "
             "decimate to the symbol rate first."
