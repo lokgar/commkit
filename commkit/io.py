@@ -202,9 +202,9 @@ def save_npz(
     # Write
     # -------------------------------------------------------------------------
     if compressed:
-        np.savez_compressed(path, **arrays)  # type: ignore[arg-type]
+        np.savez_compressed(path, **arrays)
     else:
-        np.savez(path, **arrays)  # type: ignore[arg-type]
+        np.savez(path, **arrays)
     logger.info("Saved Signal %s to %s.", signal.samples.shape, path)
 
 

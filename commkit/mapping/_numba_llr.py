@@ -23,7 +23,7 @@ _inline = numba.njit(cache=True, fastmath=True, nogil=True, inline="always")
 
 
 @_inline
-def prepare_exp(metric, e):  # type: ignore[no-untyped-def]
+def prepare_exp(metric, e):
     """``e = exp(metric - peak)`` with the largest metric ``peak``."""
     peak = metric[0]
     for m in range(1, metric.shape[0]):
@@ -35,7 +35,7 @@ def prepare_exp(metric, e):  # type: ignore[no-untyped-def]
 
 
 @_inline
-def log_half_sum(metric, e, idx, v, b, peak):  # type: ignore[no-untyped-def]
+def log_half_sum(metric, e, idx, v, b, peak):
     """``log sum_j exp(metric[idx[v, b, j]] - peak)`` of one half.
 
     Summed from ``e``, or relative to the half's own maximum where
@@ -57,7 +57,7 @@ def log_half_sum(metric, e, idx, v, b, peak):  # type: ignore[no-untyped-def]
 
 
 @_inline
-def bit_llr(metric, e, idx, b, peak, exact):  # type: ignore[no-untyped-def]
+def bit_llr(metric, e, idx, b, peak, exact):
     """LLR of bit ``b``; ``idx[v, b]`` are the points with bit ``v``."""
     if exact:
         return log_half_sum(metric, e, idx, 0, b, peak) - log_half_sum(
@@ -72,7 +72,7 @@ def bit_llr(metric, e, idx, b, peak, exact):  # type: ignore[no-untyped-def]
 
 
 @_inline
-def axis_llrs(x, lev, logp, idx, bits, inv_s2, exact, metric, e, out, i):  # type: ignore[no-untyped-def]
+def axis_llrs(x, lev, logp, idx, bits, inv_s2, exact, metric, e, out, i):
     """LLRs of one axis's bits into ``out[i, bits]``."""
     for m in range(lev.shape[0]):
         d = x - lev[m]
@@ -167,7 +167,7 @@ def llr_separable_kernel(
 
 
 @_inline
-def axis_maxlog(x, lev, lab, lo, hi, pos, inv_s2, out, i):  # type: ignore[no-untyped-def]
+def axis_maxlog(x, lev, lab, lo, hi, pos, inv_s2, out, i):
     """Closed-form max-log LLRs of one axis's bits into ``out[i, pos]``."""
     L = lev.shape[0]
     kb = pos.shape[0]

@@ -167,7 +167,7 @@ def _plot_eye_traces(
         }
         imshow_kwargs.update(kwargs)
 
-        ax.imshow(h, **imshow_kwargs)  # type: ignore[arg-type]
+        ax.imshow(h, **imshow_kwargs)
 
     else:
         raise ValueError(f"Unknown kind: {kind}. Supported: 'line', 'hist'")

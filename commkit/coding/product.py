@@ -101,22 +101,22 @@ class _StaircaseComponent(_Algebraic):
         return self.n - _PARITY
 
     @property
-    def t(self) -> int:  # type: ignore[override]
+    def t(self) -> int:
         """Correctable errors of the BCH part."""
         return 3
 
     @property
-    def first_root(self) -> int:  # type: ignore[override]
+    def first_root(self) -> int:
         """``b = 1``: roots ``beta, beta^3, beta^5``."""
         return 1
 
     @property
-    def binary(self) -> bool:  # type: ignore[override]
+    def binary(self) -> bool:
         """True: the symbols are bits."""
         return True
 
     @cached_property
-    def field(self) -> _Field:  # type: ignore[override]
+    def field(self) -> _Field:
         """GF(2^10) of the locators."""
         return _Field(10, 0x409)  # p(x) = 1 + x^3 + x^10, clause A.6
 

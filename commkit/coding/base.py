@@ -128,7 +128,7 @@ class _Value:
             return True
         if type(other) is not type(self):
             return NotImplemented
-        return self._key() == other._key()  # type: ignore[attr-defined]
+        return self._key() == other._key()
 
     def __hash__(self) -> int:
         # Cached: the device-table cache hashes the object on every call, and

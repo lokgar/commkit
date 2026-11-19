@@ -192,9 +192,9 @@ def plot_pilot_phase_estimate(
     if f_est is None:
         f_ests = None  # label the fitted slope instead
     elif isinstance(f_est, (np.ndarray, list, tuple)):
-        f_ests = [float(f) for f in f_est]  # type: ignore[union-attr]
+        f_ests = [float(f) for f in f_est]
     else:
-        f_ests = [float(f_est)] * C  # type: ignore[arg-type]
+        f_ests = [float(f_est)] * C
 
     has_full = phi_full is not None
     if quantity == "trajectory" and not has_full:
