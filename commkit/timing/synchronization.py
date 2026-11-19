@@ -577,16 +577,16 @@ def estimate_timing(
     norm_factors = xp.sqrt(e_ref * e_s)
     norm_factors = xp.maximum(norm_factors, 1e-12)
 
-    # Calculate per-channel coherence (diagnostic mathematically absolute bound, [0, 1])
+    # Per-channel coherence, a diagnostic bounded to [0, 1] by Cauchy-Schwarz.
     peak_vals = xp.max(corr_mag, axis=-1)  # (C,) incoherent, as the peak search
     mean_vals = xp.mean(corr_mag, axis=-1)
 
     coherence = peak_vals / norm_factors
     coherence = xp.clip(coherence, 0.0, 1.0)
 
-    # Primary timing metric: PAPR (Peak-to-Average magnitude)
-    # This evaluates visual prominence against the noise floor, ensuring
-    # extreme robustness to CFO phase-rotation and pulse-shape mismatch.
+    # Timing metric: peak-to-average magnitude, the peak's prominence over
+    # the correlation floor; magnitudes keep it insensitive to a CFO rotation
+    # and to pulse-shape mismatch.
     mean_vals = xp.maximum(mean_vals, 1e-12)
     metrics = peak_vals / mean_vals
 

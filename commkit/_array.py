@@ -89,16 +89,9 @@ def validate_array(
 # Array shape helpers
 # ---------------------------------------------------------------------------
 #
-# CommKit's SISO/MIMO convention is ``(N,)`` / ``(C, N)`` with time on the last
-# axis.  Nearly every DSP entry point therefore
-# promotes a 1-D input to ``(1, N)``, runs one vectorized channel-batched
-# implementation, and squeezes the leading axis back off on the way out.  These
-# helpers are that idiom, defined once, so the promotion is validated the same
-# way everywhere instead of silently passing 3-D (or 0-d) input through to a
-# confusing downstream broadcast error.
-#
-# They are pure indexing/broadcast operations and therefore correct on every
-# array type the library sees - NumPy and CuPy - without dispatching.
+# Promote ``(N,)`` to ``(1, N)``, run the channel-batched code, squeeze back:
+# validated here so 3-D or 0-d input raises instead of broadcasting.  Pure
+# indexing, so they work on NumPy and CuPy without dispatching.
 
 
 def as_2d(arr: ArrayType, *, name: str = "array") -> tuple[ArrayType, bool]:
@@ -180,9 +173,8 @@ def broadcast_channels(
 ) -> ArrayType:
     """Broadcast a shared reference sequence across ``num_channels`` channels.
 
-    Replaces the ad-hoc ``if ref.ndim == 1: ref = ref[None, :]`` promotion used
-    at every reference/pilot input, adding the channel-count check that the
-    bare promotion leaves to a later, far more opaque broadcast failure.
+    Unlike a bare ``ref[None, :]`` it checks the channel count, so a mismatch
+    raises here, naming ``name``, instead of failing later in a broadcast.
 
     Parameters
     ----------
