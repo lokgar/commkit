@@ -84,7 +84,13 @@ class TestProperties:
 
     @pytest.mark.parametrize(
         ("method", "value"),
-        [("sampling_rate", 2e6), ("symbol_rate", 1e6), ("sps", 2.0), ("domain", "DIG")],
+        [
+            ("sampling_rate", 2e6),
+            ("symbol_rate", 1e6),
+            ("sps", 2.0),
+            ("center_frequency", 0.0),
+            ("domain", "DIG"),
+        ],
     )
     def test_from_signal(self, xp: Any, method: str, value: Any) -> None:
         inp = SignalInput(make_adapter_test_signal(xp), "f()")
@@ -93,7 +99,13 @@ class TestProperties:
 
     @pytest.mark.parametrize(
         ("method", "value"),
-        [("sampling_rate", 5.0), ("symbol_rate", 3.0), ("sps", 1.5), ("domain", "RF")],
+        [
+            ("sampling_rate", 5.0),
+            ("symbol_rate", 3.0),
+            ("sps", 1.5),
+            ("center_frequency", 1e9),
+            ("domain", "RF"),
+        ],
     )
     def test_array_input_needs_the_argument(
         self, xp: Any, method: str, value: Any

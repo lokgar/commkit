@@ -58,7 +58,8 @@ class SignalInput(Generic[S]):
     Notes
     -----
     A **property** of the samples (:meth:`sampling_rate`,
-    :meth:`symbol_rate`, :meth:`sps`, :meth:`domain`, :meth:`wavelength_nm`)
+    :meth:`symbol_rate`, :meth:`sps`, :meth:`center_frequency`,
+    :meth:`domain`, :meth:`wavelength_nm`)
     comes from a Signal: a supplied argument must agree with it (to a
     relative 1e-9, the wavelength to 0.01 %) or ``ValueError`` is raised,
     and array input needs the argument.  A **default**
@@ -126,6 +127,10 @@ class SignalInput(Generic[S]):
         """The samples per symbol as a positive ``int``, see
         :func:`require_integer_sps`; a fractional value raises."""
         return require_integer_sps(self.sps(supplied), self.function_name)
+
+    def center_frequency(self, supplied: float | None = None) -> float:
+        """The carrier frequency in Hz, 0 for baseband (a property)."""
+        return float(self._property("center_frequency", supplied))
 
     def domain(self, supplied: str | None = None) -> str:
         """The domain, ``"DIG"``, ``"RF"`` or ``"OPT"`` (a property)."""
