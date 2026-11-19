@@ -18,7 +18,7 @@ from .._array import as_2d, restore_1d
 from .._circular import convolve_periodic
 from .._overlap_save import ols_apply
 from ..backend import ArrayType, _to_host, dispatch
-from ..core._signal_adapter import S, adapt_signal
+from ..core._signal_input import S, SignalInput
 from ..logger import logger
 from ..math import _next_pow2, normalize
 from .pulses import Pulse
@@ -423,8 +423,8 @@ def fir_filter(
     taps use real FFTs.  All methods give the same samples to the rounding
     of the input's precision.
     """
-    signal_adapter = adapt_signal(samples, function_name="fir_filter()")
-    x, xp, sp = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "fir_filter()")
+    x, xp, sp = dispatch(inp.samples)
     taps = xp.asarray(taps)
     if taps.ndim != 1:
         raise ValueError(f"taps must be 1-D, got shape {taps.shape}.")
@@ -434,8 +434,8 @@ def fir_filter(
 
     if periodic:
         logger.debug("fir_filter: circular, L=%s, causal=%s", L, causal)
-        return signal_adapter.wrap_samples(convolve_periodic(x, taps, center))
-    return signal_adapter.wrap_samples(_fir_filter(x, taps, center, xp, sp))
+        return inp.wrap(convolve_periodic(x, taps, center))
+    return inp.wrap(_fir_filter(x, taps, center, xp, sp))
 
 
 def _fir_method(N: int, L: int, device: str) -> str:
@@ -539,10 +539,10 @@ def matched_filter(
     ValueError
         If there is no pulse, or a pulse object is given with array input.
     """
-    signal_adapter = adapt_signal(samples, function_name="matched_filter()")
-    pulse = signal_adapter.require_choice("pulse", pulse, purpose=" (a Pulse or taps)")
+    inp = SignalInput(samples, "matched_filter()")
+    pulse = inp.pulse(pulse, required=True, purpose=" (a Pulse or taps)")
     if isinstance(pulse, Pulse):
-        sig = signal_adapter.signal
+        sig = inp.signal
         if sig is None:
             raise ValueError(
                 "matched_filter(): a Pulse needs the samples per symbol; pass "
@@ -555,11 +555,11 @@ def matched_filter(
             "Use 'unity_gain' or 'unit_energy'."
         )
 
-    x, xp, _ = dispatch(signal_adapter.array)
+    x, xp, _ = dispatch(inp.samples)
     pulse_taps = xp.asarray(pulse)
     logger.debug("Applying matched filter (%s taps).", pulse_taps.size)
     matched_taps = normalize(xp.conj(pulse_taps[::-1]), mode=taps_normalization)
-    return signal_adapter.wrap_samples(fir_filter(x, matched_taps))
+    return inp.wrap(fir_filter(x, matched_taps))
 
 
 _NUMBA_SOS: dict[str, Any] = {}
@@ -767,8 +767,8 @@ def iir_filter(
     and carries the state across them; it agrees with SciPy to about 1e-14
     at ordinary cutoffs and 2e-10 at ``1e-5·f_s``.
     """
-    signal_adapter = adapt_signal(samples, function_name="iir_filter()")
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "iir_filter()")
+    x, xp, _ = dispatch(inp.samples)
     sos_np = _to_host(sos, np.float64)
     if sos_np.ndim != 2 or sos_np.shape[1] != 6:
         raise ValueError(
@@ -797,4 +797,4 @@ def iir_filter(
     else:
         zi = xp.zeros((x2.shape[0], sos_np.shape[0], 2), dtype=state_dtype)
         y = _sosfilt(sos_np, x2, zi, xp)
-    return signal_adapter.wrap_samples(restore_1d(was_1d, xp.ascontiguousarray(y)))
+    return inp.wrap(restore_1d(was_1d, xp.ascontiguousarray(y)))

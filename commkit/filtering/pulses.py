@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 import scipy
 
-from ..core._signal_adapter import require_integer_sps
+from ..core._signal_input import require_integer_sps
 from ..logger import logger
 from ..math import normalize
 
