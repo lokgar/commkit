@@ -76,7 +76,7 @@ def decimate_to_symbol_rate(
         )
     do_norm = True if normalize is None else normalize
     result = _decimate_to_symbol_rate_array(inp.samples, sps_int, offset, do_norm)
-    return inp.wrap(result, sampling_rate=inp.signal.symbol_rate)
+    return inp.wrap(result, sampling_rate=inp.symbol_rate())
 
 
 def _check_offset(offset: int, sps: int, function_name: str) -> None:
@@ -136,7 +136,7 @@ def upsample(
     metadata: dict[str, Any] = {}
     if inp.signal is not None:
         correct_power = True if correct_power is None else correct_power
-        metadata["sampling_rate"] = inp.signal.sampling_rate * factor
+        metadata["sampling_rate"] = inp.sampling_rate() * factor
 
     arr, _, sp = dispatch(inp.samples)
     if periodic:
@@ -199,7 +199,7 @@ def decimate(
     metadata: dict[str, Any] = {}
     if inp.signal is not None:
         correct_power = True if correct_power is None else correct_power
-        metadata["sampling_rate"] = inp.signal.sampling_rate / factor
+        metadata["sampling_rate"] = inp.sampling_rate() / factor
 
     logger.debug("Decimating by factor %s (method: %s).", factor, method)
     arr, _, sp = dispatch(inp.samples)
@@ -288,13 +288,12 @@ def resample(
         raise ValueError("resample(): give either (up, down) or sps_out.")
 
     metadata: dict[str, Any] = {}
-    sig = inp.signal
-    if sig is not None:
+    if inp.signal is not None:
         correct_power = True if correct_power is None else correct_power
         metadata["sampling_rate"] = (
-            sig.sampling_rate * up / down
+            inp.sampling_rate() * up / down
             if sps_out is None
-            else sps_out * sig.symbol_rate
+            else sps_out * inp.symbol_rate()
         )
 
     arr, _, sp = dispatch(inp.samples)

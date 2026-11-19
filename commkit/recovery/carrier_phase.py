@@ -137,10 +137,10 @@ def _estimate_carrier_phase(
     if sig is not None or sampling_rate is not None:
         fs = inp.sampling_rate(sampling_rate)
     symbol_rate = isinstance(method, _SYMBOL_RATE)
-    if sig is not None and symbol_rate and not np.isclose(sig.sps, 1.0, rtol=1e-9):
+    if sig is not None and symbol_rate and not np.isclose(inp.sps(), 1.0, rtol=1e-9):
         raise ValueError(
             f"estimate_carrier_phase(): {type(method).__name__} needs one "
-            f"sample per symbol; the Signal has sps={sig.sps:g}."
+            f"sample per symbol; the Signal has sps={inp.sps():g}."
         )
     reference = inp.reference_symbols(
         method.symbols if isinstance(method, ConstantPhase) else None

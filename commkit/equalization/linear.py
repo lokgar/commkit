@@ -277,7 +277,7 @@ def apply_taps(
     metadata: dict[str, Any] = {}
     sps = inp.integer_sps(sps)
     if inp.signal is not None:
-        metadata["sampling_rate"] = inp.signal.symbol_rate
+        metadata["sampling_rate"] = inp.symbol_rate()
 
     x, xp, _ = dispatch(x)
     weights = xp.asarray(weights)

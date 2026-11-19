@@ -548,7 +548,7 @@ def matched_filter(
                 "matched_filter(): a Pulse needs the samples per symbol; pass "
                 "pulse.taps(sps) for array input."
             )
-        pulse = pulse.taps(sig.sps)
+        pulse = pulse.taps(inp.sps())
     if taps_normalization not in ("unit_energy", "unity_gain"):
         raise ValueError(
             f"Unknown taps_normalization: {taps_normalization!r}. "

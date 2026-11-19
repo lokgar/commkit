@@ -260,7 +260,7 @@ def apply_ase(
     inp = SignalInput(samples, "apply_ase()")
     x, xp, _ = dispatch(inp.samples)
     sig = inp.signal
-    if sig is None or sig.domain != "OPT" or not xp.iscomplexobj(x):
+    if sig is None or inp.domain() != "OPT" or not xp.iscomplexobj(x):
         raise ValueError(
             "apply_ase(): needs a complex optical Signal (domain='OPT'), whose "
             "sampling rate sets the noise bandwidth."
@@ -285,13 +285,13 @@ def apply_ase(
     logger.info(
         "Adding ASE noise (OSNR target: %.2f dB, %d modes).", osnr_db, noise_modes
     )
-    sps = float(sig.sps)
+    sps = inp.sps()
     # The ASE density is the same in every mode: one variance for all
     # channels, from their total power while the signal is present.
     power = xp.sum(_symbol_energy(inp, x, xp, sps)) / sps
     noise_power = (
         power
-        * sig.sampling_rate
+        * inp.sampling_rate()
         / (noise_modes * reference_bandwidth * db_to_linear(osnr_db, power=True))
     )
     return inp.wrap(x + _noise(x, xp, noise_power, rng))
@@ -463,8 +463,8 @@ def apply_coherent_detection(
     if logger.isEnabledFor(logging.INFO):
         sig = inp.signal
         snr_db = -10 * np.log10(inv_snr)
-        if sig is not None and sig.symbol_rate:
-            esn0_db = snr_db + 10 * np.log10(fs / sig.symbol_rate)
+        if sig is not None and inp.symbol_rate():
+            esn0_db = snr_db + 10 * np.log10(fs / inp.symbol_rate())
             logger.info(
                 "Coherent detection: Es/N0 %s dB per channel (%.2f dBm received, "
                 "%.2f dBm LO).",
