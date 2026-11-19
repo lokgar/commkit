@@ -32,29 +32,6 @@ def calc_mse_db(y: Any, ref: Any, xp: Any = None) -> float:
     return float(10.0 * np.log10(err / (sig + 1e-30) + 1e-30))
 
 
-def calc_tail_mse_db(error: Any, n: int = 400, xp: Any = None) -> float:
-    """Calculate MSE in dB over the last `n` samples of an error sequence.
-
-    Useful for validating equalizer convergence without initial transient penalty.
-
-    Parameters
-    ----------
-    error : ArrayLike
-        Error sequence from equalizer or adaptive filter.
-    n : int
-        Number of tail samples to evaluate.
-    xp : module, optional
-        Array module.
-
-    Returns
-    -------
-    float
-        Tail MSE in dB.
-    """
-    e = to_numpy(error)[-n:]
-    return float(10.0 * np.log10(float(np.mean(np.abs(e) ** 2)) + 1e-30))
-
-
 def calc_rms_phase_error(phase_est: Any, phase_true: Any, xp: Any = None) -> float:
     """Calculate Root Mean Square (RMS) phase error, removing any constant bias.
 

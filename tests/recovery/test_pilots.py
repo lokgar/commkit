@@ -237,9 +237,9 @@ class TestCprPilotTone:
         ).value
         N = samples.shape[-1]
         n = np.arange(N, dtype=np.float64)
-        common_np = np.asarray(to_device(common, "cpu"))
+        common_np = to_numpy(common)
         common_detrended = common_np - np.polyval(np.polyfit(n, common_np, 1), n)
-        theta_np = np.asarray(to_device(theta, "cpu"))
+        theta_np = to_numpy(theta)
         g = slice(self.EDGE, -self.EDGE)
         err = theta_np[g] - common_detrended[g]
         err -= err.mean()

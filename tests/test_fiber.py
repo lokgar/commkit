@@ -12,9 +12,9 @@ import numpy as np
 import pytest
 
 from commkit import _fiber
-from commkit.backend import to_device
 from commkit.filtering import correct_fiber_propagation
 from commkit.impairments import Fiber, apply_fiber_propagation
+from tests.common.conversions import to_numpy
 
 FS = 64e9
 
@@ -30,7 +30,7 @@ def _field(num_channels, n=1 << 14, seed=1):
 
 
 def _rel(a, b):
-    a, b = np.asarray(to_device(a, "cpu")), np.asarray(to_device(b, "cpu"))
+    a, b = to_numpy(a), to_numpy(b)
     return float(np.sqrt(np.mean(np.abs(a - b) ** 2) / np.mean(np.abs(b) ** 2)))
 
 

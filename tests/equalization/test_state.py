@@ -6,10 +6,10 @@ import numpy as np
 import pytest
 
 from commkit import equalization as E
-from commkit.backend import to_device
 from commkit.equalization import EqualizerState
 from commkit.mapping import Constellation
 from commkit.recovery import BPS, PLL, CycleSlip
+from tests.common.conversions import to_numpy
 
 C16 = Constellation.qam(16)
 
@@ -45,13 +45,11 @@ def _cold_like(state: EqualizerState) -> EqualizerState:
     )
 
 
-def _host(a):
-    return None if a is None else np.asarray(to_device(a, "cpu"))
-
-
 def _stitch(first, second, overlap):
-    first = _host(first)
-    return np.concatenate([first[..., : first.shape[-1] - overlap], _host(second)], -1)
+    first = to_numpy(first)
+    return np.concatenate(
+        [first[..., : first.shape[-1] - overlap], to_numpy(second)], -1
+    )
 
 
 TRAINED = {"lms", "rls", "block_lms"}
@@ -101,13 +99,13 @@ def test_chunked_equals_uninterrupted(name, extra, num_ch, sps, xp):
     full = fn(x, *data, **kw, state=_cold_like(r1.state))
     ov = r1.state.overlap
 
-    np.testing.assert_array_equal(_stitch(r1.y_hat, r2.y_hat, ov), _host(full.y_hat))
-    np.testing.assert_array_equal(_stitch(r1.error, r2.error, ov), _host(full.error))
-    np.testing.assert_array_equal(_host(r2.weights), _host(full.weights))
+    np.testing.assert_array_equal(_stitch(r1.y_hat, r2.y_hat, ov), to_numpy(full.y_hat))
+    np.testing.assert_array_equal(_stitch(r1.error, r2.error, ov), to_numpy(full.error))
+    np.testing.assert_array_equal(to_numpy(r2.weights), to_numpy(full.weights))
     if full.phase_trajectory is not None:
         np.testing.assert_array_equal(
             _stitch(r1.phase_trajectory, r2.phase_trajectory, ov),
-            _host(full.phase_trajectory),
+            to_numpy(full.phase_trajectory),
         )
 
 
@@ -138,7 +136,7 @@ def test_chunked_pilots_with_deboost(name, xp):
     full = fn(x, **kw, pilots=pilots(slice(None)), state=_cold_like(r1.state))
 
     np.testing.assert_array_equal(
-        _stitch(r1.y_hat, r2.y_hat, r1.state.overlap), _host(full.y_hat)
+        _stitch(r1.y_hat, r2.y_hat, r1.state.overlap), to_numpy(full.y_hat)
     )
 
 
@@ -159,8 +157,8 @@ def test_cma_state_hands_over_to_rde(first, second, extra, xp):
     relabeled = dataclasses.replace(st, equalizer=second)
     own = getattr(E, second)(x[:, n1:], **kw, state=relabeled)
 
-    np.testing.assert_array_equal(_host(handed.y_hat), _host(own.y_hat))
-    np.testing.assert_array_equal(_host(handed.weights), _host(own.weights))
+    np.testing.assert_array_equal(to_numpy(handed.y_hat), to_numpy(own.y_hat))
+    np.testing.assert_array_equal(to_numpy(handed.weights), to_numpy(own.weights))
     assert handed.state.equalizer == second
     with pytest.raises(ValueError, match=f"equalizer='{second}'"):
         getattr(E, first)(x[:, n1:], **kw, state=handed.state)

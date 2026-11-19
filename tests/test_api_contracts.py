@@ -53,6 +53,7 @@ from commkit.impairments import Fiber, Lowdin
 from commkit.mapping import Constellation
 from commkit.recovery import BPS
 from commkit.timing import Gardner
+from tests.common.conversions import to_numpy
 
 # -----------------------------------------------------------------------------
 # Kinds and checks
@@ -209,13 +210,6 @@ def _identity_taps(c: Inputs, x: Any) -> Any:
     w = np.zeros((2, 2, 5), np.complex64)
     w[0, 0, 2] = w[1, 1, 2] = 1
     return c.xp.asarray(w)
-
-
-def _pilots(x: Any) -> dict:
-    return {
-        "pilot_indices": np.arange(0, N_SYM, 8),
-        "pilot_values": to_device(_arr(x), "cpu")[..., ::8],
-    }
 
 
 def L(*checks: str) -> frozenset[str]:
@@ -1022,7 +1016,7 @@ class _ForeignArray:
     """An array from another framework: array protocols, but not NumPy/CuPy."""
 
     def __init__(self, data: Any):
-        self._a = np.asarray(to_device(data, "cpu"))
+        self._a = to_numpy(data)
         self.shape, self.dtype, self.ndim = self._a.shape, self._a.dtype, self._a.ndim
 
     def __array__(self, dtype=None, copy=None):

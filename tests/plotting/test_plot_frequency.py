@@ -17,19 +17,12 @@ from tests.common.signals import make_offset_qpsk
 FS = 1e6
 
 
-def _qpsk(xp: Any, n: int = 4096, channels: int = 1, df: float = 0.0, seed: int = 0):
-    """QPSK at 1 sample per symbol with a frequency offset ``df`` (Hz at FS)."""
-    return make_offset_qpsk(
-        xp, n=n, channels=channels, df=df, seed=seed, sampling_rate=FS
-    )
-
-
 class TestPlotFrequencySync:
     """Frequency-offset diagnostics from FrequencyOffsetEstimates."""
 
     @pytest.mark.parametrize("channels", [1, 2])
     def test_mm_autocorrelation(self, xp: Any, channels: int) -> None:
-        x, _ = _qpsk(xp, channels=channels, df=2e3)
+        x, _ = make_offset_qpsk(xp, sampling_rate=FS, channels=channels, df=2e3)
         est = frequency.estimate_frequency_offset(
             x, frequency.MengaliMorelli(), sampling_rate=FS
         )
@@ -47,7 +40,7 @@ class TestPlotFrequencySync:
         assert not first.lines
 
     def test_mm_autocorrelation_needs_mm_estimate(self, xp: Any) -> None:
-        x, _ = _qpsk(xp, df=2e3)
+        x, _ = make_offset_qpsk(xp, sampling_rate=FS, df=2e3)
         est = frequency.estimate_frequency_offset(
             x, frequency.MthPower(power=4), sampling_rate=FS
         )
@@ -56,7 +49,7 @@ class TestPlotFrequencySync:
 
     def test_frequency_offset_spectrum(self, xp: Any) -> None:
         """The estimate line is drawn at the estimated offset."""
-        x, _ = _qpsk(xp, df=3e3)
+        x, _ = make_offset_qpsk(xp, sampling_rate=FS, df=3e3)
         est = frequency.estimate_frequency_offset(
             x, frequency.MthPower(power=4), sampling_rate=FS
         )
@@ -75,7 +68,7 @@ class TestPlotFrequencySync:
     def test_frequency_offset_blockwise_result(self, xp: Any) -> None:
         """The recomputed trajectory follows the block estimates."""
         n = 8192
-        x, _ = _qpsk(xp, n=n, df=2e3)
+        x, _ = make_offset_qpsk(xp, sampling_rate=FS, n=n, df=2e3)
         est = frequency.estimate_frequency_offset(
             x, frequency.MthPower(power=4, block_size=1024), sampling_rate=FS
         )
@@ -89,7 +82,7 @@ class TestPlotFrequencySync:
 
     def test_pilot_phase_frequency_estimate(self, xp: Any) -> None:
         """A PilotSlope estimate labels the fit with its offset."""
-        x, s = _qpsk(xp, df=1e3)
+        x, s = make_offset_qpsk(xp, sampling_rate=FS, df=1e3)
         idx = np.arange(0, 4096, 64)
         est = frequency.estimate_frequency_offset(
             x, frequency.PilotSlope(idx, s[0, idx]), sampling_rate=FS
@@ -102,7 +95,7 @@ class TestPlotFrequencySync:
 
 def test_selected_blockwise_phase_overlay(xp: Any) -> None:
     """The integrated phase panel can be compared on one axis."""
-    x, _ = _qpsk(xp, n=8192, df=2e3)
+    x, _ = make_offset_qpsk(xp, sampling_rate=FS, n=8192, df=2e3)
     est = frequency.estimate_frequency_offset(
         x, frequency.MthPower(power=4, block_size=1024), sampling_rate=FS
     )

@@ -9,16 +9,8 @@ import pytest
 from commkit import timing
 from commkit.core import Preamble, SingleCarrierFrame
 from commkit.plotting.timing import plot_timing_correlation
-from tests.common.signals import make_offset_qpsk
 
 FS = 1e6
-
-
-def _qpsk(xp: Any, n: int = 4096, channels: int = 1, df: float = 0.0, seed: int = 0):
-    """QPSK at 1 sample per symbol with a frequency offset ``df`` (Hz at FS)."""
-    return make_offset_qpsk(
-        xp, n=n, channels=channels, df=df, seed=seed, sampling_rate=FS
-    )
 
 
 class TestPlotTimingSync:

@@ -28,7 +28,6 @@ from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_mse_db
 from tests.common.signals import (
     make_test_psk_samples,
-    make_test_qam_samples,
     make_wiener_phase,
 )
 
@@ -42,14 +41,6 @@ def _qpsk_signal(n_sym=4000, snr_db=20.0, rng=None):
     seed = 0 if rng is None else int(rng.integers(0, 100000))
     return make_test_psk_samples(
         order=4, num_symbols=n_sym, sps=2, snr_db=snr_db, seed=seed
-    )
-
-
-def _qam16_signal(n_sym=4000, snr_db=25.0, rng=None):
-    """Return (samples_1sps, symbols) for 16-QAM at 1 SPS."""
-    seed = 1 if rng is None else int(rng.integers(0, 100000))
-    return make_test_qam_samples(
-        order=16, num_symbols=n_sym, sps=1, snr_db=snr_db, seed=seed
     )
 
 

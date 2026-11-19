@@ -19,6 +19,7 @@ from commkit.impairments import (
     apply_chromatic_dispersion,
     apply_fiber_propagation,
 )
+from tests.common.conversions import to_numpy
 
 FS = 64e9
 C_LIGHT = 299792458.0
@@ -42,7 +43,7 @@ def _dbm(power_w):
 
 
 def _rel(a, b):
-    a, b = np.asarray(to_device(a, "cpu")), np.asarray(to_device(b, "cpu"))
+    a, b = to_numpy(a), to_numpy(b)
     return float(np.sqrt(np.mean(np.abs(a - b) ** 2) / np.mean(np.abs(b) ** 2)))
 
 
@@ -152,7 +153,7 @@ class TestKerrEffect:
         # The Kerr phase follows the power of the field: P / C per channel,
         # summed over the channels in the Manakov term.
         phase = -gamma * p_w * l_eff * spans
-        y = np.asarray(to_device(y, "cpu")).reshape(num_channels, n)
+        y = to_numpy(y).reshape(num_channels, n)
         np.testing.assert_allclose(np.abs(y), 1.0, atol=1e-5)
         np.testing.assert_allclose(np.angle(y), np.angle(np.exp(1j * phase)), atol=1e-5)
 
@@ -183,7 +184,7 @@ class TestKerrEffect:
                 center_wavelength_nm=1550.0,
                 sampling_rate=fs,
             )
-            return np.abs(np.asarray(to_device(y, "cpu")))
+            return np.abs(to_numpy(y))
 
         assert _rel(run(p0), np.abs(pulse)) < 5e-3
         assert _rel(run(p0 / 4.0), np.abs(pulse)) > 0.1
@@ -253,7 +254,7 @@ class TestGaussianNoiseModel:
         out = {}
         for name, g in (("nl", gamma), ("lin", 0.0)):
             y = apply_fiber_propagation(x, fiber=Fiber(nonlinearity_per_w_km=g), **kw)
-            out[name] = np.asarray(to_device(y, "cpu")).astype(np.complex128)
+            out[name] = to_numpy(y).astype(np.complex128)
         a = np.vdot(out["lin"], out["nl"]) / np.vdot(out["lin"], out["lin"])
         nli = np.abs(np.fft.fft(out["nl"] - a * out["lin"])) ** 2
         sig = np.abs(np.fft.fft(out["lin"])) ** 2
@@ -333,13 +334,11 @@ class TestAmplifierNoise:
         )
         noisy = apply_fiber_propagation(x, noise_figure_db=nf_db, rng=7, **kw)
         clean = apply_fiber_propagation(x, **kw)
-        noise = np.asarray(to_device(noisy - clean, "cpu"))
+        noise = to_numpy(noisy - clean)
         gain = 10.0 ** (0.2 * span_km / 10.0)
         nu = C_LIGHT / 1550e-9
         p_ase = spans * (10.0 ** (nf_db / 10.0) * gain - 1.0) * H_PLANCK * nu / 2 * FS
-        p_in = (
-            float(np.mean(np.abs(np.asarray(to_device(x, "cpu"))) ** 2)) * num_channels
-        )
+        p_in = float(np.mean(np.abs(to_numpy(x)) ** 2)) * num_channels
         expected = p_ase * p_in / (1e-3 * 10.0 ** (launch_dbm / 10.0))
         measured = np.mean(np.abs(noise.reshape(num_channels, -1)) ** 2, axis=-1)
         np.testing.assert_allclose(measured, expected, rtol=0.03)
@@ -358,7 +357,7 @@ class TestAmplifierNoise:
         )
         noisy = apply_fiber_propagation(x, noise_figure_db=nf_db, rng=11, **kw)
         clean = apply_fiber_propagation(x, **kw)
-        return float(np.mean(np.abs(np.asarray(to_device(noisy - clean, "cpu"))) ** 2))
+        return float(np.mean(np.abs(to_numpy(noisy - clean)) ** 2))
 
     def test_ase_power_scales_with_the_span_gain(self, xp):
         """The amplifier's gain is the span loss, G = 10^(a L / 10), so at a
