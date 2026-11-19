@@ -179,17 +179,17 @@ def _install() -> None:
             module.validate_array = validate_array  # type: ignore[attr-defined]
 
     # Results leave as plain NumPy arrays (callers check the exact type).
-    from commkit.core._signal_adapter import SignalAdapter
+    from commkit.core._signal_input import SignalInput
 
-    wrap = SignalAdapter.wrap_samples
+    wrap = SignalInput.wrap
 
     @functools.wraps(wrap)
-    def wrap_samples(self: Any, arr: Any, *args: Any, **kwargs: Any) -> Any:
+    def wrap_untagged(self: Any, arr: Any, *args: Any, **kwargs: Any) -> Any:
         if isinstance(arr, _Tagged):
             arr = arr.view(np.ndarray)
         return wrap(self, arr, *args, **kwargs)
 
-    SignalAdapter.wrap_samples = wrap_samples  # type: ignore[method-assign]
+    SignalInput.wrap = wrap_untagged  # type: ignore[method-assign]
 
     # SciPy's FFTs return plain arrays: keep single-precision data tagged
     # through commkit._fft, so the work after a transform is traced too.
