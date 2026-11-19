@@ -213,10 +213,10 @@ def correct_chromatic_dispersion(
     >>> y = correct_chromatic_dispersion(  # a circularly simulated record
     ...     sig, dispersion_ps_nm=1360.0, method="whole_record")
     """
-    inp = SignalInput(samples, "correct_chromatic_dispersion()")
+    name = "correct_chromatic_dispersion()"
+    inp = SignalInput(samples, name)
     sampling_rate = inp.sampling_rate(sampling_rate)
     center_wavelength_nm = inp.wavelength_nm(center_wavelength_nm)
-    name = "correct_chromatic_dispersion()"
     if (how is None) == (dispersion_ps_nm is None):
         raise ValueError(
             f"{name}: give the dispersion as an estimate or method (how) or as "
