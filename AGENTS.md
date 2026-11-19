@@ -19,6 +19,7 @@ Users are researchers and engineers. Design for them:
   ```
 
 - **Everything is expressed in Python.** No configuration files, registries, global switches or multi-step setup.
+- **User code joins on equal terms.** A block a user writes takes an array or a Signal under the library's rules through the public `commkit.core.SignalInput`, the helper the library's own functions use, so nothing needs a plug-in or registration mechanism.
 - **We deliberately do not build** pipeline or receiver objects, DSP methods on `Signal`, string shorthands for constellations, or public "config objects per algorithm".
 - **Scope is the reference model and its inverse**, not a catalogue of research variants: the fiber channel and standard digital backpropagation (`correct_fiber_propagation`, with `steps_per_span` and `nonlinear_scale`), like chromatic dispersion and its compensation. Reduced-complexity nonlinearity compensation (filtered or enhanced split step, perturbation-based) is left to user code built on these; learned DBP, which needs gradients, belongs in commax.
 

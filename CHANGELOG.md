@@ -8,6 +8,10 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 - `Constellation`, `LinearBlockCode`, `LDPCCode`, `PolarCode`, `Punctured` and `Interleaver` accept CuPy arrays for their array fields and copy them to the host, as the pilot, carrier-phase and EXIT value objects already did; `Constellation` raised `TypeError` on device points, labels or a pmf. Code that relied on the error to catch device input no longer gets it.
 
+### Added
+
+- `commkit.core.SignalInput`, the helper behind every Signal-aware function, for functions of your own: `inp = SignalInput(samples, "f()")` unwraps an array or a Signal, `inp.sampling_rate(sampling_rate)`, `inp.integer_sps(sps)`, `inp.constellation(constellation, required=True)` and the other methods resolve each value with the library's rules (a property of the samples from the Signal, raising on a conflicting argument; a default from the Signal, an explicit argument winning), and `inp.wrap(y)` returns an array for an array and a new Signal for a Signal. Section 6 of the getting-started notebook writes one.
+
 ### Performance
 
 Paired runs against 3.8.0, 8 alternating processes on the reference machine; every benchmark not named here stays within the noise of its run (5 % CPU, 10 % GPU).
@@ -17,12 +21,14 @@ Paired runs against 3.8.0, 8 alternating processes on the reference machine; eve
 
 ### Fixed
 
+- A `constellation` that is not a `Constellation` raises `TypeError` naming the argument in every Signal-aware function that takes one; only `compute_llr`, `demap_symbols` and the metrics checked it before, and the others failed later with an `AttributeError` or ignored it.
 - `estimate_linewidth` with `IncrementSubtract(noise_var=..., reference=...)` raised `ModuleNotFoundError`: the amplitude-aware correction imported `commkit.analysis.math`, which does not exist. It now subtracts `σ²·E[1/|d|²]` as documented, tested against the angle noise of 16-QAM symbols.
 
 ### Development
 
 - Structure: one `_numba()` getter per Numba kernel module in place of one getter per kernel; the CUDA launch wrappers by family under `_cuda/` with one argument check; `frequency` and `recovery` estimators build their estimate subclasses directly (the carrier-phase classes in `recovery/estimates.py`, re-exported as before); plots test estimate subclasses with `isinstance`; `estimate_timing`, the BPS metric, the pilot-tone polarization estimator and the block equalizers' runs split into named stages; shared helpers for host copies (`backend._to_host`), value-object fields (`_array.freeze_host`), FFT sizes (`math._next_pow2`), the M-fold unwrap and a missing constellation or pulse (`require_choice`). Results are identical except the GPU timing coherence, now gathered on the device (within 1.4e-7 relative).
 - `AGENTS.md`: the Numba getter rule.
+- Signal input: `SignalInput` with one typed method per field replaces `adapt_signal` and its string-keyed `resolve_fact` / `resolve_choice`, so mypy checks the resolved values. "Facts" and "choices" are called properties and defaults in `AGENTS.md`, the README, docstrings and the contract registry (`property_conflict`).
 - mypy warns on unused `type: ignore` comments (67 to 16).
 - Tests and benchmarks: shared builders for the fibre field and the Wiener record, dead helpers removed, benchmark workloads in `workloads.py` with their former seeds.
 
