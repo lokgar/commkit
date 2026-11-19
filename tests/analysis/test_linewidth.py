@@ -277,11 +277,6 @@ class TestLinewidthEstimation:
                 sampling_rate=R,
             )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="phase.py imports ..math (commkit.analysis.math) on this path: "
-        "ModuleNotFoundError",
-    )
     def test_increment_subtract_reference_weights_by_amplitude(self, xp):
         """With ``reference``, the subtracted term is ``σ²·E[1/|d|²]``.
 

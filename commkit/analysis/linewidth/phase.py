@@ -14,6 +14,7 @@ from scipy.stats import chi2
 from ..._array import as_2d, broadcast_channels, to_report_scalar
 from ...backend import ArrayType, dispatch, to_device
 from ...logger import logger
+from ...math import normalize
 from .._common import (
     _BETA_SLOPE,
     _FWHM_FROM_AREA,
@@ -313,8 +314,6 @@ def _increment_subtract(
     sigma_n2 = xp.asarray(sigma_host)
 
     if method.reference is not None and bool(np.any(sigma_host)):
-        from ..math import normalize
-
         d2 = broadcast_channels(xp.asarray(method.reference), c, xp, name="reference")
         d2 = d2[:, :n_full][:, sl]
         d2 = normalize(d2, mode="average_power", axis=-1)
