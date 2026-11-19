@@ -113,7 +113,7 @@ class _Phase:
     used_tones: tuple[int, ...] | None = None
 
 
-def _check_blocks(N: int, block_size: int) -> int:
+def _num_blocks(N: int, block_size: int) -> int:
     """Number of whole blocks; raises when there is none."""
     N_blocks = N // block_size
     if N_blocks == 0:

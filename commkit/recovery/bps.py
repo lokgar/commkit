@@ -9,7 +9,7 @@ from ..backend import ArrayType, dispatch
 from ..logger import logger
 from ..mapping._lattice import slicer_params
 from ..math import normalize
-from ._common import _check_blocks, _Context, _interp_block_phases, _Phase
+from ._common import _Context, _interp_block_phases, _num_blocks, _Phase
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 
 __all__ = ["BPS"]
@@ -106,7 +106,7 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     B = num_test_phases
     candidates = xp.arange(B, dtype=symbols.real.dtype) * (2.0 * np.pi / M / B)
 
-    N_blocks = _check_blocks(N, block_size)
+    N_blocks = _num_blocks(N, block_size)
     N_trunc = N_blocks * block_size
 
     # Very small block_size makes the M-fold phase unwrap unreliable: with only

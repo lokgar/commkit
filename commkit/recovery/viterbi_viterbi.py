@@ -7,10 +7,10 @@ import numpy as np
 from ..backend import ArrayType, dispatch
 from ..logger import logger
 from ._common import (
-    _check_blocks,
     _Context,
     _interp_block_phases,
     _mth_power_geometry,
+    _num_blocks,
     _Phase,
     _vv_block_phase,
 )
@@ -93,7 +93,7 @@ def _viterbi_viterbi(
     C, N = symbols.shape
     block_size = method.block_size
     M, project, bias = _mth_power_geometry(constellation)
-    N_blocks = _check_blocks(N, block_size)
+    N_blocks = _num_blocks(N, block_size)
     _warn_small_qam_block("VV", block_size, project, constellation.order)
 
     joint = method.joint_channels and C > 1

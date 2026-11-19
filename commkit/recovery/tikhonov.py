@@ -12,10 +12,10 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ._common import (
-    _check_blocks,
     _Context,
     _interp_block_phases,
     _mth_power_geometry,
+    _num_blocks,
     _Phase,
     _vv_block_phase,
 )
@@ -226,7 +226,7 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
     C, N = symbols.shape
     block_size = method.block_size
     M, project, bias = _mth_power_geometry(constellation)
-    N_blocks = _check_blocks(N, block_size)
+    N_blocks = _num_blocks(N, block_size)
     # Same data-residual constraint as Viterbi-Viterbi: block phase variance
     # can exceed π/M before smoothing, causing slips the smoother cannot fix.
     _warn_small_qam_block("Tikhonov", block_size, project, constellation.order)
