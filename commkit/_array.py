@@ -42,8 +42,8 @@ def validate_array(
 
     Parameters
     ----------
-    v : array_like or any
-        Input data to validate.
+    v : array_like
+        Input data to validate (``None`` is not an array and raises).
     name : str, default "array"
         Variable name used in error messages.
     complex_only : bool, default False
@@ -59,9 +59,6 @@ def validate_array(
     ValueError
         If the input cannot be converted to a supported array type.
     """
-    if v is None:
-        return None
-
     # Coerce lists/tuples and scalars to NumPy; arrays from other frameworks
     # (JAX, PyTorch, ...) are rejected rather than silently copied.
     if not (isinstance(v, np.ndarray) or _is_cupy_array(v)):
