@@ -343,6 +343,7 @@ ROWS: list[Row] = [
     # Signal only: the frame layout lives on the Signal.
     Row("commkit.core.frame.extract_payload", DESIGN),
     Row("commkit.core.signal.Signal", VALUE),
+    Row("commkit.core._signal_input.SignalInput", VALUE),
     Row("commkit.core.generation.expand", DESIGN),
     Row("commkit.core.generation.shape_pulse", DESIGN),
     # The constellation is the primary positional parameter.
@@ -904,6 +905,15 @@ ROWS: list[Row] = [
         "commkit.timing.synchronization.apply_delay",
         TRANSFORM,
         call=lambda c, x: _a(x, delay=0.25),
+    ),
+    # --- user code ----------------------------------------------------------
+    # A transform written outside the package on SignalInput passes the
+    # checks of a library transform.
+    Row(
+        "tests.common.user_block.apply_gain_ramp",
+        TRANSFORM,
+        call=lambda c, x: _a(x, ramp_db_per_s=1e6, sampling_rate=FS),
+        conflict=FS_CONFLICT,
     ),
 ]
 

@@ -1,6 +1,7 @@
 """The array-or-Signal argument of a Signal-aware function (private).
 
-:class:`SignalInput` unwraps the argument once, resolves what the function
+Every Signal-aware function of the package, and user code through
+``commkit.core.SignalInput``, starts from :class:`SignalInput`, which unwraps the argument once, resolves what the function
 needs from the Signal through one typed method per field, and returns
 results through :meth:`SignalInput.wrap`.  :data:`S` is the TypeVar of a
 transform's argument and result.  Also :func:`reference_of` (the
@@ -9,7 +10,8 @@ transform's argument and result.  Also :func:`reference_of` (the
 and :func:`require_integer_sps`.
 
 Two rules, the same for every field.  A **property** of the samples
-(``sampling_rate``, ``symbol_rate``, ``sps``, ``domain``, the carrier) comes
+(``sampling_rate``, ``symbol_rate``, ``sps``, ``center_frequency``,
+``domain``, the carrier wavelength) comes
 from a Signal: an argument that disagrees with it raises ``ValueError``, an
 equal one is accepted, and array input needs the argument.  A **default**
 (``constellation``, ``pulse``, the reference symbols) comes from a Signal
@@ -46,7 +48,9 @@ class SignalInput(Generic[S]):
 
     Built at the top of the function, it gives the samples to process, then
     resolves each value the function needs from the Signal by a method named
-    after the field, and wraps the result for return.
+    after the field, and wraps the result for return.  The library's
+    Signal-aware functions are built on it, and so can yours: they then
+    take an array or a Signal and follow the same rules.
 
     Parameters
     ----------
@@ -67,6 +71,29 @@ class SignalInput(Generic[S]):
     the supplied argument when given, else the Signal's value, else
     ``None``, which ``required=True`` turns into a ``ValueError``.  Called
     without an argument, each method returns the Signal's value.
+
+    Process :attr:`samples` with ``x, xp, _ = dispatch(inp.samples)`` so
+    the work runs on the input's device, and return a waveform through
+    :meth:`wrap`.  An estimate or a plot returns its own result instead.
+
+    Examples
+    --------
+    A transform of your own that takes an array or a Signal: the sampling
+    rate comes from a Signal (an argument that disagrees raises) and is
+    required for an array, and the result is of the input's kind, on its
+    device.
+
+    >>> from commkit.backend import dispatch
+    >>> from commkit.core import SignalInput
+    >>> def apply_gain_ramp(samples, *, ramp_db_per_s, sampling_rate=None):
+    ...     inp = SignalInput(samples, "apply_gain_ramp()")
+    ...     fs = inp.sampling_rate(sampling_rate)
+    ...     x, xp, _ = dispatch(inp.samples)
+    ...     t = xp.arange(x.shape[-1]) / fs
+    ...     gain = (10 ** (ramp_db_per_s * t / 20)).astype(x.real.dtype)
+    ...     return inp.wrap(x * gain)
+    >>> y = apply_gain_ramp(sig, ramp_db_per_s=1e6)  # a new Signal
+    >>> y = apply_gain_ramp(sig.samples, ramp_db_per_s=1e6, sampling_rate=64e9)
     """
 
     __slots__ = ("_samples", "_signal", "function_name")

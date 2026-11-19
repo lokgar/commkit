@@ -9,8 +9,11 @@
   preamble before a frame's body.
 - :func:`generate` (:mod:`commkit.core.generation`): random symbols,
   pulse-shaped into a Signal; also re-exported as ``commkit.generate``.
+- :class:`SignalInput`: the array-or-Signal argument of a Signal-aware
+  function, for writing your own with the library's conventions.
 """
 
+from ._signal_input import SignalInput
 from .frame import FrameStructure, SingleCarrierFrame, extract_payload
 from .generation import generate
 from .preamble import Preamble
@@ -21,6 +24,7 @@ __all__ = [
     "Preamble",
     "Reference",
     "Signal",
+    "SignalInput",
     "SingleCarrierFrame",
     "extract_payload",
     "generate",
