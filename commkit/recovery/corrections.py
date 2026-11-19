@@ -16,7 +16,7 @@ import numpy as np
 from .. import _fft
 from .._array import as_2d, broadcast_channels, freeze_host, restore_1d
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import S, adapt_signal
+from ..core._signal_input import S, SignalInput
 from ..logger import logger
 from ..math import _remove_linear_trend
 from ._common import _Context, _numba
@@ -449,11 +449,11 @@ def _data_aided(
 # Both correct a Signal's samples against reference.symbols.
 
 
-def _reference_symbols(signal_adapter: Any, reference: Any, name: str) -> Any:
+def _reference_symbols(inp: Any, reference: Any, name: str) -> Any:
     """The explicit reference, else the Signal's ``reference.symbols``."""
     if reference is not None:
         return reference
-    sig = signal_adapter.signal
+    sig = inp.signal
     if sig is None or sig.reference is None:
         raise ValueError(
             f"{name} needs reference symbols: pass reference= or a Signal that "
@@ -558,15 +558,15 @@ def resolve_channel_permutation(
         samples reordered (its reference is already in that order).
     """
     name = "resolve_channel_permutation()"
-    signal_adapter = adapt_signal(symbols, function_name=name)
-    x = signal_adapter.symbol_array()
+    inp = SignalInput(symbols, name)
+    x = inp.symbols()
     resolved = _resolve_channel_permutation_array(
         x,
-        _reference_symbols(signal_adapter, reference, name),
+        _reference_symbols(inp, reference, name),
         num_skip_symbols=num_skip_symbols,
         metric=metric,
     )
-    return signal_adapter.wrap_samples(resolved)
+    return inp.wrap(resolved)
 
 
 def _resolve_channel_permutation_array(
@@ -683,19 +683,19 @@ def resolve_phase_ambiguity(
         Rotated symbols, same shape and dtype; a Signal gives a new Signal.
     """
     name = "resolve_phase_ambiguity()"
-    signal_adapter = adapt_signal(symbols, function_name=name)
-    x = signal_adapter.symbol_array()
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    inp = SignalInput(symbols, name)
+    x = inp.symbols()
+    constellation = inp.constellation(constellation)
     if symmetry is None and constellation is None:
         raise ValueError(f"{name} requires constellation or symmetry.")
     resolved = _resolve_phase_ambiguity_array(
         x,
-        _reference_symbols(signal_adapter, reference, name),
+        _reference_symbols(inp, reference, name),
         constellation,
         symmetry=symmetry,
         num_skip_symbols=num_skip_symbols,
     )
-    return signal_adapter.wrap_samples(resolved)
+    return inp.wrap(resolved)
 
 
 def _resolve_phase_ambiguity_array(
