@@ -51,7 +51,7 @@ from ..._dispersion import (
     spread_samples,
 )
 from ..._fiber import Fiber, check_link, propagate, to_watts
-from ...backend import ArrayType, dispatch, to_device
+from ...backend import ArrayType, _to_host, dispatch
 from ...core._signal_adapter import (
     S,
     adapt_signal,
@@ -77,8 +77,7 @@ __all__ = [
 def _dispersion_value(value: Any, function_name: str) -> float:
     """One accumulated dispersion in ps/nm from a number or an estimate's
     value (0-d, or ``(C,)`` of one joint estimate)."""
-    v = np.asarray(to_device(value, "cpu") if hasattr(value, "shape") else value)
-    v = v.astype(np.float64).ravel()
+    v = _to_host(value, np.float64).ravel()
     if (
         v.size == 0
         or not np.all(np.isfinite(v))
