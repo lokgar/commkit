@@ -422,22 +422,14 @@ class BlockwiseFrequencyEstimate(FrequencyOffsetEstimate):
 
 
 # -----------------------------------------------------------------------------
-# ESTIMATOR KERNELS (rows of a (R, N) array; R = channels or blocks)
+# ESTIMATORS (rows of a (R, N) array; R = channels or blocks)
 # -----------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class _Rows:
-    """Per-row values and weights (on device) plus the method's diagnostics."""
-
-    values: ArrayType
-    weights: ArrayType
-    power: int | None = None
-    spectrum: ArrayType | None = None
-    spectrum_frequencies: np.ndarray | None = None
-    autocorrelation: ArrayType | None = None
-    pilot_phase: ArrayType | None = None
-    pilot_indices: np.ndarray | None = None
+#
+# Each takes ``(x, fs, method, constellation, shared_rows, was_1d)`` and returns
+# its estimate.  ``shared_rows`` marks the channels of one record (static
+# estimate: the method's subclass with its diagnostics, ``restore_1d`` applied);
+# without it the rows are independent blocks and only the base class's value
+# and weights are built, which the blockwise path reshapes.
 
 
 def _resolve_power(power: int | None, constellation: Any, default: int | None) -> int:
@@ -466,7 +458,8 @@ def _mth_power(
     method: MthPower,
     constellation: Any,
     shared_rows: bool,
-) -> _Rows:
+    was_1d: bool,
+) -> FrequencyOffsetEstimate:
     """M-th power estimate per row; rows share one peak bin if ``shared_rows``."""
     xp = dispatch(x)[1]
     R, N = x.shape
@@ -517,7 +510,10 @@ def _mth_power(
     # The peak bin's frequency, as fftfreq computes it: signed bin times fs/nfft.
     k_signed = xp.where(k_peak > (nfft - 1) // 2, k_peak - nfft, k_peak)
     f_bin = k_signed.astype(xp.float64) * (1.0 / (nfft * (1.0 / fs)))
-    values = (f_bin + mu * (fs / nfft)) / M
+    values = ((f_bin + mu * (fs / nfft)) / M).astype(xp.float64)
+    weights = mag[rows, k_peak].astype(xp.float64)
+    if not shared_rows:
+        return FrequencyOffsetEstimate(values, weights)
     # The diagnostic spectrum in ascending frequency, cut to the search range
     # (the mask zeroed every other bin), gathered on the device.
     f_sorted = np.fft.fftshift(freqs_np)
@@ -526,18 +522,18 @@ def _mth_power(
         lo = int(np.searchsorted(f_sorted, tone_lo, side="left"))
         hi = int(np.searchsorted(f_sorted, tone_hi, side="right"))
     bins = (xp.arange(lo, hi) + (nfft + 1) // 2) % nfft  # fftshift order
-    return _Rows(
-        values=values.astype(xp.float64),
-        weights=mag[rows, k_peak].astype(xp.float64),
-        power=M,
-        spectrum=mag[:, bins],
-        spectrum_frequencies=f_sorted[lo:hi],
-    )
+    values, weights, spectrum = restore_1d(was_1d, values, weights, mag[:, bins])
+    return MthPowerEstimate(values, weights, M, spectrum, f_sorted[lo:hi])
 
 
 def _mengali_morelli(
-    x: ArrayType, fs: float, method: MengaliMorelli, constellation: Any
-) -> _Rows:
+    x: ArrayType,
+    fs: float,
+    method: MengaliMorelli,
+    constellation: Any,
+    shared_rows: bool,
+    was_1d: bool,
+) -> FrequencyOffsetEstimate:
     xp = dispatch(x)[1]
     R, N = x.shape
     M = _resolve_power(method.power, constellation, 1)
@@ -560,16 +556,21 @@ def _mengali_morelli(
     R_np = _to_host(R_rows)
     amp = np.abs(R_np)
     values = _get_numba_mm_bootstrap()(np.angle(R_np), amp, float(M), float(fs))
-    weights = np.sum(amp**2, axis=-1)
-    return _Rows(
-        values=xp.asarray(values),
-        weights=xp.asarray(weights),
-        power=M,
-        autocorrelation=R_rows,
-    )
+    values, weights = xp.asarray(values), xp.asarray(np.sum(amp**2, axis=-1))
+    if not shared_rows:
+        return FrequencyOffsetEstimate(values, weights)
+    values, weights, R_rows = restore_1d(was_1d, values, weights, R_rows)
+    return MengaliMorelliEstimate(values, weights, M, R_rows)
 
 
-def _pilot_symbols(x: ArrayType, fs: float, method: PilotSlope) -> _Rows:
+def _pilot_slope(
+    x: ArrayType,
+    fs: float,
+    method: PilotSlope,
+    constellation: Any,
+    shared_rows: bool,
+    was_1d: bool,
+) -> PilotSlopeEstimate:
     xp = dispatch(x)[1]
     C, N = x.shape
     idx_np = method.indices
@@ -607,15 +608,23 @@ def _pilot_symbols(x: ArrayType, fs: float, method: PilotSlope) -> _Rows:
         max_gap,
         fs / (2 * max_gap),
     )
-    return _Rows(
-        values=slopes / (2.0 * np.pi),
-        weights=xp.mean(pwr, axis=-1).astype(xp.float64),
-        pilot_phase=phi_u,
-        pilot_indices=idx_np,
+    values, weights, phi_u = restore_1d(
+        was_1d,
+        slopes / (2.0 * np.pi),
+        xp.mean(pwr, axis=-1).astype(xp.float64),
+        phi_u,
     )
+    return PilotSlopeEstimate(values, weights, phi_u, idx_np)
 
 
-def _bias_tone(x: ArrayType, fs: float, method: SpectralPeak) -> _Rows:
+def _spectral_peak(
+    x: ArrayType,
+    fs: float,
+    method: SpectralPeak,
+    constellation: Any,
+    shared_rows: bool,
+    was_1d: bool,
+) -> FrequencyOffsetEstimate:
     xp = dispatch(x)[1]
     R, N = x.shape
     if N < 4:
@@ -646,67 +655,15 @@ def _bias_tone(x: ArrayType, fs: float, method: SpectralPeak) -> _Rows:
     )
     delta = parabolic_peak_offset(left, peak, right, xp, log=True)
     values = freqs[k] + delta * (fs / nfft)
-    return _Rows(values=values, weights=peak)
+    return FrequencyOffsetEstimate(*restore_1d(was_1d, values, peak))
 
 
-def _estimate_rows(
-    x: ArrayType,
-    fs: float,
-    method: FrequencyMethod,
-    constellation: Any,
-    shared_rows: bool,
-) -> _Rows:
-    return _ROW_ESTIMATORS[type(method)](x, fs, method, constellation, shared_rows)
-
-
-# Row estimator per method type, all called as
-# ``(x, fs, method, constellation, shared_rows)``.
-_ROW_ESTIMATORS: dict[type, Callable[..., _Rows]] = {
+#: Estimator per method type.
+_ESTIMATORS: dict[type, Callable[..., FrequencyOffsetEstimate]] = {
     MthPower: _mth_power,
-    MengaliMorelli: lambda x, fs, m, c, shared: _mengali_morelli(x, fs, m, c),
-    PilotSlope: lambda x, fs, m, c, shared: _pilot_symbols(x, fs, m),
-    SpectralPeak: lambda x, fs, m, c, shared: _bias_tone(x, fs, m),
-}
-
-
-def _mth_power_result(
-    values: Any, weights: Any, rows: _Rows, was_1d: bool
-) -> MthPowerEstimate:
-    assert rows.power is not None and rows.spectrum_frequencies is not None
-    spectrum = restore_1d(was_1d, rows.spectrum)
-    return MthPowerEstimate(
-        values, weights, rows.power, spectrum, rows.spectrum_frequencies
-    )
-
-
-def _mengali_morelli_result(
-    values: Any, weights: Any, rows: _Rows, was_1d: bool
-) -> MengaliMorelliEstimate:
-    assert rows.power is not None
-    autocorrelation = restore_1d(was_1d, rows.autocorrelation)
-    return MengaliMorelliEstimate(values, weights, rows.power, autocorrelation)
-
-
-def _pilot_slope_result(
-    values: Any, weights: Any, rows: _Rows, was_1d: bool
-) -> PilotSlopeEstimate:
-    assert rows.pilot_indices is not None
-    pilot_phase = restore_1d(was_1d, rows.pilot_phase)
-    return PilotSlopeEstimate(values, weights, pilot_phase, rows.pilot_indices)
-
-
-def _spectral_peak_result(
-    values: Any, weights: Any, rows: _Rows, was_1d: bool
-) -> FrequencyOffsetEstimate:
-    return FrequencyOffsetEstimate(values, weights)
-
-
-#: The result of a static (whole-record) estimate, built from the method's rows.
-_RESULTS: dict[type, Callable[[Any, Any, _Rows, bool], FrequencyOffsetEstimate]] = {
-    MthPower: _mth_power_result,
-    MengaliMorelli: _mengali_morelli_result,
-    PilotSlope: _pilot_slope_result,
-    SpectralPeak: _spectral_peak_result,
+    MengaliMorelli: _mengali_morelli,
+    PilotSlope: _pilot_slope,
+    SpectralPeak: _spectral_peak,
 }
 
 
@@ -781,23 +738,18 @@ def _estimate_frequency_offset(
     x, was_1d = as_2d(x, name="samples")
     C, N = x.shape
 
-    block_size = getattr(method, "block_size", None)
-    if block_size is None:
-        rows = _estimate_rows(x, fs, method, constellation, shared_rows=True)
-        values, weights = restore_1d(was_1d, rows.values, rows.weights)
-        est: FrequencyOffsetEstimate = _RESULTS[type(method)](
-            values, weights, rows, was_1d
-        )
+    estimator = _ESTIMATORS[type(method)]
+    if isinstance(method, PilotSlope) or method.block_size is None:
+        est = estimator(x, fs, method, constellation, True, was_1d)
     else:
-        assert not isinstance(method, PilotSlope)
-        starts, length = _block_starts(N, block_size, method.overlap)
+        starts, length = _block_starts(N, method.block_size, method.overlap)
         B = len(starts)
         # All blocks of all channels in one batched call: rows (C * B, L).
         blocks = xp.stack([x[:, s : s + length] for s in starts], axis=1)
-        rows = _estimate_rows(
-            blocks.reshape(C * B, length), fs, method, constellation, shared_rows=False
+        rows = estimator(
+            blocks.reshape(C * B, length), fs, method, constellation, False, False
         )
-        block_values = rows.values.reshape(C, B)
+        block_values = rows.value.reshape(C, B)
         block_weights = rows.weights.reshape(C, B)
         values, weights, block_values = restore_1d(
             was_1d,
