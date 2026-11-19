@@ -8,6 +8,13 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 - `Constellation`, `LinearBlockCode`, `LDPCCode`, `PolarCode`, `Punctured` and `Interleaver` accept CuPy arrays for their array fields and copy them to the host, as the pilot, carrier-phase and EXIT value objects already did; `Constellation` raised `TypeError` on device points, labels or a pmf. Code that relied on the error to catch device input no longer gets it.
 
+### Performance
+
+Paired runs against 3.8.0, 8 alternating processes on the reference machine; every benchmark not named here stays within the noise of its run (5 % CPU, 10 % GPU).
+
+- `estimate_timing` on GPU input gathers the energy at each correlation peak on the device instead of slicing every channel through a host index: 0.48 of the former time (32 channels of 2^16 samples, a 512-sample template).
+- `estimate_frequency_offset` with a blockwise `MthPower` no longer gathers the diagnostic spectrum of every block, which it discarded: 0.74 of the former time on the CPU and 0.75 on the GPU (2 x 2^20 samples, blocks of 4096).
+
 ### Fixed
 
 - `estimate_linewidth` with `IncrementSubtract(noise_var=..., reference=...)` raised `ModuleNotFoundError`: the amplitude-aware correction imported `commkit.analysis.math`, which does not exist. It now subtracts `σ²·E[1/|d|²]` as documented, tested against the angle noise of 16-QAM symbols.
