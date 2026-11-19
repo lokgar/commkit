@@ -112,15 +112,15 @@ class SignalInput(Generic[S]):
 
     def sampling_rate(self, supplied: float | None = None) -> float:
         """The sampling rate in Hz (a property of the samples)."""
-        return cast(float, self._property("sampling_rate", supplied))
+        return float(self._property("sampling_rate", supplied))
 
     def symbol_rate(self, supplied: float | None = None) -> float:
         """The symbol rate in Hz (a property of the samples)."""
-        return cast(float, self._property("symbol_rate", supplied))
+        return float(self._property("symbol_rate", supplied))
 
     def sps(self, supplied: float | None = None) -> float:
         """The samples per symbol (a property of the samples)."""
-        return cast(float, self._property("sps", supplied))
+        return float(self._property("sps", supplied))
 
     def integer_sps(self, supplied: float | None = None) -> int:
         """The samples per symbol as a positive ``int``, see
