@@ -4,6 +4,10 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.9.0] - 2026-11-20
+
+Your own Signal-aware functions: `commkit.core.SignalInput`, the helper behind every function that takes an array or a Signal, is public, with one typed method per property or default of the Signal. Value objects with array fields accept device arrays, `estimate_timing` on the GPU is twice as fast, and the rest is structure: shared helpers in place of copies, estimators that build their own result classes, and the words properties and defaults for what a Signal provides. Results are unchanged apart from the fixes below.
+
 ### Changes that may need code updates
 
 - `Constellation`, `LinearBlockCode`, `LDPCCode`, `PolarCode`, `Punctured` and `Interleaver` accept CuPy arrays for their array fields and copy them to the host, as the pilot, carrier-phase and EXIT value objects already did; `Constellation` raised `TypeError` on device points, labels or a pmf. Code that relied on the error to catch device input no longer gets it.
@@ -26,7 +30,7 @@ Paired runs against 3.8.0, 8 alternating processes on the reference machine; eve
 
 ### Development
 
-- Structure: one `_numba()` getter per Numba kernel module in place of one getter per kernel; the CUDA launch wrappers by family under `_cuda/` with one argument check; `frequency` and `recovery` estimators build their estimate subclasses directly (the carrier-phase classes in `recovery/estimates.py`, re-exported as before); plots test estimate subclasses with `isinstance`; `estimate_timing`, the BPS metric, the pilot-tone polarization estimator and the block equalizers' runs split into named stages; shared helpers for host copies (`backend._to_host`), value-object fields (`_array.freeze_host`), FFT sizes (`math._next_pow2`), the M-fold unwrap and a missing constellation or pulse (`require_choice`). Results are identical except the GPU timing coherence, now gathered on the device (within 1.4e-7 relative).
+- Structure: one `_numba()` getter per Numba kernel module in place of one getter per kernel; the CUDA launch wrappers by family under `_cuda/` with one argument check; `frequency` and `recovery` estimators build their estimate subclasses directly (the carrier-phase classes in `recovery/estimates.py`, re-exported as before); plots test estimate subclasses with `isinstance`; `estimate_timing`, the BPS metric, the pilot-tone polarization estimator and the block equalizers' runs split into named stages; shared helpers for host copies (`backend._to_host`), value-object fields (`_array.freeze_host`), FFT sizes (`math._next_pow2`), the M-fold unwrap and a value that must be given (`require_value`). Results are identical except the GPU timing coherence, now gathered on the device (within 1.4e-7 relative).
 - `AGENTS.md`: the Numba getter rule.
 - Signal input: `SignalInput` with one typed method per field replaces `adapt_signal` and its string-keyed `resolve_fact` / `resolve_choice`, so mypy checks the resolved values. "Facts" and "choices" are called properties and defaults in `AGENTS.md`, the README, docstrings and the contract registry (`property_conflict`).
 - mypy warns on unused `type: ignore` comments (67 to 16).
@@ -635,7 +639,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.8.0...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.9.0...HEAD
+[3.9.0]: https://github.com/lokgar/commkit/compare/v3.8.0...v3.9.0
 [3.8.0]: https://github.com/lokgar/commkit/compare/v3.7.1...v3.8.0
 [3.7.1]: https://github.com/lokgar/commkit/compare/v3.7.0...v3.7.1
 [3.7.0]: https://github.com/lokgar/commkit/compare/v3.6.1...v3.7.0
