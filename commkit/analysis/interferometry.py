@@ -93,7 +93,7 @@ import numpy as np
 from .. import _fft
 from .._array import as_2d, restore_1d, to_report_scalar
 from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import adapt_signal
+from ..core._signal_input import SignalInput
 from ..core.signal import Signal
 from ..frequency import correct_frequency_offset
 from ..logger import logger
@@ -349,9 +349,9 @@ def dsh_phase(
       delay fiber, phase noise of the AOM's RF synthesizer) cannot be told
       apart from laser phase noise here and adds to the low-frequency PSD.
     """
-    signal_adapter = adapt_signal(samples, function_name="dsh_phase()")
-    samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    inp = SignalInput(samples, "dsh_phase()")
+    samples = inp.samples
+    sampling_rate = inp.sampling_rate(sampling_rate)
 
     z, xp, _ = dispatch(samples)
     fs = float(sampling_rate)

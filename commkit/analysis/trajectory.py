@@ -9,7 +9,7 @@ import numpy as np
 
 from .._array import as_2d, broadcast_channels, restore_1d
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import adapt_signal
+from ..core._signal_input import SignalInput
 from ..core.signal import Signal
 from ..recovery.corrections import resolve_channel_permutation
 
@@ -79,10 +79,10 @@ def carrier_phase_trajectory(
       explicit noise estimate.
     """
     name = "carrier_phase_trajectory()"
-    adapter = adapt_signal(symbols, function_name=name)
-    y, xp, _ = dispatch(adapter.symbol_array())
+    inp = SignalInput(symbols, name)
+    y, xp, _ = dispatch(inp.symbols())
     if reference is None:
-        sig = adapter.signal
+        sig = inp.signal
         if sig is None or sig.reference is None:
             raise ValueError(
                 f"{name} needs reference symbols: pass reference= or a Signal "

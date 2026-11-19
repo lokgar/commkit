@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import _to_host, dispatch
-from ..core._signal_adapter import adapt_signal
+from ..core._signal_input import SignalInput
 from ..logger import logger
 from .theme import (
     _draw_channels,
@@ -81,11 +81,11 @@ def plot_time_domain(
         The figure and the Axes (an array of Axes for several panels);
         ``None`` with ``show=True``, which shows the figure instead.
     """
-    signal_adapter = adapt_signal(samples, function_name="plot_time_domain()")
-    x = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    if signal_adapter.signal is not None:
-        sps = signal_adapter.resolve_fact("sps", sps)
+    inp = SignalInput(samples, "plot_time_domain()")
+    x = inp.samples
+    sampling_rate = inp.sampling_rate(sampling_rate)
+    if inp.signal is not None:
+        sps = inp.sps(sps)
     logger.debug("Generating time-domain plot.")
     x, xp, _ = dispatch(x)
 

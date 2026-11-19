@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.collections import LineCollection
 
 from ..backend import _to_host, dispatch, to_device
-from ..core._signal_adapter import adapt_signal, require_integer_sps
+from ..core._signal_input import SignalInput
 from ..logger import logger
 from ..math import normalize
 from ..smoothing import smooth_density_2d
@@ -241,8 +241,8 @@ def plot_eye_diagram(
     For an open eye, synchronize the signal (no frequency or timing offset)
     and matched-filter it first.
     """
-    signal_adapter = adapt_signal(samples, function_name="plot_eye_diagram()")
-    x, _, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "plot_eye_diagram()")
+    x, _, _ = dispatch(inp.samples)
     if quantity not in (None, "i", "q"):
         raise ValueError("quantity must be i, q, or None")
     if quantity == "q" and x.dtype.kind != "c":
@@ -251,9 +251,7 @@ def plot_eye_diagram(
         x = x.real
     elif quantity == "q":
         x = x.imag
-    sps = require_integer_sps(
-        signal_adapter.resolve_fact("sps", sps), "plot_eye_diagram()"
-    )
+    sps = inp.integer_sps(sps)
     logger.debug("Generating eye diagram (%s mode).", kind)
     is_complex = x.dtype.kind == "c"
     per_channel = 2 if is_complex else 1  # I and Q panels for complex samples

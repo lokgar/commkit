@@ -25,7 +25,7 @@ reductions.
 from typing import Any
 
 from ...backend import ArrayType, dispatch
-from ...core._signal_adapter import adapt_signal
+from ...core._signal_input import SignalInput
 from ...core.signal import Signal
 from .dsh import (
     DshFmFit,
@@ -140,9 +140,9 @@ def estimate_linewidth(
         delay below one sample.
     """
     name = "estimate_linewidth()"
-    adapter = adapt_signal(samples, function_name=name)
-    fs = float(adapter.resolve_fact("sampling_rate", sampling_rate))
-    x, xp, _ = dispatch(adapter.array)
+    inp = SignalInput(samples, name)
+    fs = inp.sampling_rate(sampling_rate)
+    x, xp, _ = dispatch(inp.samples)
     kind = type(method)
     if kind in _PHASE_METHODS:
         if xp.iscomplexobj(x):
