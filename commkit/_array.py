@@ -4,7 +4,8 @@ Indexing, broadcasting and coercion operations on NumPy/CuPy arrays, used by
 every module: :func:`validate_array`, the SISO/MIMO shape pair
 :func:`as_2d` / :func:`restore_1d`, :func:`broadcast_channels`,
 :func:`require_channels`, :func:`to_report_scalar` (host values of the
-metrics and summaries) and :func:`warn_if_double` (the
+metrics and summaries), :func:`freeze_host` (the read-only host fields of
+value objects) and :func:`warn_if_double` (the
 :class:`~commkit.PrecisionWarning` of the fixed-precision blocks).  This
 module imports only ``backend``: nothing from ``core``, DSP modules or
 plotting.
@@ -83,6 +84,19 @@ def validate_array(
         v = v.astype(complex_dtype)
 
     return v
+
+
+def freeze_host(obj: Any, name: str, value: Any, dtype: Any = None) -> np.ndarray:
+    """Store ``value`` as field ``name`` of the frozen dataclass ``obj``.
+
+    The field becomes a read-only host copy (one transfer for device input),
+    so the caller's array stays writable and a value object never holds
+    device memory.  Returns the stored array.
+    """
+    arr = np.array(_to_host(value), dtype=dtype)
+    arr.setflags(write=False)
+    object.__setattr__(obj, name, arr)
+    return arr
 
 
 # ---------------------------------------------------------------------------

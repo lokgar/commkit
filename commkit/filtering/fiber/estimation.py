@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 
 from ... import _fft
-from ..._array import as_2d, broadcast_channels
+from ..._array import as_2d, broadcast_channels, freeze_host
 from ..._constants import SPEED_OF_LIGHT as _SPEED_OF_LIGHT
 from ..._dispersion import (
     beta2_length,
@@ -223,14 +223,12 @@ class QuadraticPhaseFit:
                 f"{self.max_dispersion_ps_nm!r}."
             )
         if self.symbols is not None:
-            symbols = np.array(to_device(self.symbols, "cpu"))
+            symbols = freeze_host(self, "symbols", self.symbols)
             if symbols.ndim not in (1, 2):
                 raise ValueError(
                     "QuadraticPhaseFit: symbols must have shape (K,) or (C, K), "
                     f"got {symbols.shape}."
                 )
-            symbols.setflags(write=False)
-            object.__setattr__(self, "symbols", symbols)
 
 
 @dataclass(frozen=True)

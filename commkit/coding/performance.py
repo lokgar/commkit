@@ -19,6 +19,7 @@ from typing import Any
 import numpy as np
 
 from .. import _random
+from .._array import freeze_host
 from ..backend import _module_for, _to_host, to_device
 from ..logger import logger
 from ..mapping import Constellation
@@ -94,16 +95,14 @@ class ErrorRateCurve:
     label: str = ""
 
     def __post_init__(self) -> None:
-        esn0 = np.array(to_device(self.esn0_db, "cpu"), dtype=np.float64)
+        esn0 = freeze_host(self, "esn0_db", self.esn0_db, np.float64)
         if esn0.ndim != 1 or esn0.size == 0 or not np.all(np.isfinite(esn0)):
             raise ValueError(
                 f"ErrorRateCurve: esn0_db must be 1-D, finite and not empty, got "
                 f"shape {esn0.shape}."
             )
-        esn0.setflags(write=False)
-        object.__setattr__(self, "esn0_db", esn0)
         for name in _COUNT_FIELDS:
-            value = np.array(to_device(getattr(self, name), "cpu"))
+            value = _to_host(getattr(self, name))
             if value.shape != esn0.shape:
                 raise ValueError(
                     f"ErrorRateCurve: {name} must have the shape of esn0_db "
@@ -111,9 +110,7 @@ class ErrorRateCurve:
                 )
             if value.dtype.kind not in "iu" or np.any(value < 0):
                 raise ValueError(f"ErrorRateCurve: {name} must be counts >= 0.")
-            value = value.astype(np.int64)
-            value.setflags(write=False)
-            object.__setattr__(self, name, value)
+            freeze_host(self, name, value, np.int64)
         if np.any(self.num_blocks < 1):
             raise ValueError("ErrorRateCurve: num_blocks must be >= 1 at every point.")
         for name in ("k", "n", "bits_per_symbol"):

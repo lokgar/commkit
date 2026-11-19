@@ -47,6 +47,7 @@ _PAYLOAD = "transmitted payload drawn on the host"
 
 # "path/to/module.py::qualname" -> why the transfer is deliberate.
 _DOCUMENTED: dict[str, str] = {
+    "_array.py::freeze_host": "value object: host copy of an array field",
     "analysis/linewidth/phase.py::_beta_separation": _REPORT,
     "analysis/linewidth/dsh.py::_dsh_fm_psd": _REPORT,
     "analysis/linewidth/dsh.py::_dsh_lorentzian": _REPORT,
@@ -90,7 +91,6 @@ _DOCUMENTED: dict[str, str] = {
     + " (the IIR state transitions)",
     "metrics/_common.py::_paired": _HOST_VALUE + " (reference symbols)",
     "coding/performance.py::error_rate_curve": _PAYLOAD + " (per batch of blocks)",
-    "recovery/corrections.py::ConstantPhase.__post_init__": "value object: host copy",
     "recovery/corrections.py::_data_aided": _HOST_VALUE + " (reference symbols)",
     "recovery/corrections.py::correct_cycle_slips": _RECURSION,
     "recovery/pilots.py::_extract_pilot_phasor": _HOST_VALUE

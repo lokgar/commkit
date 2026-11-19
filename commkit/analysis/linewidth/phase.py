@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 from scipy.stats import chi2
 
-from ..._array import as_2d, broadcast_channels, to_report_scalar
+from ..._array import as_2d, broadcast_channels, freeze_host, to_report_scalar
 from ...backend import ArrayType, _to_host, dispatch, to_device
 from ...logger import logger
 from ...math import _next_pow2, normalize
@@ -153,16 +153,13 @@ class IncrementSubtract:
                     "noise_var must be a non-negative scalar or (C,) array, "
                     f"got {self.noise_var!r}."
                 )
-            nv.setflags(write=False)
-            object.__setattr__(self, "noise_var", nv)
+            freeze_host(self, "noise_var", nv)
         if self.reference is not None:
-            ref = np.array(to_device(self.reference, "cpu"))
+            ref = freeze_host(self, "reference", self.reference)
             if ref.ndim not in (1, 2):
                 raise ValueError(
                     f"reference must have shape (N,) or (C, N), got {ref.shape}."
                 )
-            ref.setflags(write=False)
-            object.__setattr__(self, "reference", ref)
         _check_edge_trim(self.edge_trim)
 
 

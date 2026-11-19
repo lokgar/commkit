@@ -11,7 +11,7 @@ from typing import Any, Literal
 import numpy as np
 
 from .. import _fft
-from .._array import broadcast_channels
+from .._array import broadcast_channels, freeze_host
 from .._peaks import refine_tones
 from ..backend import ArrayType, dispatch, to_device
 from ..frequency import correct_frequency_offset
@@ -55,8 +55,8 @@ class PilotInterpolation:
     cycle_slip: CycleSlip | None = None
 
     def __post_init__(self) -> None:
-        indices = np.array(to_device(self.indices, "cpu")).astype(np.intp)
-        values = np.array(to_device(self.values, "cpu"))
+        indices = freeze_host(self, "indices", self.indices, np.intp)
+        values = freeze_host(self, "values", self.values)
         if indices.ndim != 1 or indices.size < 1:
             raise ValueError("indices must be 1-D with at least one pilot.")
         if np.any(np.diff(indices) <= 0):
@@ -71,9 +71,6 @@ class PilotInterpolation:
                 f"Unknown interpolation method: {self.interpolation!r}. "
                 "Choose 'linear' or 'cubic'."
             )
-        for name, arr in (("indices", indices), ("values", values)):
-            arr.setflags(write=False)
-            object.__setattr__(self, name, arr)
 
     @classmethod
     def from_frame(

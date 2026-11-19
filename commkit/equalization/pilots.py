@@ -7,8 +7,8 @@ from typing import Any
 
 import numpy as np
 
-from .._array import broadcast_channels
-from ..backend import to_device
+from .._array import broadcast_channels, freeze_host
+from ..backend import _to_host
 
 __all__ = ["EqualizerPilots"]
 
@@ -48,20 +48,17 @@ class EqualizerPilots:
     gain_db: float = 0.0
 
     def __post_init__(self) -> None:
-        values = np.array(to_device(self.values, "cpu"), dtype=np.complex64)
-        mask = np.array(to_device(self.mask, "cpu"))
+        values = freeze_host(self, "values", self.values, np.complex64)
+        mask = _to_host(self.mask)
         if mask.ndim != 1 or mask.dtype.kind not in "bui":
             raise ValueError(f"mask must be a 1-D boolean array, got {mask.shape}.")
-        mask = mask.astype(bool)
+        mask = freeze_host(self, "mask", mask, bool)
         count = int(mask.sum())
         if values.ndim not in (1, 2) or values.shape[-1] != count:
             raise ValueError(
                 f"values must have shape (K,) or (C, K) with K = {count} pilots "
                 f"(the True entries of mask), got {values.shape}."
             )
-        for name, arr in (("values", values), ("mask", mask)):
-            arr.setflags(write=False)
-            object.__setattr__(self, name, arr)
         object.__setattr__(self, "gain_db", float(self.gain_db))
 
     @classmethod

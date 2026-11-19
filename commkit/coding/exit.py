@@ -62,7 +62,8 @@ from typing import Any
 import numpy as np
 
 from .. import _random
-from ..backend import ArrayType, _module_for, dispatch, to_device
+from .._array import freeze_host
+from ..backend import ArrayType, _module_for, _to_host, dispatch, to_device
 from ..logger import logger
 from ..mapping import Constellation
 from .base import _decode_blocks, _encode_blocks, _resolve_method
@@ -131,8 +132,8 @@ class ExitCurve:
     label: str = ""
 
     def __post_init__(self) -> None:
-        a = np.array(to_device(self.a_priori, "cpu"), dtype=np.float64)
-        e = np.array(to_device(self.extrinsic, "cpu"), dtype=np.float64)
+        a = freeze_host(self, "a_priori", self.a_priori, np.float64)
+        e = _to_host(self.extrinsic, np.float64)
         if a.ndim != 1 or a.shape != e.shape or a.size < 2:
             raise ValueError(
                 "ExitCurve: a_priori and extrinsic must be 1-D of one length >= 2, "
@@ -144,9 +145,7 @@ class ExitCurve:
             raise ValueError("ExitCurve: a_priori must increase within [0, 1].")
         if e.min() < -1e-9 or e.max() > 1 + 1e-9:
             raise ValueError("ExitCurve: extrinsic must lie in [0, 1].")
-        for name, value in (("a_priori", a), ("extrinsic", np.clip(e, 0.0, 1.0))):
-            value.setflags(write=False)
-            object.__setattr__(self, name, value)
+        freeze_host(self, "extrinsic", np.clip(e, 0.0, 1.0))
 
 
 @dataclass(frozen=True, eq=False)

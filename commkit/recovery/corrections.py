@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 
 from .. import _fft
-from .._array import as_2d, broadcast_channels, restore_1d
+from .._array import as_2d, broadcast_channels, freeze_host, restore_1d
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
@@ -412,13 +412,11 @@ class ConstantPhase:
                 f"num_skip_symbols must be >= 0, got {self.num_skip_symbols}."
             )
         if self.symbols is not None:
-            symbols = np.array(to_device(self.symbols, "cpu"))
+            symbols = freeze_host(self, "symbols", self.symbols)
             if symbols.ndim not in (1, 2):
                 raise ValueError(
                     f"symbols must have shape (N,) or (C, N), got {symbols.shape}."
                 )
-            symbols.setflags(write=False)
-            object.__setattr__(self, "symbols", symbols)
 
 
 def _data_aided(x: ArrayType, method: ConstantPhase, ctx: _Context) -> _Phase:

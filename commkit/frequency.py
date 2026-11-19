@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 
 from . import _fft
-from ._array import as_2d, broadcast_channels, restore_1d
+from ._array import as_2d, broadcast_channels, freeze_host, restore_1d
 from ._peaks import parabolic_peak_offset
 from .backend import ArrayType, _to_host, dispatch, to_device
 from .core._signal_adapter import S, adapt_signal, require_integer_sps
@@ -186,8 +186,8 @@ class PilotSlope:
     snr_weighted: bool = True
 
     def __post_init__(self) -> None:
-        indices = np.array(to_device(self.indices, "cpu")).astype(np.intp)
-        values = np.array(to_device(self.values, "cpu"))
+        indices = freeze_host(self, "indices", self.indices, np.intp)
+        values = freeze_host(self, "values", self.values)
         if indices.ndim != 1 or indices.size < 2:
             raise ValueError("indices must be 1-D with at least two pilots.")
         if np.any(np.diff(indices) <= 0):
@@ -197,9 +197,6 @@ class PilotSlope:
                 f"values must have shape (P,) or (C, P) with P={indices.size}, "
                 f"got {values.shape}."
             )
-        for name, arr in (("indices", indices), ("values", values)):
-            arr.setflags(write=False)
-            object.__setattr__(self, name, arr)
 
     @classmethod
     def from_frame(
