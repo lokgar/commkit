@@ -646,89 +646,13 @@ def _estimate_tones(
             tone_frequencies=tuple(map(float, f_used)),
         )
 
-    # --- Tracking low-pass design + feasibility check ------------------------
-    if num_taps is None:
-        # Hamming transition width ≈ 3.3·fs/num_taps; size it to resolve the
-        # requested tracking bandwidth.  Force odd; keep it shorter than N.
-        num_taps = int(round(3.3 * sampling_rate / track_bandwidth))
-        num_taps += 1 - (num_taps % 2)  # nearest odd >= value
-        num_taps = max(num_taps, 3)
-    num_taps = min(int(num_taps), (N // 2) * 2 - 1)
-    h = fir_taps(
-        sampling_rate=sampling_rate,
-        num_taps=num_taps,
-        cutoff=track_bandwidth,
-        btype="low",
+    h, num_taps = _tracking_filter(num_taps, track_bandwidth, sampling_rate, N, f_tones)
+    grid_np, grid, grid_step = _inversion_grid(
+        grid_step, track_bandwidth, sampling_rate, N, xp
     )
-
-    if K > 1:
-        sorted_f = sorted(f_tones)
-        d_min = min(b - a for a, b in zip(sorted_f, sorted_f[1:]))
-        transition = 3.3 * sampling_rate / num_taps
-        if 2.0 * track_bandwidth + transition >= d_min:
-            logger.warning(
-                "estimate_polarization: tracking bandwidth "
-                "(%.3g Hz, FIR transition %.3g Hz) approaches the nearest tone "
-                "spacing %.3g Hz - neighboring tones may leak into the Jones "
-                "estimate. Reduce track_bandwidth or widen the tone spacing.",
-                track_bandwidth,
-                transition,
-                d_min,
-            )
-
-    # --- Decimated inversion grid --------------------------------------------
-    if grid_step is None:
-        grid_step = max(1, int(sampling_rate / (4.0 * track_bandwidth)))
-    grid_step = int(min(max(grid_step, 1), N))
-    grid_np = np.arange(0, N, grid_step, dtype=np.int64)
-    if int(grid_np[-1]) != N - 1:
-        grid_np = np.concatenate([grid_np, [N - 1]])  # pin the last sample
+    Tg = _tracked_jones(xw, h, f_used, grid_np, grid, sampling_rate)
+    Wg = _regularized_inverse(Tg, xp)
     G = int(grid_np.shape[0])
-    grid = xp.arange(0, N, grid_step, dtype=xp.int64)  # grid_np, built on the device
-    if int(grid.shape[0]) != G:
-        grid = xp.concatenate([grid, xp.full(1, N - 1, dtype=xp.int64)])
-    grid_positions = grid.astype(xp.float64)
-
-    # --- Track the Jones matrix at the grid points ---------------------------
-    # T[i, j, g] = LPF{ r_i(n) · exp(-j2π f_j n/fs) }(g) ≈ J_ij(g)·α_j, with a
-    # centered ('same') linear-phase FIR, so the LPF group delay is compensated
-    # and the estimate aligns in time with the input.  Only the G grid points
-    # feed the batched inverse, so the tracker is evaluated there directly
-    # (windowed gather + GEMM in _jones_at_grid_points) instead of filtering
-    # all N samples and discarding grid_step-1 of every grid_step outputs.
-    # The batched inverse follows the RLS-style double-precision convention,
-    # hence the complex128 (G, C, K) stack.
-    if G * num_taps <= 24 * K * N:
-        Tg = _jones_at_grid_points(xw, h, f_used, grid_np, grid, sampling_rate)
-    else:
-        # Dense grid (grid_step ≪ num_taps): per-grid-point windows would touch
-        # far more elements than the record itself, so keep the full-rate
-        # batched-FIR formulation.  The phase ramp 2π·f·n/fs reaches ~1e7 rad
-        # over a long capture, so it MUST be formed and wrapped in float64 -
-        # float32 loses the integer turn count and corrupts every tone phasor.
-        # The wrapped phase, the exp, the mix-down, and the averaging LPF are
-        # well-conditioned, so they run in working precision, with FFT-FIR
-        # round-off (~√N_fft·ε ≈ 5e-5) far below the demux crosstalk floor.
-        two_pi = 2.0 * np.pi
-        real_dtype = xp.float64 if xw.dtype == xp.complex128 else xp.float32
-        f_arr = xp.asarray([float(fj) for fj in f_used], dtype=xp.float64)  # (K,)
-        n = xp.arange(N, dtype=xp.float64)
-        ph = two_pi * f_arr[:, None] * n[None, :] / sampling_rate  # (K, N) float64
-        ph -= xp.round(ph / two_pi) * two_pi  # wrap in float64 (essential)
-        carrier = xp.exp(-1j * ph.astype(real_dtype))  # (K, N) working precision
-        mixed = xw[:, None, :] * carrier[None, :, :]  # (C, K, N)
-        # One batched linear-phase FIR over (C·K) rows instead of K calls.
-        T_t = cast(ArrayType, fir_filter(mixed.reshape(C * K, N), h)).reshape(C, K, N)
-        Tg = xp.moveaxis(T_t[:, :, grid], 2, 0).astype(xp.complex128)  # (G, C, K)
-    Th = xp.conj(xp.swapaxes(Tg, -1, -2))  # (G, K, C)
-    gram = Th @ Tg  # (G, K, K)
-    # Tikhonov regularization keeps the batched inverse well-conditioned when the
-    # instantaneous SOP nearly aligns two streams (gram -> singular).
-    diag_mean = xp.real(xp.trace(gram, axis1=-2, axis2=-1)) / K  # (G,)
-    eye = xp.eye(K, dtype=xp.complex128)
-    ridge = (1e-9 * diag_mean)[:, None, None] * eye[None, :, :]
-    Wg = xp.linalg.inv(gram + ridge) @ Th  # (G, K, C) - batched, CPU+GPU
-
     logger.info(
         "estimate_polarization (tones, tracked): f_tones=%s Hz, refine=%s, "
         "track_bw=%.3g Hz, taps=%d, grid_step=%d, G=%d [C=%d, K=%d, N=%d]",
@@ -745,8 +669,134 @@ def _estimate_tones(
     # A centered FIR averages zero padding into the num_taps//2 samples at
     # each end.
     return PolarizationTonesEstimate(
-        Wg, grid_positions, num_taps // 2, tone_frequencies=tuple(map(float, f_used))
+        Wg,
+        grid.astype(xp.float64),
+        num_taps // 2,
+        tone_frequencies=tuple(map(float, f_used)),
     )
+
+
+def _tracking_filter(
+    num_taps: int | None,
+    track_bandwidth: float,
+    sampling_rate: float,
+    N: int,
+    f_tones: Any,
+) -> tuple[ArrayType, int]:
+    """The tracking low-pass of the tone mix-downs, and its length.
+
+    A Hamming FIR whose transition width (about ``3.3 fs / num_taps``)
+    resolves ``track_bandwidth``: odd, at least 3 taps and shorter than the
+    record.  Warns when the passband and transition approach the nearest
+    tone spacing, where neighbouring tones leak into the Jones estimate.
+    """
+    if num_taps is None:
+        num_taps = int(round(3.3 * sampling_rate / track_bandwidth))
+        num_taps += 1 - (num_taps % 2)  # nearest odd >= value
+        num_taps = max(num_taps, 3)
+    num_taps = min(int(num_taps), (N // 2) * 2 - 1)
+    h = fir_taps(
+        sampling_rate=sampling_rate,
+        num_taps=num_taps,
+        cutoff=track_bandwidth,
+        btype="low",
+    )
+    if len(f_tones) > 1:
+        sorted_f = sorted(f_tones)
+        d_min = min(b - a for a, b in zip(sorted_f, sorted_f[1:]))
+        transition = 3.3 * sampling_rate / num_taps
+        if 2.0 * track_bandwidth + transition >= d_min:
+            logger.warning(
+                "estimate_polarization: tracking bandwidth "
+                "(%.3g Hz, FIR transition %.3g Hz) approaches the nearest tone "
+                "spacing %.3g Hz - neighboring tones may leak into the Jones "
+                "estimate. Reduce track_bandwidth or widen the tone spacing.",
+                track_bandwidth,
+                transition,
+                d_min,
+            )
+    return h, num_taps
+
+
+def _inversion_grid(
+    grid_step: int | None, track_bandwidth: float, sampling_rate: float, N: int, xp: Any
+) -> tuple[np.ndarray, ArrayType, int]:
+    """Sample indices where the Jones matrix is inverted, and their step.
+
+    Every ``grid_step`` samples (by default four per period of the tracking
+    bandwidth) with the last sample pinned, on the host and on the data's
+    device.
+    """
+    if grid_step is None:
+        grid_step = max(1, int(sampling_rate / (4.0 * track_bandwidth)))
+    grid_step = int(min(max(grid_step, 1), N))
+    grid_np = np.arange(0, N, grid_step, dtype=np.int64)
+    if int(grid_np[-1]) != N - 1:
+        grid_np = np.concatenate([grid_np, [N - 1]])  # pin the last sample
+    grid = xp.arange(0, N, grid_step, dtype=xp.int64)  # grid_np, built on the device
+    if int(grid.shape[0]) != int(grid_np.shape[0]):
+        grid = xp.concatenate([grid, xp.full(1, N - 1, dtype=xp.int64)])
+    return grid_np, grid, grid_step
+
+
+def _tracked_jones(
+    xw: ArrayType,
+    h: ArrayType,
+    f_used: Any,
+    grid_np: np.ndarray,
+    grid: ArrayType,
+    sampling_rate: float,
+) -> ArrayType:
+    """The tracked Jones columns at the grid points, ``(G, C, K)`` complex128.
+
+    ``T[i, j, g] = LPF{ r_i(n) · exp(-j2π f_j n/fs) }(g) ≈ J_ij(g)·α_j``, with
+    a centered ('same') linear-phase FIR, so the LPF group delay is
+    compensated and the estimate aligns in time with the input.  A sparse
+    grid evaluates the tracker at the grid points only (windowed gather and
+    GEMM in :func:`_jones_at_grid_points`); a dense one (``grid_step`` well
+    below the filter length, where the windows would touch far more elements
+    than the record) filters the full-rate mix-downs instead.  The stack is
+    complex128 for the batched inverse, the RLS-style double-precision
+    convention.
+    """
+    _, xp, _ = dispatch(xw)
+    C, N = xw.shape
+    K, G, num_taps = len(f_used), int(grid_np.shape[0]), int(h.shape[-1])
+    if G * num_taps <= 24 * K * N:
+        return _jones_at_grid_points(xw, h, f_used, grid_np, grid, sampling_rate)
+    # The phase ramp 2π·f·n/fs reaches ~1e7 rad over a long capture, so it
+    # MUST be formed and wrapped in float64 - float32 loses the integer turn
+    # count and corrupts every tone phasor.  The wrapped phase, the exp, the
+    # mix-down, and the averaging LPF are well-conditioned, so they run in
+    # working precision, with FFT-FIR round-off (~√N_fft·ε ≈ 5e-5) far below
+    # the demux crosstalk floor.
+    two_pi = 2.0 * np.pi
+    real_dtype = xp.float64 if xw.dtype == xp.complex128 else xp.float32
+    f_arr = xp.asarray([float(fj) for fj in f_used], dtype=xp.float64)  # (K,)
+    n = xp.arange(N, dtype=xp.float64)
+    ph = two_pi * f_arr[:, None] * n[None, :] / sampling_rate  # (K, N) float64
+    ph -= xp.round(ph / two_pi) * two_pi  # wrap in float64 (essential)
+    carrier = xp.exp(-1j * ph.astype(real_dtype))  # (K, N) working precision
+    mixed = xw[:, None, :] * carrier[None, :, :]  # (C, K, N)
+    # One batched linear-phase FIR over (C·K) rows instead of K calls.
+    T_t = cast(ArrayType, fir_filter(mixed.reshape(C * K, N), h)).reshape(C, K, N)
+    return xp.moveaxis(T_t[:, :, grid], 2, 0).astype(xp.complex128)  # (G, C, K)
+
+
+def _regularized_inverse(Tg: ArrayType, xp: Any) -> ArrayType:
+    """Left inverses ``(G, K, C)`` of the ``(G, C, K)`` Jones stack.
+
+    ``(Tᴴ T + ε I)⁻¹ Tᴴ``, batched on either device: the ridge ``ε = 1e-9``
+    times the mean diagonal keeps the inverse well-conditioned when the
+    instantaneous SOP nearly aligns two streams (the Gram matrix singular).
+    """
+    K = Tg.shape[-1]
+    Th = xp.conj(xp.swapaxes(Tg, -1, -2))  # (G, K, C)
+    gram = Th @ Tg  # (G, K, K)
+    diag_mean = xp.real(xp.trace(gram, axis1=-2, axis2=-1)) / K  # (G,)
+    eye = xp.eye(K, dtype=xp.complex128)
+    ridge = (1e-9 * diag_mean)[:, None, None] * eye[None, :, :]
+    return xp.linalg.inv(gram + ridge) @ Th
 
 
 def correct_polarization(
