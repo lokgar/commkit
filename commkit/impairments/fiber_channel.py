@@ -36,7 +36,7 @@ from .._dispersion import apply_dispersion
 from .._fiber import Fiber, check_link, jones_section, propagate, to_watts
 from .._random import RNG
 from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import S, adapt_signal
+from ..core._signal_input import S, SignalInput
 from ..logger import logger
 from ..math import _phasor
 
@@ -116,12 +116,12 @@ def apply_pmd(
     >>> distorted = apply_pmd(x, dgd=5e-12, theta=np.pi / 5, sampling_rate=fs)
     >>> distorted = apply_pmd(sig, dgd=5e-12, theta=np.pi / 5)  # Signal input
     """
-    signal_adapter = adapt_signal(samples, function_name="apply_pmd()")
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    inp = SignalInput(samples, "apply_pmd()")
+    sampling_rate = inp.sampling_rate(sampling_rate)
 
     logger.info("Applying PMD (DGD=%.2e s, theta=%.3f rad).", dgd, theta)
 
-    x, xp, _ = dispatch(signal_adapter.array)
+    x, xp, _ = dispatch(inp.samples)
 
     require_channels(
         x, 2, name="samples", description="dual-pol input with shape (2, N)"
@@ -144,7 +144,7 @@ def apply_pmd(
     if result.dtype != x.dtype:
         result = result.astype(x.dtype)
 
-    return signal_adapter.wrap_samples(result)
+    return inp.wrap(result)
 
 
 def apply_polarization_mixing(
@@ -197,7 +197,7 @@ def apply_polarization_mixing(
     >>> # Slow linear SOP drift: 10 krad/s
     >>> drifted = apply_polarization_mixing(signal, theta=0.0, drift_rate=1e4)
     """
-    signal_adapter = adapt_signal(samples, function_name="apply_polarization_mixing()")
+    inp = SignalInput(samples, "apply_polarization_mixing()")
 
     logger.info(
         "Applying polarization mixing (theta=%s, drift=%.3g rad/s).",
@@ -210,9 +210,9 @@ def apply_polarization_mixing(
                 "apply_polarization_mixing(): drift_rate needs a scalar theta; "
                 "an array theta gives every angle."
             )
-        sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+        sampling_rate = inp.sampling_rate(sampling_rate)
 
-    x, xp, _ = dispatch(signal_adapter.array)
+    x, xp, _ = dispatch(inp.samples)
 
     require_channels(
         x, 2, name="samples", description="dual-pol input with shape (2, N)"
@@ -233,7 +233,7 @@ def apply_polarization_mixing(
             result = R @ x
             if result.dtype != x.dtype:
                 result = result.astype(x.dtype)
-            return signal_adapter.wrap_samples(result)
+            return inp.wrap(result)
     else:
         angles = xp.asarray(theta, dtype=xp.float64)
         if angles.shape != (N,):
@@ -256,7 +256,7 @@ def apply_polarization_mixing(
     if result.dtype != x.dtype:
         result = result.astype(x.dtype)
 
-    return signal_adapter.wrap_samples(result)
+    return inp.wrap(result)
 
 
 def apply_chromatic_dispersion(
@@ -311,9 +311,9 @@ def apply_chromatic_dispersion(
     >>> distorted = apply_chromatic_dispersion(  # optical Signal: its carrier
     ...     sig, dispersion_ps_nm_km=17.0, fiber_length_km=80.0)
     """
-    signal_adapter = adapt_signal(samples, function_name="apply_chromatic_dispersion()")
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    center_wavelength_nm = signal_adapter.resolve_wavelength_nm(center_wavelength_nm)
+    inp = SignalInput(samples, "apply_chromatic_dispersion()")
+    sampling_rate = inp.sampling_rate(sampling_rate)
+    center_wavelength_nm = inp.wavelength_nm(center_wavelength_nm)
 
     logger.info(
         "Applying CD (D=%s ps/nm/km, L=%s km, λ=%s nm).",
@@ -323,13 +323,13 @@ def apply_chromatic_dispersion(
     )
 
     result = apply_dispersion(
-        signal_adapter.array,
+        inp.samples,
         sampling_rate=sampling_rate,
         dispersion_ps_nm=dispersion_ps_nm_km * fiber_length_km,
         center_wavelength_nm=center_wavelength_nm,
         inverse=False,
     )
-    return signal_adapter.wrap_samples(result)
+    return inp.wrap(result)
 
 
 def apply_fiber_propagation(
@@ -448,9 +448,9 @@ def apply_fiber_propagation(
     ...     launch_power_dbm=2.0, noise_figure_db=5.0, rng=1)
     """
     name = "apply_fiber_propagation()"
-    signal_adapter = adapt_signal(samples, function_name=name)
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    center_wavelength_nm = signal_adapter.resolve_wavelength_nm(center_wavelength_nm)
+    inp = SignalInput(samples, name)
+    sampling_rate = inp.sampling_rate(sampling_rate)
+    center_wavelength_nm = inp.wavelength_nm(center_wavelength_nm)
     link = check_link(
         fiber=fiber,
         span_length_km=span_length_km,
@@ -465,7 +465,7 @@ def apply_fiber_propagation(
         raise ValueError(
             f"{name}: noise_figure_db must be >= 0 (or None), got {noise_figure_db!r}."
         )
-    x, xp, _ = dispatch(signal_adapter.array)
+    x, xp, _ = dispatch(inp.samples)
     field, was_1d, scale = to_watts(x, xp, launch_power_dbm, name)
     if fiber.pmd_ps_sqrt_km > 0 and field.shape[0] != 2:
         raise ValueError(
@@ -490,4 +490,4 @@ def apply_fiber_propagation(
         rng=rng,
     )
     out *= out.real.dtype.type(1.0 / scale)
-    return signal_adapter.wrap_samples(restore_1d(was_1d, out))
+    return inp.wrap(restore_1d(was_1d, out))

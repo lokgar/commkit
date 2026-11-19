@@ -27,7 +27,7 @@ from .._array import as_2d, restore_1d
 from .._interpolation import interpolate_at, interpolate_piecewise
 from .._random import RNG, as_generator, complex_normal, standard_normal
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import S, adapt_signal
+from ..core._signal_input import S, SignalInput
 from ..core.signal import Signal
 from ..logger import logger
 from ..math import _derotate, db_to_linear
@@ -111,11 +111,11 @@ def apply_iq_imbalance(
     ...     s, amplitude_imbalance_db=0.0, phase_imbalance_deg=0.0, skew=2e-12
     ... )
     """
-    signal_adapter = adapt_signal(samples, function_name="apply_iq_imbalance()")
+    inp = SignalInput(samples, "apply_iq_imbalance()")
     if skew != 0.0:
-        sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    elif signal_adapter.signal is not None and sampling_rate is not None:
-        signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+        sampling_rate = inp.sampling_rate(sampling_rate)
+    elif inp.signal is not None and sampling_rate is not None:
+        inp.sampling_rate(sampling_rate)
 
     logger.info(
         "Applying IQ imbalance (amplitude=%.2f dB, phase=%.2f deg, skew=%.3g s).",
@@ -124,7 +124,7 @@ def apply_iq_imbalance(
         skew,
     )
 
-    x, xp, _ = dispatch(signal_adapter.array)
+    x, xp, _ = dispatch(inp.samples)
     _require_complex(x, xp, "apply_iq_imbalance()")
     if skew != 0.0:
         assert sampling_rate is not None
@@ -142,7 +142,7 @@ def apply_iq_imbalance(
     if result.dtype != x.dtype:
         result = result.astype(x.dtype)
 
-    return signal_adapter.wrap_samples(result)
+    return inp.wrap(result)
 
 
 def _require_complex(x: ArrayType, xp: ModuleType, function_name: str) -> None:
@@ -214,15 +214,13 @@ def apply_sampling_clock_offset(samples: S, *, offset_ppm: float) -> S:
         raise ValueError(
             f"apply_sampling_clock_offset(): offset_ppm must be above -1e6, got {offset_ppm!r}."
         )
-    signal_adapter = adapt_signal(
-        samples, function_name="apply_sampling_clock_offset()"
-    )
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "apply_sampling_clock_offset()")
+    x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
     n_in = x.shape[-1]
     eps = offset_ppm * 1e-6
     if eps == 0.0:
-        return signal_adapter.wrap_samples(restore_1d(was_1d, x.copy()))
+        return inp.wrap(restore_1d(was_1d, x.copy()))
     n_out = math.floor((n_in - 1) * (1.0 + eps)) + 1 if n_in else 0
     logger.info(
         "Applying a sampling-clock offset of %.3f ppm (%d -> %d samples).",
@@ -232,7 +230,7 @@ def apply_sampling_clock_offset(samples: S, *, offset_ppm: float) -> S:
     )
     # output n at input n / (1 + ε), formed in float64 per instant
     y = interpolate_piecewise(x, np.array([[0.0, n_out / (1.0 + eps)]]), n_out)
-    return signal_adapter.wrap_samples(restore_1d(was_1d, y))
+    return inp.wrap(restore_1d(was_1d, y))
 
 
 def apply_quantization(
@@ -298,8 +296,8 @@ def apply_quantization(
         raise ValueError(
             f"apply_quantization(): enob must be in (0, num_bits={num_bits}], got {enob!r}."
         )
-    signal_adapter = adapt_signal(samples, function_name="apply_quantization()")
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "apply_quantization()")
+    x, xp, _ = dispatch(inp.samples)
     step = 2.0 * full_scale / 2 ** int(num_bits)
     top = full_scale - step / 2
 
@@ -331,7 +329,7 @@ def apply_quantization(
             "" if enob is None else f", ENOB {enob:g}",
             100 * clipped_fraction,
         )
-    return signal_adapter.wrap_samples(y)
+    return inp.wrap(y)
 
 
 def apply_sampling_jitter(
@@ -384,9 +382,9 @@ def apply_sampling_jitter(
         raise ValueError(
             f"apply_sampling_jitter(): jitter must be non-negative, got {jitter!r}."
         )
-    signal_adapter = adapt_signal(samples, function_name="apply_sampling_jitter()")
-    fs = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "apply_sampling_jitter()")
+    fs = inp.sampling_rate(sampling_rate)
+    x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
     logger.info(
         "Applying %.3g s rms sampling jitter (%.3g sample periods).",
@@ -394,14 +392,14 @@ def apply_sampling_jitter(
         jitter * fs,
     )
     if jitter == 0:
-        return signal_adapter.wrap_samples(restore_1d(was_1d, x.copy()))
+        return inp.wrap(restore_1d(was_1d, x.copy()))
     real = x.real.dtype
     n = x.shape[-1]
     d = (jitter * fs) * standard_normal(as_generator(rng), (n,), dtype=real, xp=xp)
     whole = xp.floor(d)
     base = xp.arange(n) + whole.astype(xp.int64)
     y = interpolate_at(x, base, (d - whole).astype(real, copy=False))
-    return signal_adapter.wrap_samples(restore_1d(was_1d, y))
+    return inp.wrap(restore_1d(was_1d, y))
 
 
 # -----------------------------------------------------------------------------
@@ -473,8 +471,8 @@ def estimate_iq_imbalance(samples: ArrayType | Signal) -> IQImbalanceEstimate:
     >>> est = estimate_iq_imbalance(r)  # ≈ 0.5 dB, 3.0°
     >>> s_hat = correct_iq_imbalance(r, est)
     """
-    signal_adapter = adapt_signal(samples, function_name="estimate_iq_imbalance()")
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "estimate_iq_imbalance()")
+    x, xp, _ = dispatch(inp.samples)
     _require_complex(x, xp, "estimate_iq_imbalance()")
     x2, was_1d = as_2d(x, name="samples")
     sii, sqq, siq = _branch_moments(x2, xp)
@@ -611,14 +609,14 @@ def correct_iq_imbalance(
             "correct_iq_imbalance(): how must be Lowdin(), GramSchmidt() or an "
             f"IQImbalanceEstimate, got {type(how).__name__}."
         )
-    signal_adapter = adapt_signal(samples, function_name="correct_iq_imbalance()")
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "correct_iq_imbalance()")
+    x, xp, _ = dispatch(inp.samples)
     _require_complex(x, xp, "correct_iq_imbalance()")
     logger.info("Correcting IQ imbalance (%s).", type(how).__name__)
     if correct_fn is None:
         assert isinstance(how, IQImbalanceEstimate)
-        return signal_adapter.wrap_samples(_invert_iq_imbalance(x, xp, how))
-    return signal_adapter.wrap_samples(_apply_iq_correction(x, xp, correct_fn))
+        return inp.wrap(_invert_iq_imbalance(x, xp, how))
+    return inp.wrap(_apply_iq_correction(x, xp, correct_fn))
 
 
 def _invert_iq_imbalance(
