@@ -11,10 +11,10 @@ from ._common import (
     _interp_block_phases,
     _mth_power_geometry,
     _num_blocks,
-    _Phase,
     _vv_block_phase,
 )
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
+from .estimates import BlockPhaseEstimate
 
 __all__ = ["ViterbiViterbi"]
 
@@ -86,7 +86,7 @@ def _warn_small_qam_block(
 
 def _viterbi_viterbi(
     symbols: ArrayType, method: ViterbiViterbi, ctx: _Context
-) -> _Phase:
+) -> BlockPhaseEstimate:
     """Viterbi-Viterbi phase of ``(C, N)`` symbols."""
     constellation = ctx.need_constellation(method)
     symbols, xp, _ = dispatch(symbols)
@@ -115,8 +115,8 @@ def _viterbi_viterbi(
         "[%s blocks x %s symbols, C=%s, cycle_slip=%s]",
         (N_blocks, block_size, C, method.cycle_slip is not None),
     )
-    return _Phase(
-        phase=phi_full,
+    return BlockPhaseEstimate(
+        value=phi_full,
         block_centers=np.arange(N_blocks, dtype=np.float64) * block_size
         + block_size / 2,
         block_phase=phi_u,

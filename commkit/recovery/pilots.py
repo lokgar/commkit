@@ -17,8 +17,9 @@ from ..backend import ArrayType, dispatch, to_device
 from ..frequency import correct_frequency_offset
 from ..logger import logger
 from ..math import _remove_linear_trend
-from ._common import _Context, _Phase
+from ._common import _Context
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
+from .estimates import PilotInterpolationEstimate, PilotToneEstimate, PilotTonesEstimate
 
 __all__ = ["PilotInterpolation", "PilotTone", "PilotTones"]
 
@@ -109,7 +110,7 @@ class PilotInterpolation:
 
 def _pilot_aided(
     symbols: ArrayType, method: PilotInterpolation, ctx: _Context
-) -> _Phase:
+) -> PilotInterpolationEstimate:
     """Pilot-aided phase of ``(C, N)`` symbols."""
     symbols, xp, _ = dispatch(symbols)
     C, N = symbols.shape
@@ -188,8 +189,8 @@ def _pilot_aided(
         "[P=%s pilots, C=%s]",
         (P, C),
     )
-    return _Phase(
-        phase=phi_full, pilot_indices=pilot_indices_np, pilot_phase=phi_pilots_u
+    return PilotInterpolationEstimate(
+        value=phi_full, pilot_indices=pilot_indices_np, pilot_phase=phi_pilots_u
     )
 
 
@@ -418,7 +419,9 @@ class PilotTone:
             raise ValueError(f"bandwidth must be > 0, got {self.bandwidth}.")
 
 
-def _pilot_tone(samples: ArrayType, method: PilotTone, ctx: _Context) -> _Phase:
+def _pilot_tone(
+    samples: ArrayType, method: PilotTone, ctx: _Context
+) -> PilotToneEstimate:
     """Pilot-tone phase of ``(C, N)`` samples."""
     sampling_rate = ctx.need_sampling_rate(method)
     tone_frequency = method.frequency
@@ -473,7 +476,7 @@ def _pilot_tone(samples: ArrayType, method: PilotTone, ctx: _Context) -> _Phase:
         "[f_p=%.3g Hz, B=%.3g Hz, refine=%s, remove_foe=%s, C=%s]",
         (tone_frequency, bandwidth, method.refine, method.remove_frequency_offset, C),
     )
-    return _Phase(phase=theta, tone_frequencies=np.asarray(f_centers))
+    return PilotToneEstimate(value=theta, tone_frequencies=np.asarray(f_centers))
 
 
 def _lowpass_fft(z: ArrayType, sampling_rate: float, cutoff: float, xp) -> ArrayType:
@@ -559,7 +562,9 @@ class PilotTones:
                 )
 
 
-def _pilot_tones(samples: ArrayType, method: PilotTones, ctx: _Context) -> _Phase:
+def _pilot_tones(
+    samples: ArrayType, method: PilotTones, ctx: _Context
+) -> PilotTonesEstimate:
     """MRC pilot-tones phase of ``(C, N)`` samples."""
     sampling_rate = ctx.need_sampling_rate(method)
     tone_frequencies = list(method.frequencies)
@@ -671,8 +676,8 @@ def _pilot_tones(samples: ArrayType, method: PilotTones, ctx: _Context) -> _Phas
             C,
         )
 
-    return _Phase(
-        phase=phi_full,
+    return PilotTonesEstimate(
+        value=phi_full,
         tone_frequencies=np.stack([np.asarray(fc) for fc in f_centers], axis=-1),
         tone_snr_db=10.0 * np.log10(snr),
         differential_phase=xp.stack(delta),

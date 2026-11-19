@@ -22,15 +22,7 @@ from __future__ import annotations
 # attribute access on the package namespace keep working.
 from ..logger import logger
 from .bps import BPS
-from .carrier_phase import (
-    BlockPhaseEstimate,
-    CarrierPhaseEstimate,
-    PilotInterpolationEstimate,
-    PilotToneEstimate,
-    PilotTonesEstimate,
-    correct_carrier_phase,
-    estimate_carrier_phase,
-)
+from .carrier_phase import correct_carrier_phase, estimate_carrier_phase
 from .corrections import (
     ConstantPhase,
     CycleSlip,
@@ -38,6 +30,13 @@ from .corrections import (
     resolve_channel_permutation,
     resolve_phase_ambiguity,
     smooth_phase,
+)
+from .estimates import (
+    BlockPhaseEstimate,
+    CarrierPhaseEstimate,
+    PilotInterpolationEstimate,
+    PilotToneEstimate,
+    PilotTonesEstimate,
 )
 from .pilots import PilotInterpolation, PilotTone, PilotTones
 from .pll import PLL

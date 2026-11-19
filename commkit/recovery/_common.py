@@ -73,26 +73,6 @@ class _Context:
         return self.sampling_rate
 
 
-@dataclass(frozen=True)
-class _Phase:
-    """An estimator's (C, N) trajectory and diagnostics, before ``restore_1d``.
-
-    Field meanings are those of ``CarrierPhaseEstimate``; per-channel fields
-    keep their leading channel axis here.
-    """
-
-    phase: ArrayType
-    block_centers: np.ndarray | None = None
-    block_phase: ArrayType | None = None
-    pilot_indices: np.ndarray | None = None
-    pilot_phase: ArrayType | None = None
-    tone_frequencies: np.ndarray | None = None
-    tone_snr_db: np.ndarray | None = None
-    differential_phase: ArrayType | None = None
-    reference_tone: int | None = None
-    used_tones: tuple[int, ...] | None = None
-
-
 def _num_blocks(N: int, block_size: int) -> int:
     """Number of whole blocks; raises when there is none."""
     N_blocks = N // block_size

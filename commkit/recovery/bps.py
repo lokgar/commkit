@@ -9,8 +9,9 @@ from ..backend import ArrayType, dispatch
 from ..logger import logger
 from ..mapping._lattice import slicer_params
 from ..math import normalize
-from ._common import _Context, _interp_block_phases, _num_blocks, _Phase
+from ._common import _Context, _interp_block_phases, _num_blocks
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
+from .estimates import BlockPhaseEstimate
 
 __all__ = ["BPS"]
 
@@ -81,7 +82,7 @@ def _get_numba_bps_grid() -> Any:
     return _numba_loops.bps_grid
 
 
-def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
+def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> BlockPhaseEstimate:
     """BPS phase of ``(C, N)`` symbols."""
 
     constellation = ctx.need_constellation(method)
@@ -273,8 +274,8 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
         (N_blocks, block_size, C, method.cycle_slip is not None),
     )
 
-    return _Phase(
-        phase=phi_full,
+    return BlockPhaseEstimate(
+        value=phi_full,
         block_centers=np.arange(N_blocks, dtype=np.float64) * block_size
         + block_size / 2,
         block_phase=phi_u,

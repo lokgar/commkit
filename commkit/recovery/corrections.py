@@ -19,7 +19,8 @@ from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
 from ..math import _remove_linear_trend
-from ._common import _Context, _Phase
+from ._common import _Context
+from .estimates import CarrierPhaseEstimate
 
 __all__ = [
     "CycleSlip",
@@ -419,7 +420,9 @@ class ConstantPhase:
                 )
 
 
-def _data_aided(x: ArrayType, method: ConstantPhase, ctx: _Context) -> _Phase:
+def _data_aided(
+    x: ArrayType, method: ConstantPhase, ctx: _Context
+) -> CarrierPhaseEstimate:
     if ctx.reference is None:
         raise ValueError(
             "estimate_carrier_phase(): ConstantPhase needs known symbols (pass "
@@ -442,7 +445,7 @@ def _data_aided(x: ArrayType, method: ConstantPhase, ctx: _Context) -> _Phase:
         logger.info(
             "CPR (data-aided): theta per channel %s°", np.round(deg, 2).tolist()
         )
-    return _Phase(phase=xp.broadcast_to(theta[:, None], (C, N)).copy())
+    return CarrierPhaseEstimate(value=xp.broadcast_to(theta[:, None], (C, N)).copy())
 
 
 # -----------------------------------------------------------------------------

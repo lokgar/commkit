@@ -16,10 +16,10 @@ from ._common import (
     _interp_block_phases,
     _mth_power_geometry,
     _num_blocks,
-    _Phase,
     _vv_block_phase,
 )
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
+from .estimates import BlockPhaseEstimate
 from .viterbi_viterbi import _warn_small_qam_block
 
 __all__ = ["Tikhonov"]
@@ -188,7 +188,9 @@ def _vv_observation_variance(
     return (power - second.real) / (2.0 * block_size * M**2 * abs(mu) ** 2)
 
 
-def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
+def _tikhonov(
+    symbols: ArrayType, method: Tikhonov, ctx: _Context
+) -> BlockPhaseEstimate:
     """Tikhonov-smoothed Viterbi-Viterbi phase of ``(C, N)`` symbols."""
     constellation = ctx.need_constellation(method)
     symbols, xp, sp = dispatch(symbols)
@@ -237,8 +239,8 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
         "[%s blocks x %s, σ_p²=%.2e, σ_v²=%.2e, C=%s, cycle_slip=%s]",
         (N_blocks, block_size, sigma_p2, sigma_v2, C, method.cycle_slip is not None),
     )
-    return _Phase(
-        phase=phi_full,
+    return BlockPhaseEstimate(
+        value=phi_full,
         block_centers=np.arange(N_blocks, dtype=np.float64) * block_size
         + block_size / 2,
         block_phase=phi_smooth,
