@@ -11,13 +11,12 @@ import numpy as np
 
 from .._array import to_report_scalar
 from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import adapt_signal
+from ..core._signal_input import SignalInput
 from ..core.signal import Signal
 from ..logger import logger
 from ..mapping import Constellation
 from ..math import linear_to_db
 from ._common import (
-    _constellation,
     _gain,
     _log_per_channel,
     _paired,
@@ -90,8 +89,8 @@ def evm(
     power by the mean power of the decided points.  No rotation is applied.
     """
     name = "evm()"
-    adapter = adapt_signal(symbols, function_name=name)
-    rx, xp, _ = dispatch(adapter.symbol_array())
+    inp = SignalInput(symbols, name)
+    rx, xp, _ = dispatch(inp.symbols())
     axis = -1
 
     if blind:
@@ -99,7 +98,7 @@ def evm(
             raise ValueError(
                 f"{name}: blind=True measures against hard decisions; drop reference=."
             )
-        c = _constellation(adapter, constellation, name)
+        c = inp.constellation(constellation, required=True)
         rx = _skip(rx, num_skip_symbols, name)
         # No gain correction: the caller passes symbols at the constellation's
         # scale.  The error is relative to the power of the decided points.
@@ -107,13 +106,13 @@ def evm(
         tx = xp.asarray(points)[c._nearest(rx.reshape(-1))].reshape(rx.shape)
         ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis, dtype=xp.float64)
     else:
-        ref = _reference(adapter, reference, "symbols", name, hint=", or blind=True")
+        ref = _reference(inp, reference, "symbols", name, hint=", or blind=True")
         rx, tx = _paired(rx, ref, xp, name)
         rx = _skip(rx, num_skip_symbols, name)
         tx = _skip(tx, num_skip_symbols, name)
-        known = adapter.resolve_choice("constellation", constellation)
+        known = inp.constellation(constellation)
         if known is not None:
-            _require_points(tx, _constellation(adapter, known, name), xp, name)
+            _require_points(tx, known, xp, name)
         tx, tx_pwr = _unit_reference(tx, xp)
         rx = rx / _gain(rx, tx, xp, tx_pwr)
         ref_pwr = tx_pwr[..., 0]
@@ -139,9 +138,9 @@ def _error_power(
 ) -> tuple[ArrayType, ArrayType, Any]:
     """``E[|r / g - s|^2]`` per channel (float64, on the device) with the
     reference at unit power, the reference's power, and the array module."""
-    adapter = adapt_signal(symbols, function_name=name)
-    rx, xp, _ = dispatch(adapter.symbol_array())
-    rx, tx = _paired(rx, _reference(adapter, reference, "symbols", name), xp, name)
+    inp = SignalInput(symbols, name)
+    rx, xp, _ = dispatch(inp.symbols())
+    rx, tx = _paired(rx, _reference(inp, reference, "symbols", name), xp, name)
     rx = _skip(rx, num_skip_symbols, name)
     tx = _skip(tx, num_skip_symbols, name)
     tx, tx_pwr = _unit_reference(tx, xp)

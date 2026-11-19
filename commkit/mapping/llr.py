@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..backend import ArrayType
-from ..core._signal_adapter import adapt_signal
+from ..core._signal_input import SignalInput
 from ..core.signal import Signal
 from ..logger import logger
 from ._demap import _noise_variance
@@ -90,11 +90,9 @@ def compute_llr(
     Gaussian log-likelihood of the noise the symbols carry.
     """
 
-    signal_adapter = adapt_signal(symbols, function_name="compute_llr()")
-    x = signal_adapter.symbol_array()
-    constellation = signal_adapter.require_choice(
-        "constellation", constellation, kind=Constellation
-    )
+    inp = SignalInput(symbols, "compute_llr()")
+    x = inp.symbols()
+    constellation = inp.constellation(constellation, required=True)
     noise_var = _noise_variance(
         noise_var, esn0_db, constellation, x.dtype.kind != "c", "compute_llr()"
     )
