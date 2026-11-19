@@ -8,6 +8,17 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 - `Constellation`, `LinearBlockCode`, `LDPCCode`, `PolarCode`, `Punctured` and `Interleaver` accept CuPy arrays for their array fields and copy them to the host, as the pilot, carrier-phase and EXIT value objects already did; `Constellation` raised `TypeError` on device points, labels or a pmf. Code that relied on the error to catch device input no longer gets it.
 
+### Fixed
+
+- `estimate_linewidth` with `IncrementSubtract(noise_var=..., reference=...)` raised `ModuleNotFoundError`: the amplitude-aware correction imported `commkit.analysis.math`, which does not exist. It now subtracts `σ²·E[1/|d|²]` as documented, tested against the angle noise of 16-QAM symbols.
+
+### Development
+
+- Structure: one `_numba()` getter per Numba kernel module in place of one getter per kernel; the CUDA launch wrappers by family under `_cuda/` with one argument check; `frequency` and `recovery` estimators build their estimate subclasses directly (the carrier-phase classes in `recovery/estimates.py`, re-exported as before); plots test estimate subclasses with `isinstance`; `estimate_timing`, the BPS metric, the pilot-tone polarization estimator and the block equalizers' runs split into named stages; shared helpers for host copies (`backend._to_host`), value-object fields (`_array.freeze_host`), FFT sizes (`math._next_pow2`), the M-fold unwrap and a missing constellation or pulse (`require_choice`). Results are identical except the GPU timing coherence, now gathered on the device (within 1.4e-7 relative).
+- `AGENTS.md`: the Numba getter rule.
+- mypy warns on unused `type: ignore` comments (67 to 16).
+- Tests and benchmarks: shared builders for the fibre field and the Wiener record, dead helpers removed, benchmark workloads in `workloads.py` with their former seeds.
+
 ## [3.8.0] - 2026-11-12
 
 The fixes of a full review of 3.7.1. Gardner clock recovery holds its loop bandwidth up to the largest offset it accepts, resampling keeps its accuracy at any record length, block backpropagation bounds its memory, and the fibre kernels form their phase in double precision. One interpolation kernel serves clock offset, jitter and Gardner on both devices, and `fir_filter`, `apply_taps`, `welch_psd` and the trace plots are several times faster. Names follow the verb rules: an estimator returns the estimate subclass of its method, with no field left `None`, and `cma` takes its default step from the constellation and warns where the constant-modulus criterion cannot work. The migration list below comes first.
