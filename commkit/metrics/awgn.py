@@ -37,6 +37,7 @@ from scipy.special import erfc
 from ..logger import logger
 from ..mapping import Constellation
 from ..mapping._lattice import separable_axes
+from ..mapping.shaping import _entropy_bits
 
 __all__ = ["awgn_ber", "awgn_gmi", "awgn_mi", "awgn_ser"]
 
@@ -399,7 +400,7 @@ def _information(
                 terms = _axis_terms(levels, float(n0))
                 weights = _nodes(_ORDER_1D, float(n0))[1]
                 if generalized:
-                    value += _entropy(pmf) - _gmi_loss(terms, weights, pmf, labels)
+                    value += _entropy_bits(pmf) - _gmi_loss(terms, weights, pmf, labels)
                 else:
                     value += _mi_terms(terms, weights, pmf, pmf)
         elif generalized:
@@ -412,11 +413,6 @@ def _information(
     if logger.isEnabledFor(logging.DEBUG) and scalar:
         logger.debug("%s %.6f bits/symbol.", name, float(out[0]))
     return _out(out, scalar, np.shape(esn0_db))
-
-
-def _entropy(pmf: np.ndarray) -> float:
-    p = pmf[pmf > 0]
-    return float(-np.sum(p * np.log2(p)))
 
 
 def awgn_mi(constellation: Constellation, *, esn0_db: Any) -> float | np.ndarray:
