@@ -19,7 +19,7 @@ import numpy as np
 from .. import _fft
 from .._peaks import refine_tones
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import S, adapt_signal
+from ..core._signal_input import S, SignalInput
 from ..core.signal import Signal
 from ..filtering import fir_filter, fir_taps
 from ..logger import logger
@@ -569,9 +569,9 @@ def estimate_polarization(
     TypeError
         If ``method`` is not a polarization method.
     """
-    signal_adapter = adapt_signal(samples, function_name="estimate_polarization()")
-    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    x, _, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "estimate_polarization()")
+    sampling_rate = inp.sampling_rate(sampling_rate)
+    x, _, _ = dispatch(inp.samples)
     return _estimate(x, method, sampling_rate)
 
 
@@ -848,12 +848,12 @@ def correct_polarization(
         If ``samples`` is not ``(C, N)`` with the ``C`` of ``how``, or
         ``trim_edges`` is set for a Signal.
     """
-    signal_adapter = adapt_signal(samples, function_name="correct_polarization()")
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "correct_polarization()")
+    x, xp, _ = dispatch(inp.samples)
     if isinstance(how, PolarizationEstimate):
         track = how
     elif type(how) in _ESTIMATORS:
-        fs = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+        fs = inp.sampling_rate(sampling_rate)
         track = _estimate(x, cast(PolarizationMethod, how), fs)
     else:
         matrix = xp.asarray(how)
@@ -864,7 +864,7 @@ def correct_polarization(
                 f"matrix, got shape {matrix.shape}."
             )
         track = PolarizationEstimate(matrix[None], xp.zeros(1, dtype=xp.float64))
-    if trim_edges and signal_adapter.signal is not None:
+    if trim_edges and inp.signal is not None:
         raise ValueError(
             "correct_polarization(): trim_edges drops samples and would "
             "misalign the Signal's reference; use array input."
@@ -892,7 +892,7 @@ def correct_polarization(
         p_in = xp.vdot(x_kept, x_kept).real / x_kept.size
         p_out = xp.mean(xp.abs(demuxed) ** 2, axis=-1, keepdims=True)  # (K, 1)
         demuxed = demuxed * xp.sqrt(p_in / xp.where(p_out > 0, p_out, 1.0))
-    return signal_adapter.wrap_samples(demuxed.astype(x.dtype, copy=False))
+    return inp.wrap(demuxed.astype(x.dtype, copy=False))
 
 
 _ESTIMATORS: dict[type, Callable[..., PolarizationEstimate]] = {

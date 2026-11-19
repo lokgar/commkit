@@ -13,7 +13,7 @@ import numpy as np
 
 from .._array import restore_1d
 from ..backend import _to_host, dispatch, to_device
-from ..core._signal_adapter import require_integer_sps
+from ..core._signal_input import require_integer_sps
 from ..logger import logger
 from ..math import rms
 from .result import EqualizerResult, EqualizerState

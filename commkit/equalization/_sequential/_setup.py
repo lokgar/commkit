@@ -23,7 +23,7 @@ import numpy as np
 
 from ..._array import restore_1d, warn_if_double
 from ...backend import ArrayType, dispatch, to_device
-from ...core._signal_adapter import require_choice
+from ...core._signal_input import require_value
 from ...recovery import BPS, PLL, CycleSlip
 from .._common import (
     _build_padded_samples,
@@ -263,7 +263,7 @@ def _dd_constellation(
     """
     if constellation is None and not decisions:
         return np.zeros(1, dtype=np.complex64)
-    require_choice(
+    require_value(
         constellation, "constellation", function_name, purpose=" for its decisions"
     )
     return np.ascontiguousarray(constellation.points, dtype=np.complex64)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import operator
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -17,7 +18,7 @@ from .. import _fft
 from .._array import as_2d, restore_1d
 from .._overlap_save import ols_apply
 from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import S, adapt_signal, require_integer_sps
+from ..core._signal_input import S, SignalInput
 from ..core.signal import Signal
 from ..logger import logger
 from ..math import _next_pow2
@@ -100,8 +101,8 @@ def correct_channel(
     ValueError
         If ``center_tap`` is outside ``[0, L)``, or given with an estimate.
     """
-    signal_adapter = adapt_signal(samples, function_name="correct_channel()")
-    x = signal_adapter.array
+    inp = SignalInput(samples, "correct_channel()")
+    x = inp.samples
     if isinstance(how, ChannelEstimate):
         if center_tap is not None:
             raise ValueError(
@@ -204,7 +205,7 @@ def correct_channel(
 
     out = ols_apply(x, N_fft, process)
 
-    return signal_adapter.wrap_samples(restore_1d(was_1d, out))
+    return inp.wrap(restore_1d(was_1d, out))
 
 
 def apply_taps(
@@ -271,12 +272,12 @@ def apply_taps(
         y = equalization.apply_taps(new_signal, result.weights,
                                     input_norm_factor=result.input_norm_factor)
     """
-    signal_adapter = adapt_signal(samples, function_name="apply_taps()")
-    x = signal_adapter.array
-    metadata = {}
-    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "apply_taps()")
-    if signal_adapter.signal is not None:
-        metadata["sampling_rate"] = signal_adapter.signal.symbol_rate
+    inp = SignalInput(samples, "apply_taps()")
+    x = inp.samples
+    metadata: dict[str, Any] = {}
+    sps = inp.integer_sps(sps)
+    if inp.signal is not None:
+        metadata["sampling_rate"] = inp.signal.symbol_rate
 
     x, xp, _ = dispatch(x)
     weights = xp.asarray(weights)
@@ -342,7 +343,7 @@ def apply_taps(
     y = ols_apply(padded.astype(dtype, copy=False), N_fft, process, guard=num_taps - 1)
     y = y[:, : n_sym * sps : sps]
 
-    return signal_adapter.wrap_samples(restore_1d(was_1d, y), **metadata)
+    return inp.wrap(restore_1d(was_1d, y), **metadata)
 
 
 # -----------------------------------------------------------------------------
@@ -408,10 +409,8 @@ def estimate_channel(
         The taps, their centre tap and the frequency response ``B(f)``, on
         the input's device.
     """
-    received = adapt_signal(samples, function_name="estimate_channel(samples)").array
-    reference = adapt_signal(
-        reference, function_name="estimate_channel(reference)"
-    ).array
+    received = SignalInput(samples, "estimate_channel()").samples
+    reference = SignalInput(reference, "estimate_channel()").samples
     x, xp, _ = dispatch(reference)
     y = xp.asarray(received)
     single = x.ndim == 1

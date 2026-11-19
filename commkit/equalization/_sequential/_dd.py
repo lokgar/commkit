@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from ...backend import ArrayType
-from ...core._signal_adapter import adapt_signal, require_integer_sps
+from ...core._signal_input import SignalInput
 from ...core.signal import Signal
 from ...logger import logger
 from ...mapping._lattice import slicer_params
@@ -262,11 +262,11 @@ def lms(
     input is copied to the host once and the outputs back once; the result's
     arrays are on the input's device.
     """
-    signal_adapter = adapt_signal(samples, function_name="lms()")
-    x = signal_adapter.array
-    sig = signal_adapter.signal
-    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "lms()")
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    inp = SignalInput(samples, "lms()")
+    x = inp.samples
+    sig = inp.signal
+    sps = inp.integer_sps(sps)
+    constellation = inp.constellation(constellation)
 
     inline = _inline_cpr(cpr, constellation, "lms()")
 
@@ -540,11 +540,11 @@ def rls(
        the null subspace, where ``P``'s eigenvalues grow for fractionally
        spaced (``sps > 1``) input.
     """
-    signal_adapter = adapt_signal(samples, function_name="rls()")
-    x = signal_adapter.array
-    sig = signal_adapter.signal
-    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "rls()")
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    inp = SignalInput(samples, "rls()")
+    x = inp.samples
+    sig = inp.signal
+    sps = inp.integer_sps(sps)
+    constellation = inp.constellation(constellation)
     if sps > 1:
         logger.debug(
             "RLS is mathematically ill-conditioned for fractionally-spaced "
