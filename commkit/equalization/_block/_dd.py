@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -138,6 +138,8 @@ class _BlockBps:
     anchor_kernel: Any = None  # CUDA data-aided anchor kernel, or None
     kernel: Any = None  # CUDA min-distance kernel, or None
     cs_kernel: Any = None  # CUDA cycle-slip launch bound to the buffers, or None
+    phi_all: Any = None  # (C, n_sym) float32 unwrapped phase, the trajectory
+    phi_ws: Any = None  # (C, block_size) float32, the block's phase
 
     def snapshot(self) -> _BlockCarrier:
         """Host copies of the state, at a block boundary."""
@@ -305,6 +307,99 @@ class _BlockBps:
         two_pi = xp.float64(2.0 * np.pi)
         phi_wrapped = (phi_f64 - xp.round(phi_f64 / two_pi) * two_pi).astype(xp.float32)
         return phi_wrapped, phi_f64.astype(xp.float32)
+
+
+@dataclass
+class _BlockLmsRun:
+    """One ``block_lms`` run: its persistent buffers and the block loop's steps.
+
+    The methods are the callbacks of :func:`._engine._block_loop`.  They
+    write only the buffers held here and read training symbols from the
+    staged ``d_ws``, so a full decision-directed block and a full training
+    block can each be captured into a CUDA graph and replayed.
+    """
+
+    run: _Block
+    slicer: _Slicer
+    bps: _BlockBps | None
+    mu: float
+    n_train: int
+    training: ArrayType  # (C, K) training symbols, (C, 0) without
+    y_all: ArrayType  # (C, n_sym) outputs
+    e_all: ArrayType  # (C, n_sym) errors
+    w_hist: ArrayType | None  # (n_sym, C, C, T) weights, with store_weights
+    e_scatter: ArrayType  # (C, fftsize) gradient scratch
+    y_rot_ws: ArrayType  # (C, block_size) the block's outputs
+    e_clean_ws: ArrayType  # (C, block_size) the block's errors
+    d_ws: ArrayType  # (C, block_size) staged training, (C, 0) without
+    # Weights and BPS state where a later call resumes.
+    snap: list[tuple[np.ndarray, Any]] = field(default_factory=list)
+
+    def prepare(self, B: int, b_start: int) -> None:
+        """Stage the block's training symbols while training lasts the whole block."""
+        if self.n_train - b_start >= B:
+            self.run.take(self.d_ws, self.training, B)
+
+    def run_block(self, B: int, b_start: int) -> None:
+        """One block: filter, CPR, slicer or training error, update."""
+        run, bps, xp = self.run, self.bps, self.run.xp
+        n_train_blk = max(0, min(self.n_train - b_start, B))
+        y_block, X_fd = _fdaf_forward(run.h, run.x_win, run.fftsize, run.sps, B, xp)
+        d_train = None
+        if n_train_blk == B:
+            d_train = self.d_ws[:, :B]
+        elif n_train_blk > 0:  # the one partially trained block, eager
+            d_train = self.training[:, b_start : b_start + n_train_blk]
+
+        if bps is not None:
+            phi_c, phi_traj = bps.phase(y_block, self.slicer, xp, d_train)
+            rot = _unit_phasor(-phi_c, xp.complex64, xp)  # (C, B), phi_c wrapped
+            y_rot = y_block * rot
+            bps.phi_ws[:, :B] = phi_traj  # unwrapped float32, for trajectory
+        else:
+            y_rot = y_block
+
+        e_clean = self.e_clean_ws[:, :B]
+        if d_train is not None:
+            e_clean[:, :n_train_blk] = d_train - y_rot[:, :n_train_blk]
+        if n_train_blk < B:
+            y_dd = y_rot[:, n_train_blk:]
+            e_clean[:, n_train_blk:] = self.slicer.decide(y_dd, xp) - y_dd
+
+        self.y_rot_ws[:, :B] = y_rot
+        if self.w_hist is not None:
+            self.w_hist[b_start : b_start + B] = run.h[None, :, :, :]
+
+        # The update works in the tap plane: undo the CPR rotation.
+        e_taps = e_clean * xp.conj(rot) if bps is not None else e_clean
+        _fdaf_gradient_update(
+            run.h, X_fd, e_taps, self.e_scatter, run.sps, B, run.num_taps, self.mu, xp
+        )
+
+    def store(self, b_start: int, b_end: int, B: int) -> None:
+        """Store the block's outputs, errors and (with BPS) phases."""
+        self.run.put(self.y_all, self.y_rot_ws, B)
+        self.run.put(self.e_all, self.e_clean_ws, B)
+        if self.bps is not None:
+            self.run.put(self.bps.phi_all, self.bps.phi_ws, B)
+
+    def at_resume(self) -> None:
+        """Snapshot the weights and the BPS state where a later call resumes."""
+        weights = to_device(self.run.h, "cpu").copy()
+        self.snap.append((weights, None if self.bps is None else self.bps.snapshot()))
+
+    def capturable(self, B: int, b_start: int) -> str | None:
+        """Graph key of a block: ``"train"``, ``"dd"`` or ``None``.
+
+        ``None`` for a short block or one that mixes training and decisions.
+        """
+        if B != self.run.block_size:
+            return None
+        if self.n_train - b_start <= 0:
+            return "dd"
+        if self.n_train - b_start >= B:
+            return "train"
+        return None
 
 
 def block_lms(
@@ -627,105 +722,38 @@ def block_lms(
         cpr_info,
     )
 
-    y_all = xp.empty((C, n_sym), dtype=xp.complex64)
-    e_all = xp.empty((C, n_sym), dtype=xp.complex64)
-    w_hist = (
-        xp.empty((n_sym, C, C, num_taps), dtype=xp.complex64) if store_weights else None
+    if bps is not None:
+        bps.phi_all = xp.zeros((C, n_sym), dtype=xp.float32)
+        bps.phi_ws = xp.empty((C, block_size), dtype=xp.float32)
+    loop = _BlockLmsRun(
+        run=run,
+        slicer=slicer,
+        bps=bps,
+        mu=mu,
+        n_train=n_train,
+        training=(
+            training if training is not None else xp.empty((C, 0), dtype=xp.complex64)
+        ),
+        y_all=xp.empty((C, n_sym), dtype=xp.complex64),
+        e_all=xp.empty((C, n_sym), dtype=xp.complex64),
+        w_hist=(
+            xp.empty((n_sym, C, C, num_taps), dtype=xp.complex64)
+            if store_weights
+            else None
+        ),
+        e_scatter=xp.zeros((C, run.fftsize), dtype=xp.complex64),
+        y_rot_ws=xp.empty((C, block_size), dtype=xp.complex64),
+        e_clean_ws=xp.empty((C, block_size), dtype=xp.complex64),
+        d_ws=xp.empty((C, block_size if n_train else 0), dtype=xp.complex64),
     )
-    phi_all = xp.zeros((C, n_sym), dtype=xp.float32) if bps is not None else None
-    e_scatter = xp.zeros((C, run.fftsize), dtype=xp.complex64)
-    y_rot_ws = xp.empty((C, block_size), dtype=xp.complex64)
-    e_clean_ws = xp.empty((C, block_size), dtype=xp.complex64)
-    phi_ws = xp.empty((C, block_size), dtype=xp.float32) if bps is not None else None
-    # Training symbols of a fully trained block, staged by prepare() so that
-    # a captured graph reads them from a fixed address.
-    d_ws = xp.empty((C, block_size), dtype=xp.complex64) if n_train else None
-
-    def prepare(B: int, b_start: int) -> None:
-        """Stage the block's training symbols while training lasts the whole block."""
-        if d_ws is not None and n_train - b_start >= B:
-            assert run.training is not None
-            run.take(d_ws, run.training, B)
-
-    def run_block(B: int, b_start: int) -> None:
-        """One block: filter, CPR, slicer/training error, update.
-
-        Writes only persistent buffers and reads training symbols from the
-        staged d_ws, so a full decision-directed block and a full training
-        block can each be captured into a CUDA graph.
-        """
-        n_train_blk = max(0, min(n_train - b_start, B))
-        y_block, X_fd = _fdaf_forward(run.h, run.x_win, run.fftsize, sps, B, xp)
-        d_train = None
-        if n_train_blk == B:
-            assert d_ws is not None
-            d_train = d_ws[:, :B]
-        elif n_train_blk > 0:  # the one partially trained block, eager
-            assert training is not None
-            d_train = training[:, b_start : b_start + n_train_blk]
-
-        if bps is not None:
-            phi_c, phi_traj = bps.phase(y_block, slicer, xp, d_train)
-            rot = _unit_phasor(-phi_c, xp.complex64, xp)  # (C, B), phi_c wrapped
-            y_rot = y_block * rot
-            assert phi_ws is not None
-            phi_ws[:, :B] = phi_traj  # unwrapped float32, for trajectory
-        else:
-            y_rot = y_block
-
-        e_clean = e_clean_ws[:, :B]
-        if d_train is not None:
-            e_clean[:, :n_train_blk] = d_train - y_rot[:, :n_train_blk]
-        if n_train_blk < B:
-            y_dd = y_rot[:, n_train_blk:]
-            e_clean[:, n_train_blk:] = slicer.decide(y_dd, xp) - y_dd
-
-        y_rot_ws[:, :B] = y_rot
-        if store_weights:
-            assert w_hist is not None
-            w_hist[b_start : b_start + B] = run.h[None, :, :, :]
-
-        # The update works in the tap plane: undo the CPR rotation.
-        e_taps = e_clean * xp.conj(rot) if bps is not None else e_clean
-        _fdaf_gradient_update(run.h, X_fd, e_taps, e_scatter, sps, B, num_taps, mu, xp)
-
-    def store(b_start: int, b_end: int, B: int) -> None:
-        """Store the block's outputs, errors and (with BPS) phases."""
-        run.put(y_all, y_rot_ws, B)
-        run.put(e_all, e_clean_ws, B)
-        if bps is not None:
-            assert phi_all is not None and phi_ws is not None
-            run.put(phi_all, phi_ws, B)
-
-    snap: list[tuple[np.ndarray, Any]] = []
-
-    def at_resume() -> None:
-        """Snapshot the weights and the BPS state where a later call resumes."""
-        weights = to_device(run.h, "cpu").copy()
-        snap.append((weights, None if bps is None else bps.snapshot()))
-
     first_dd_full = ((n_train + block_size - 1) // block_size) * block_size
     n_dd_full = max(0, (n_sym - first_dd_full) // block_size)
     n_train_full = min(n_train, n_sym) // block_size
-
-    def capturable(B: int, b_start: int) -> str | None:
-        """Graph key of a block: ``"train"``, ``"dd"`` or ``None``.
-
-        ``None`` for a short block or one that mixes training and decisions.
-        """
-        if B != block_size:
-            return None
-        if n_train - b_start <= 0:
-            return "dd"
-        if n_train - b_start >= B:
-            return "train"
-        return None
-
     _block_loop(
         run,
-        run_block=run_block,
-        store=store,
-        capturable=capturable,
+        run_block=loop.run_block,
+        store=loop.store,
+        capturable=loop.capturable,
         use_graph=(
             cuda_graph
             and xp is not np
@@ -734,8 +762,8 @@ def block_lms(
             and (n_dd_full >= 2 or n_train_full >= 2)
         ),
         name="block_lms",
-        at_resume=at_resume,
-        prepare=prepare,
+        at_resume=loop.at_resume,
+        prepare=loop.prepare,
     )
 
     # Non-finite weights stay non-finite, so one check after the loop sees a
@@ -749,11 +777,19 @@ def block_lms(
             f"{min(0.5 / block_size, 8e-3) / sps:.2e} sits at a quarter of that "
             f"ceiling."
         )
-    weights, carrier = snap[0]
+    weights, carrier = loop.snap[0]
     state_out = _block_state(
         run, equalizer="block_lms", cpr=cpr, weights=weights, carrier=carrier
     )
-    result = _assemble_block(run, y_all, e_all, w_hist, phi_all, n_train, state_out)
+    result = _assemble_block(
+        run,
+        loop.y_all,
+        loop.e_all,
+        loop.w_hist,
+        None if bps is None else bps.phi_all,
+        n_train,
+        state_out,
+    )
     result = _log_equalizer_exit(result, name="Block-LMS")
     result = _check_decision_power(result, constellation, "block_lms()")
     return _attach_equalized_signal(result, sig, state)

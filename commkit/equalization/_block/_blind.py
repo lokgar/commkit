@@ -7,6 +7,7 @@ behind them, :func:`_block_fdaf_blind`; re-exported by
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -31,6 +32,7 @@ from ..result import (
     _log_equalizer_exit,
 )
 from ._engine import (
+    _Block,
     _block_loop,
     _block_state,
     _fdaf_forward,
@@ -64,6 +66,60 @@ def _cupy_rde_error() -> Any:
             "commkit_rde_error",
         )
     return _RDE_KERNEL["k"]
+
+
+@dataclass
+class _BlockBlindRun:
+    """One ``block_cma`` / ``block_rde`` run: buffers and the block loop's steps.
+
+    The methods are the callbacks of :func:`._engine._block_loop`; results go
+    to the persistent ``y_ws`` and ``e_ws``, so a block without pilots is
+    CUDA-graph capturable.
+    """
+
+    run: _Block
+    mu: float
+    r2: float  # Godard radius (CMA)
+    rings: ArrayType | None  # RDE: (2, K) squared radii and decision bounds
+    rde_error: Any  # the CuPy RDE error kernel, or None
+    pilot: tuple[ArrayType, ArrayType] | None  # (reference (C, N), mask (N,))
+    y_all: ArrayType  # (C, n_sym) outputs
+    e_all: ArrayType  # (C, n_sym) errors
+    e_scatter: ArrayType  # (C, fftsize) gradient scratch
+    y_ws: ArrayType  # (C, block_size) the block's outputs
+    e_ws: ArrayType  # (C, block_size) the block's errors
+    snap: list[np.ndarray] = field(default_factory=list)  # weights at the resume
+
+    def run_block(self, B: int, b_start: int) -> None:
+        """Forward FDAF, blind error (the LMS residual at pilots), update."""
+        run, xp = self.run, self.run.xp
+        y_block, X_fd = _fdaf_forward(run.h, run.x_win, run.fftsize, run.sps, B, xp)
+        abs2 = xp.real(y_block * xp.conj(y_block))  # (C, B) strict-real |y|^2
+        if self.rings is None:  # CMA
+            e = y_block * (xp.float32(self.r2) - abs2)
+        elif self.rde_error is not None:  # RDE: nearest ring radius per symbol
+            e = self.rde_error(y_block, abs2, self.rings, np.int32(self.rings.shape[1]))
+        else:
+            ring2, bounds2 = self.rings[0], self.rings[1, :-1]
+            e = y_block * (ring2[np.searchsorted(bounds2, abs2)] - abs2)
+        if self.pilot is not None:
+            pref, pmask = self.pilot
+            pm = pmask[b_start : b_start + B][None, :]
+            e = xp.where(pm, pref[:, b_start : b_start + B] - y_block, e)
+        self.y_ws[:, :B] = y_block
+        self.e_ws[:, :B] = e
+        _fdaf_gradient_update(
+            run.h, X_fd, e, self.e_scatter, run.sps, B, run.num_taps, self.mu, xp
+        )
+
+    def store(self, b_start: int, b_end: int, B: int) -> None:
+        """Store the block's outputs and errors."""
+        self.run.put(self.y_all, self.y_ws, B)
+        self.run.put(self.e_all, self.e_ws, B)
+
+    def at_resume(self) -> None:
+        """Snapshot the weights where a later call resumes."""
+        self.snap.append(to_device(self.run.h, "cpu").copy())
 
 
 def _block_fdaf_blind(
@@ -131,62 +187,36 @@ def _block_fdaf_blind(
         use_pilots,
     )
 
+    pilot = None
     if use_pilots:
         pref = xp.asarray(
             np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
         )
         if pref.ndim == 1:
             pref = xp.tile(pref[None, :], (C, 1))
-        pmask_dev = xp.asarray(np.asarray(pilot_mask).astype(bool))
+        pilot = (pref, xp.asarray(np.asarray(pilot_mask).astype(bool)))
+    rings = None
     if kind == "rde":
         assert radii_np is not None
         rings = xp.asarray(_rde_rings(radii_np))
-        ring2, bounds2 = rings[0], rings[1, :-1]
-        rde_error = _cupy_rde_error() if xp is not np else None
 
-    e_scatter = xp.zeros((C, run.fftsize), dtype=xp.complex64)
-    y_all = xp.empty((C, n_sym), dtype=xp.complex64)
-    e_all = xp.empty((C, n_sym), dtype=xp.complex64)
-    y_ws = xp.empty((C, run.block_size), dtype=xp.complex64)
-    e_ws = xp.empty((C, run.block_size), dtype=xp.complex64)
-
-    def run_block(B: int, b_start: int) -> None:
-        """Forward FDAF, blind error, in-place gradient update.
-
-        Results go to the persistent ``y_ws``/``e_ws`` buffers so the block is
-        CUDA-graph capturable; pilot positions use the LMS residual.
-        """
-        y_block, X_fd = _fdaf_forward(run.h, run.x_win, run.fftsize, sps, B, xp)
-        abs2 = xp.real(y_block * xp.conj(y_block))  # (C, B) strict-real |y|^2
-        if kind == "cma":
-            e = y_block * (xp.float32(r2) - abs2)
-        else:  # rde - nearest ring radius per symbol
-            if rde_error is not None:
-                e = rde_error(y_block, abs2, rings, np.int32(rings.shape[1]))
-            else:
-                e = y_block * (ring2[np.searchsorted(bounds2, abs2)] - abs2)
-        if use_pilots:
-            pm = pmask_dev[b_start : b_start + B][None, :]
-            e = xp.where(pm, pref[:, b_start : b_start + B] - y_block, e)
-        y_ws[:, :B] = y_block
-        e_ws[:, :B] = e
-        _fdaf_gradient_update(run.h, X_fd, e, e_scatter, sps, B, run.num_taps, mu, xp)
-
-    def store(b_start: int, b_end: int, B: int) -> None:
-        """Store the block's outputs and errors."""
-        run.put(y_all, y_ws, B)
-        run.put(e_all, e_ws, B)
-
-    snap: list[np.ndarray] = []
-
-    def at_resume() -> None:
-        """Snapshot the weights where a later call resumes."""
-        snap.append(to_device(run.h, "cpu").copy())
-
+    loop = _BlockBlindRun(
+        run=run,
+        mu=mu,
+        r2=r2,
+        rings=rings,
+        rde_error=_cupy_rde_error() if rings is not None and xp is not np else None,
+        pilot=pilot,
+        y_all=xp.empty((C, n_sym), dtype=xp.complex64),
+        e_all=xp.empty((C, n_sym), dtype=xp.complex64),
+        e_scatter=xp.zeros((C, run.fftsize), dtype=xp.complex64),
+        y_ws=xp.empty((C, run.block_size), dtype=xp.complex64),
+        e_ws=xp.empty((C, run.block_size), dtype=xp.complex64),
+    )
     _block_loop(
         run,
-        run_block=run_block,
-        store=store,
+        run_block=loop.run_block,
+        store=loop.store,
         capturable=lambda B, b_start: B == run.block_size,
         # Pilot indexing depends on b_start, which a replayed graph freezes.
         use_graph=(
@@ -196,8 +226,9 @@ def _block_fdaf_blind(
             and n_sym // run.block_size >= 2  # >= 1 warmup + 1 captured block
         ),
         name=name,
-        at_resume=at_resume,
+        at_resume=loop.at_resume,
     )
+    y_all, e_all = loop.y_all, loop.e_all
 
     h = run.h
     if not bool(xp.isfinite(h).all()):
@@ -219,7 +250,7 @@ def _block_fdaf_blind(
         num_train_symbols=0,
         input_norm_factor=run.eq_norm,
         state=_block_state(
-            run, equalizer=equalizer, cpr=None, weights=snap[0], carrier=None
+            run, equalizer=equalizer, cpr=None, weights=loop.snap[0], carrier=None
         ),
     )
     return _log_equalizer_exit(result, name=name)
