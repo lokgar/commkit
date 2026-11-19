@@ -28,6 +28,7 @@ import numpy as np
 
 from .. import _cuda
 from .._bits import pack_bits
+from .._cuda.llr import LLR_MAX_K
 from ..backend import ArrayType, _device_tables, dispatch
 from ._lattice import Axis
 
@@ -238,9 +239,9 @@ def _llr(
 
 def _require_gpu_bits(k: int) -> None:
     """Raise for more bits per symbol than the CUDA LLR kernels handle."""
-    if k > _cuda._LLR_MAX_K:
+    if k > LLR_MAX_K:
         raise ValueError(
-            f"compute_llr(): GPU input supports at most {_cuda._LLR_MAX_K} bits "
+            f"compute_llr(): GPU input supports at most {LLR_MAX_K} bits "
             f"per symbol, the constellation has {k}"
         )
 
