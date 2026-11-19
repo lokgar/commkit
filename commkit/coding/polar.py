@@ -29,7 +29,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from .base import _Code, _Codec, _Decoded, _encode_blocks, _register
+from .base import _CODECS, _Code, _Codec, _Decoded, _encode_blocks
 from .crc import CRC
 
 __all__ = ["PolarCode", "SC", "SCL"]
@@ -322,13 +322,10 @@ def _decode(code: PolarCode, llrs: ArrayType, method: SC | SCL) -> _Decoded:
     )
 
 
-_register(
-    PolarCode,
-    _Codec(
-        encode=_encode,
-        decode=_decode,
-        default_method=lambda code: SCL(),
-        methods=(SC, SCL),
-        checked=lambda code, method: code.crc is not None,
-    ),
+_CODECS[PolarCode] = _Codec(
+    encode=_encode,
+    decode=_decode,
+    default_method=lambda code: SCL(),
+    methods=(SC, SCL),
+    checked=lambda code, method: code.crc is not None,
 )

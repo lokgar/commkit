@@ -42,6 +42,7 @@ from ..backend import ArrayType, dispatch, to_device
 from ..mapping import Constellation
 from ..mapping._lattice import separable_axes
 from .base import (
+    _CODECS,
     _Code,
     _Codec,
     _codec,
@@ -50,7 +51,6 @@ from .base import (
     _encode_blocks,
     _hard,
     _info_positions,
-    _register,
     _resolve_method,
 )
 from .interleaving import Interleaver, deinterleave, interleave
@@ -433,25 +433,19 @@ def _decode_pas(code: PAS, llrs: ArrayType, method: Any) -> _Decoded:
     )
 
 
-_register(
-    CCDM,
-    _Codec(
-        encode=_encode_ccdm,
-        decode=_decode_ccdm,
-        default_method=lambda code: _Dematch(),
-        methods=(_Dematch,),
-        checked=lambda code, method: True,
-        host=True,
-    ),
+_CODECS[CCDM] = _Codec(
+    encode=_encode_ccdm,
+    decode=_decode_ccdm,
+    default_method=lambda code: _Dematch(),
+    methods=(_Dematch,),
+    checked=lambda code, method: True,
+    host=True,
 )
-_register(
-    PAS,
-    _Codec(
-        encode=_encode_pas,
-        decode=_decode_pas,
-        default_method=lambda code: _resolve_method(code.code, None, "decode()"),
-        methods=(object,),
-        checked=lambda code, method: True,  # the matcher's composition check
-        host=True,
-    ),
+_CODECS[PAS] = _Codec(
+    encode=_encode_pas,
+    decode=_decode_pas,
+    default_method=lambda code: _resolve_method(code.code, None, "decode()"),
+    methods=(object,),
+    checked=lambda code, method: True,  # the matcher's composition check
+    host=True,
 )

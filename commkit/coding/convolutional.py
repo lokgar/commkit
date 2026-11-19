@@ -27,7 +27,7 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from .base import _Code, _Codec, _Decoded, _register
+from .base import _CODECS, _Code, _Codec, _Decoded
 
 __all__ = ["BCJR", "ConvolutionalCode", "Viterbi"]
 
@@ -290,13 +290,10 @@ def _decode(
     )
 
 
-_register(
-    ConvolutionalCode,
-    _Codec(
-        encode=_encode,
-        decode=_decode,
-        default_method=lambda code: Viterbi(),
-        methods=(Viterbi, BCJR),
-        checked=lambda code, method: False,
-    ),
+_CODECS[ConvolutionalCode] = _Codec(
+    encode=_encode,
+    decode=_decode,
+    default_method=lambda code: Viterbi(),
+    methods=(Viterbi, BCJR),
+    checked=lambda code, method: False,
 )

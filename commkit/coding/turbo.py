@@ -30,7 +30,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from .base import _Code, _Codec, _Decoded, _register
+from .base import _CODECS, _Code, _Codec, _Decoded
 from .convolutional import _Trellis, _trellis
 
 __all__ = ["TurboCode", "TurboIterations"]
@@ -230,14 +230,11 @@ def _decode(code: TurboCode, llrs: ArrayType, method: TurboIterations) -> _Decod
     )
 
 
-_register(
-    TurboCode,
-    _Codec(
-        encode=_encode,
-        decode=_decode,
-        default_method=lambda code: TurboIterations(),
-        methods=(TurboIterations,),
-        checked=lambda code, method: False,
-        host=True,
-    ),
+_CODECS[TurboCode] = _Codec(
+    encode=_encode,
+    decode=_decode,
+    default_method=lambda code: TurboIterations(),
+    methods=(TurboIterations,),
+    checked=lambda code, method: False,
+    host=True,
 )

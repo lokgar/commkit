@@ -28,6 +28,7 @@ from .._bits import pack_bits, unpack_bits
 from ..backend import ArrayType, _device_tables, dispatch
 from ._gf2 import matmul_mod2, null_space, row_reduce
 from .base import (
+    _CODECS,
     _checked,
     _Code,
     _Codec,
@@ -35,7 +36,6 @@ from .base import (
     _Decoded,
     _encode_blocks,
     _hard,
-    _register,
     _resolve_method,
 )
 
@@ -646,14 +646,11 @@ def _linear_checked(code: LinearBlockCode, method: object) -> bool:
     return False
 
 
-_register(
-    LinearBlockCode,
-    _Codec(
-        encode=_encode,
-        decode=_decode,
-        default_method=lambda code: Syndrome(),
-        methods=(Syndrome, MaximumLikelihood, Chase),
-        checked=_linear_checked,
-        info_positions=lambda code: code._unmix[0] if code._unmix[1] is None else None,
-    ),
+_CODECS[LinearBlockCode] = _Codec(
+    encode=_encode,
+    decode=_decode,
+    default_method=lambda code: Syndrome(),
+    methods=(Syndrome, MaximumLikelihood, Chase),
+    checked=_linear_checked,
+    info_positions=lambda code: code._unmix[0] if code._unmix[1] is None else None,
 )

@@ -177,11 +177,8 @@ class _Codec:
     host: bool = False
 
 
+#: Codec per code class, filled by each code module as ``_CODECS[cls] = ...``.
 _CODECS: dict[type, _Codec] = {}
-
-
-def _register(cls: type, codec: _Codec) -> None:
-    _CODECS[cls] = codec
 
 
 def _codec(code: Any, function_name: str) -> _Codec:

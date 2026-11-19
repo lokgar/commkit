@@ -39,7 +39,7 @@ from .._bits import pack_bits
 from ..backend import ArrayType, _device_tables, dispatch
 from ._galois import PRIMITIVE, _Field
 from ._gf2 import matmul_mod2
-from .base import _Code, _Codec, _Decoded, _hard, _register, _resolve_method
+from .base import _CODECS, _Code, _Codec, _Decoded, _hard, _resolve_method
 from .crc import _remainders
 from .linear import Chase, _decode_chase, _HardWords
 
@@ -467,15 +467,12 @@ for _cls, _dec, _methods in (
     (ReedSolomonCode, _decode, (BerlekampMassey,)),
     (BCHCode, _decode_bch, (BerlekampMassey, Chase)),
 ):
-    _register(
-        _cls,
-        _Codec(
-            encode=_encode,
-            decode=_dec,
-            default_method=lambda code: BerlekampMassey(),
-            methods=_methods,
-            # Chase is checked when its hard decoder (BerlekampMassey) is.
-            checked=lambda code, method: True,
-            info_positions=lambda code: np.arange(code.k),
-        ),
+    _CODECS[_cls] = _Codec(
+        encode=_encode,
+        decode=_dec,
+        default_method=lambda code: BerlekampMassey(),
+        methods=_methods,
+        # Chase is checked when its hard decoder (BerlekampMassey) is.
+        checked=lambda code, method: True,
+        info_positions=lambda code: np.arange(code.k),
     )

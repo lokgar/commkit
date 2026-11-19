@@ -37,7 +37,7 @@ from ..backend import ArrayType, _device_tables, dispatch
 from ..logger import logger
 from ._gf2 import inverse, matmul_mod2, rank, row_reduce
 from ._ldpc_tables import DVBS2, PON_BASE
-from .base import _Code, _Codec, _Decoded, _register
+from .base import _CODECS, _Code, _Codec, _Decoded
 
 __all__ = ["LDPCCode", "MinSum", "SumProduct"]
 
@@ -597,14 +597,11 @@ def _get_numba_ldpc() -> Any:
     return _numba_loops.ldpc_layered
 
 
-_register(
-    LDPCCode,
-    _Codec(
-        encode=_encode,
-        decode=_decode,
-        default_method=lambda code: MinSum(),
-        methods=(MinSum, SumProduct),
-        checked=lambda code, method: True,
-        info_positions=lambda code: code._encoder.info,
-    ),
+_CODECS[LDPCCode] = _Codec(
+    encode=_encode,
+    decode=_decode,
+    default_method=lambda code: MinSum(),
+    methods=(MinSum, SumProduct),
+    checked=lambda code, method: True,
+    info_positions=lambda code: code._encoder.info,
 )

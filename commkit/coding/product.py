@@ -39,6 +39,7 @@ from ._galois import _Field
 from ._gf2 import matmul_mod2
 from .algebraic import ReedSolomonCode, _Algebraic, _correct
 from .base import (
+    _CODECS,
     _checked,
     _Code,
     _Codec,
@@ -48,7 +49,6 @@ from .base import (
     _encode_blocks,
     _hard,
     _info_positions,
-    _register,
     _resolve_method,
 )
 from .interleaving import Interleaver, deinterleave, interleave
@@ -546,34 +546,25 @@ def _decode_repeat(code: _Repeat, llrs: ArrayType, method: Any) -> _Decoded:
     )
 
 
-_register(
-    StaircaseCode,
-    _Codec(
-        encode=_encode_staircase,
-        decode=_decode_staircase,
-        default_method=lambda code: HardIterations(),
-        methods=(HardIterations,),
-        checked=lambda code, method: True,
-    ),
+_CODECS[StaircaseCode] = _Codec(
+    encode=_encode_staircase,
+    decode=_decode_staircase,
+    default_method=lambda code: HardIterations(),
+    methods=(HardIterations,),
+    checked=lambda code, method: True,
 )
-_register(
-    Concatenated,
-    _Codec(
-        encode=_encode_concatenated,
-        decode=_decode_concatenated,
-        default_method=lambda code: StageDecoders(),
-        methods=(StageDecoders,),
-        # valid is the outer decoder's.
-        checked=lambda code, method: _checked(code.outer, method.outer),
-    ),
+_CODECS[Concatenated] = _Codec(
+    encode=_encode_concatenated,
+    decode=_decode_concatenated,
+    default_method=lambda code: StageDecoders(),
+    methods=(StageDecoders,),
+    # valid is the outer decoder's.
+    checked=lambda code, method: _checked(code.outer, method.outer),
 )
-_register(
-    _Repeat,
-    _Codec(
-        encode=_encode_repeat,
-        decode=_decode_repeat,
-        default_method=lambda code: _resolve_method(code.code, None, "decode()"),
-        methods=(object,),
-        checked=lambda code, method: _checked(code.code, method),
-    ),
+_CODECS[_Repeat] = _Codec(
+    encode=_encode_repeat,
+    decode=_decode_repeat,
+    default_method=lambda code: _resolve_method(code.code, None, "decode()"),
+    methods=(object,),
+    checked=lambda code, method: _checked(code.code, method),
 )

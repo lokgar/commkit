@@ -21,6 +21,7 @@ import numpy as np
 
 from ..backend import ArrayType, _device_tables, dispatch
 from .base import (
+    _CODECS,
     _checked,
     _Code,
     _Codec,
@@ -29,7 +30,6 @@ from .base import (
     _Decoded,
     _encode_blocks,
     _info_positions,
-    _register,
     _resolve_method,
 )
 
@@ -200,15 +200,12 @@ for _cls, _enc, _dec, _info in (
     (Punctured, _encode_punctured, _decode_punctured, _punctured_info),
     (Shortened, _encode_shortened, _decode_shortened, _shortened_info),
 ):
-    _register(
-        _cls,
-        _Codec(
-            encode=_enc,
-            decode=_dec,
-            # The inner code's decoders, resolved (and checked) on the inner code.
-            default_method=lambda code: _resolve_method(code.code, None, "decode()"),
-            methods=(object,),
-            checked=lambda code, method: _checked(code.code, method),
-            info_positions=_info,
-        ),
+    _CODECS[_cls] = _Codec(
+        encode=_enc,
+        decode=_dec,
+        # The inner code's decoders, resolved (and checked) on the inner code.
+        default_method=lambda code: _resolve_method(code.code, None, "decode()"),
+        methods=(object,),
+        checked=lambda code, method: _checked(code.code, method),
+        info_positions=_info,
     )
