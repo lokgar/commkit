@@ -226,6 +226,10 @@ def bps_grid(x_re, x_im, ph_re, ph_im, lev_min, d_grid, side, block_size, out):
 def rts_smoother(phi_obs, sigma_p2, sigma_v2):
     """Run the Rauch-Tung-Striebel smoother over the block phases (Numba).
 
+    State model: ``x[k+1] = x[k] + w[k]``, ``w ~ N(0, sigma_p2)`` (the Wiener
+    phase increment per block).  Observation: ``y[k] = x[k] + v[k]``,
+    ``v ~ N(0, sigma_v2)`` (the Viterbi-Viterbi estimator variance).
+
     Parameters
     ----------
     phi_obs : numpy.ndarray

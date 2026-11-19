@@ -32,38 +32,6 @@ def _get_numba_rts_smoother() -> Any:
     return _numba_loops.rts_smoother
 
 
-def _rts_smoother_1d(
-    phi_obs: np.ndarray,
-    sigma_p2: float,
-    sigma_v2: float,
-) -> np.ndarray:
-    """Smooth a random-walk phase with the Rauch-Tung-Striebel (RTS) smoother.
-
-    Runs the Numba kernel of ``_get_numba_rts_smoother`` on the host; the
-    caller moves the observations to the CPU.
-
-    State model: ``x[k+1] = x[k] + w[k]``, ``w ~ N(0, sigma_p2)``.
-    Observation: ``y[k] = x[k] + v[k]``, ``v ~ N(0, sigma_v2)``.
-
-    Parameters
-    ----------
-    phi_obs : numpy.ndarray
-        Noisy block phases in radians (from Viterbi-Viterbi), float64,
-        ``(B,)``.
-    sigma_p2 : float
-        Process noise variance per block (the Wiener phase increment).
-    sigma_v2 : float
-        Observation noise variance per block (the Viterbi-Viterbi estimator
-        variance).
-
-    Returns
-    -------
-    numpy.ndarray
-        MAP-smoothed phases, float64, ``(B,)``.
-    """
-    return _get_numba_rts_smoother()(phi_obs, float(sigma_p2), float(sigma_v2))
-
-
 def _sskf_smoother_1d(
     phi_obs: ArrayType,
     sigma_p2: float,
@@ -79,8 +47,8 @@ def _sskf_smoother_1d(
     state.  It runs on the input's device (``sp.signal.filtfilt``).
 
     The approximation is close when ``B >> 1/K_∞`` (typically ``B > 20``).
-    Below 7 blocks (the ``filtfilt`` minimum) the exact ``_rts_smoother_1d``
-    runs on the CPU instead.
+    Below 7 blocks (the ``filtfilt`` minimum) the exact RTS kernel runs on
+    the CPU instead.
 
     Parameters
     ----------
@@ -101,7 +69,8 @@ def _sskf_smoother_1d(
     # filtfilt requires at least padlen * 2 + 1 samples; padlen = 3 * max(len(b), len(a)) = 6
     if len(phi_obs) < 7:
         phi_np = to_device(phi_obs, "cpu")
-        return xp.asarray(_rts_smoother_1d(phi_np, sigma_p2, sigma_v2))
+        rts = _get_numba_rts_smoother()
+        return xp.asarray(rts(phi_np, float(sigma_p2), float(sigma_v2)))
 
     # Steady-state prediction error covariance from discrete Riccati equation:
     #   p² - σ_p²·p - σ_p²·σ_v² = 0  ->  p = (σ_p² + √(σ_p⁴ + 4σ_p²σ_v²)) / 2
@@ -247,8 +216,9 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
 
     if method.smoother == "rts":
         phi_u_np = to_device(phi_u, "cpu")  # (R, N_blocks) float64
+        rts = _get_numba_rts_smoother()
         phi_smooth = xp.asarray(
-            np.stack([_rts_smoother_1d(row, sigma_p2, sigma_v2) for row in phi_u_np])
+            np.stack([rts(row, float(sigma_p2), float(sigma_v2)) for row in phi_u_np])
         )
     else:
         phi_smooth = xp.stack(

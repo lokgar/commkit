@@ -549,8 +549,7 @@ def _set_eng_formatter(ax, which: str) -> None:
 
 def _as_channels(arr) -> np.ndarray:
     """Bring to CPU and promote ``(N,)`` -> ``(1, N)``."""
-    arr = np.atleast_2d(np.asarray(to_device(arr, "cpu")))
-    return arr
+    return np.atleast_2d(np.asarray(to_device(arr, "cpu")))
 
 
 def _host(a: Any) -> np.ndarray:

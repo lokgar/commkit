@@ -405,20 +405,6 @@ def lms(
     return _attach_equalized_signal(result, sig, state)
 
 
-def _check_rls_divergence(
-    weights: Any, xp: Any, forgetting_factor: float, regularization: float
-) -> None:
-    """Raise if RLS produced non-finite weights (silent divergence guard).
-
-    Like the block equalizers' check after their loop: a single device->host
-    sync on the assembled weights catches loss of positive-definiteness in the inverse
-    correlation matrix P (which surfaces as NaN/Inf taps) and converts it into an
-    actionable error instead of returning garbage weights.
-    """
-    if not bool(xp.isfinite(weights).all()):
-        raise RuntimeError(_rls_divergence_message(forgetting_factor, regularization))
-
-
 def _rls_divergence_message(forgetting_factor: float, regularization: float) -> str:
     return (
         f"RLS equalizer diverged (forgetting_factor={forgetting_factor}, "
@@ -734,5 +720,8 @@ def rls(
     )
     result = _log_equalizer_exit(result, name="RLS")
     result = _check_decision_power(result, constellation, "rls()")
-    _check_rls_divergence(result.weights, run.xp, forgetting_factor, regularization)
+    # A P that lost positive definiteness without tripping the kernel surfaces
+    # as non-finite taps: one sync on the assembled weights catches it.
+    if not bool(run.xp.isfinite(result.weights).all()):
+        raise RuntimeError(_rls_divergence_message(forgetting_factor, regularization))
     return _attach_equalized_signal(result, sig, state)

@@ -13,28 +13,6 @@ import numpy as np
 from ..backend import ArrayType, to_device
 
 
-def _pll_gains(bandwidth: float) -> tuple[np.float32, np.float32]:
-    """Convert normalized loop bandwidth to PI gains (mu, beta).
-
-    Uses the usual second-order loop approximation for a critically damped
-    (ζ = 1) PI loop:  μ ≈ 4·B_L,  β ≈ 4·B_L².  (With ``ωₙT = √β = 2B`` and
-    ``ζ = μ/(2√β) = 1``.)
-
-    Parameters
-    ----------
-    bandwidth : float
-        Normalized one-sided loop bandwidth as a fraction of the symbol rate,
-        e.g. ``1e-3`` for a narrow loop.
-
-    Returns
-    -------
-    mu, beta : float32
-    """
-    mu = np.float32(4.0 * bandwidth)
-    beta = np.float32(4.0 * bandwidth**2)
-    return mu, beta
-
-
 def _resolve_pll_gains(
     bandwidth: float, mu: float | None, beta: float | None
 ) -> tuple[Any, Any]:
@@ -49,7 +27,8 @@ def _resolve_pll_gains(
     * ``mu`` (the proportional gain) given: raw PI gains; ``beta`` (the
       integral gain) defaults to ``0.0`` (a first-order loop).
     * ``mu`` is ``None``: critically damped (ζ = 1) gains ``μ = 4B, β = 4B²``
-      from ``bandwidth`` via ``_pll_gains``.
+      from ``bandwidth`` (the second-order loop approximation of a
+      critically damped PI loop: ``ωₙT = √β = 2B``, ``ζ = μ/(2√β) = 1``).
 
     ``beta`` without ``mu`` is ambiguous and raises ``ValueError``.
 
@@ -63,7 +42,7 @@ def _resolve_pll_gains(
         raise ValueError(
             "integral_gain requires proportional_gain (or use normalized_bandwidth)."
         )
-    return _pll_gains(bandwidth)
+    return np.float32(4.0 * bandwidth), np.float32(4.0 * bandwidth**2)
 
 
 @dataclass(frozen=True)

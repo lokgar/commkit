@@ -444,16 +444,19 @@ def _read_signal(data: Any, path: Path) -> Signal:
 # -----------------------------------------------------------------------------
 
 
-def _json_default(value: Any) -> Any:
-    """Convert NumPy scalars (e.g. ``np.float64``) to Python values for JSON."""
-    if isinstance(value, np.generic):
-        return value.item()
-    raise TypeError(f"Cannot store {type(value).__name__} in npz metadata.")
-
-
 def _json_array(obj: dict) -> np.ndarray:
-    """A 0-d unicode array holding ``obj`` as JSON (no pickling needed)."""
-    return np.array(json.dumps(obj, default=_json_default))
+    """A 0-d unicode array holding ``obj`` as JSON (no pickling needed).
+
+    NumPy scalars (``np.float64``, ...) are stored as Python values; any other
+    non-JSON value raises ``TypeError``.
+    """
+
+    def scalar(value: Any) -> Any:
+        if isinstance(value, np.generic):
+            return value.item()
+        raise TypeError(f"Cannot store {type(value).__name__} in npz metadata.")
+
+    return np.array(json.dumps(obj, default=scalar))
 
 
 def _read_json(data: Any, key: str) -> dict:
