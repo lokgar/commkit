@@ -118,7 +118,9 @@ def fer(
     ----------
     bits : array_like or DecodeResult
         Received bits (0 and 1), ``(N,)`` or ``(C, N)``, with ``N`` a multiple
-        of ``info_bits``, or a :class:`~commkit.coding.DecodeResult`.
+        of ``info_bits``, or a :class:`~commkit.coding.DecodeResult`.  Not a
+        Signal, unlike :func:`ber`'s: blocks are decoder output, never
+        samples.
     reference : array_like, Signal or Reference
         Transmitted bits, same shape.  With a DecodeResult, the transmitted
         Signal or its :class:`~commkit.core.Reference`, whose ``info_bits``
