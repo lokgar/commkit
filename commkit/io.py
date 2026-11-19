@@ -47,17 +47,19 @@ from __future__ import annotations
 import dataclasses
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
 from . import backend as _backend
+from . import core as _core
+from . import filtering
+from .core import Reference, Signal
+from .core._signal_adapter import require_device
 from .logger import logger
+from .mapping import Constellation
 
 __all__ = ["load_npz", "save_npz"]
-
-if TYPE_CHECKING:
-    from .core import Signal
 
 # -----------------------------------------------------------------------------
 # Internal constants
@@ -220,7 +222,6 @@ def _put_constellation(c: Any, key: str, arrays: dict, meta: dict) -> None:
 
 def _get_constellation(key: str, data: Any, meta: dict) -> Any:
     """The constellation stored under ``key``, or ``None``."""
-    from .mapping import Constellation
 
     if f"{key}_points" not in data:
         return None
@@ -247,7 +248,6 @@ def _put_code(value: Any, key: str, arrays: dict) -> Any:
     (``frame_payload_code.code.checks``);
     a code becomes ``{"type": class name, "fields": ...}``.
     """
-    from .mapping import Constellation
 
     if value is None or isinstance(value, bool | int | float | str):
         return value
@@ -334,7 +334,6 @@ def load_npz(
     >>> sig = load_npz("capture.npz")                   # on the CPU
     >>> sig_gpu = load_npz("capture.npz", device="gpu")
     """
-    from .core._signal_adapter import require_device
 
     device = require_device(device, "load_npz()")
     path = Path(path)
@@ -358,8 +357,6 @@ def _read_signal(data: Any, path: Path) -> Signal:
 
     # Build Signal constructor kwargs
     # -------------------------------------------------------------------------
-    from . import filtering
-    from .core import Reference, Signal
 
     kwargs: dict = {f: meta[f] for f in _META_FIELDS}
     kwargs["samples"] = data["samples"]
@@ -396,8 +393,6 @@ def _read_signal(data: Any, path: Path) -> Signal:
     # Reconstruct originating frame (if serialized)
     # -------------------------------------------------------------------------
     if "__frame_metadata__" in data:
-        from . import core as _core
-
         frame_dict = _read_json(data, "__frame_metadata__")
         frame_type_name = frame_dict.pop("_frame_type", "SingleCarrierFrame")
 

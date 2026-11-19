@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from .. import spectral
 from .._constants import SPEED_OF_LIGHT
 from ..backend import dispatch, to_device
 from ..core._signal_adapter import adapt_signal
@@ -100,7 +101,6 @@ def plot_psd(
     center_frequency, domain = _resolve_band(signal_adapter, center_frequency, domain)
     logger.debug("Generating PSD plot (sampling_rate=%s Hz).", sampling_rate)
     x, _, _ = dispatch(x)
-    from .. import spectral
 
     def draw(ax: Any, row: Any, title: str | None) -> None:
         # Calculate PSD
@@ -265,7 +265,6 @@ def plot_spectrogram(
     center_frequency, domain = _resolve_band(signal_adapter, center_frequency, domain)
     logger.debug("Generating spectrogram plot (sampling_rate=%s Hz).", sampling_rate)
     x, _, _ = dispatch(x)
-    from .. import spectral
 
     def draw(ax: Any, row: Any, title: str | None) -> None:
         # Calculate spectrogram

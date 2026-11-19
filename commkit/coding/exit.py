@@ -64,6 +64,7 @@ import numpy as np
 from .. import _random
 from ..backend import ArrayType, _module_for, dispatch, to_device
 from ..logger import logger
+from ..mapping import Constellation
 from .base import _decode_blocks, _encode_blocks, _resolve_method
 from .ldpc import LDPCCode
 
@@ -520,7 +521,6 @@ def demapper_exit_curve(
       ``num_symbols * M`` per point of the curve, in chunks; it does not use
       the compiled LLR kernels, whose speed is unaffected.
     """
-    from ..mapping import Constellation
 
     name = "demapper_exit_curve()"
     if not isinstance(constellation, Constellation):

@@ -13,6 +13,7 @@ import numpy as np
 from ..backend import dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..logger import logger
+from ..mapping import Constellation
 from ..math import rms
 from ..smoothing import smooth_density_2d
 from .theme import (
@@ -64,7 +65,6 @@ def plot_ideal_constellation(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    from ..mapping import Constellation
 
     if not isinstance(constellation, Constellation):
         raise TypeError(

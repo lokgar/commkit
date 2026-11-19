@@ -23,6 +23,7 @@ import numpy as np
 
 from ..._array import restore_1d, warn_if_double
 from ...backend import ArrayType, dispatch, to_device
+from ...recovery import BPS, PLL, CycleSlip
 from .._common import (
     _build_padded_samples,
     _cpr_symmetry,
@@ -358,7 +359,6 @@ class _InlineCpr:
 
 def _inline_cpr(cpr: Any, constellation: Any, function_name: str) -> _InlineCpr | None:
     """Resolve ``cpr=`` (``PLL``, ``BPS`` or ``None``) for the LMS/RLS kernels."""
-    from ...recovery import BPS, PLL, CycleSlip
 
     if cpr is None:
         return None

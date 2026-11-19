@@ -12,7 +12,9 @@ import numpy as np
 
 from .. import _fft
 from .._array import broadcast_channels
+from .._peaks import refine_tones
 from ..backend import ArrayType, dispatch, to_device
+from ..frequency import correct_frequency_offset
 from ..logger import logger
 from ..math import _remove_linear_trend
 from ._common import _Context, _Phase
@@ -267,8 +269,6 @@ def _extract_pilot_phasor(
     _PilotPhasor
         The phasor, the tone centers and the signal and noise powers.
     """
-    from .._peaks import refine_tones
-    from ..frequency import correct_frequency_offset
 
     C, N = samples.shape
     df = sampling_rate / N

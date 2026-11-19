@@ -7,6 +7,8 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch
 from ..logger import logger
+from ..mapping._lattice import slicer_params
+from ..math import normalize
 from ._common import _check_blocks, _Context, _interp_block_phases, _Phase
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 
@@ -81,8 +83,6 @@ def _get_numba_bps_grid() -> Any:
 
 def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     """BPS phase of ``(C, N)`` symbols."""
-    from ..mapping._lattice import slicer_params
-    from ..math import normalize
 
     constellation = ctx.need_constellation(method)
     num_test_phases = method.test_phases

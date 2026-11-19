@@ -15,6 +15,7 @@ import numpy as np
 from .. import _cuda
 from ..backend import ArrayType, dispatch
 from ..logger import logger
+from ..math import normalize as _normalize
 
 __all__ = ["gray_code", "gray_to_binary"]
 
@@ -182,8 +183,6 @@ def _gray_points(
             # PSK is already on unit circle (E_s = 1)
             pass
         else:
-            from ..math import normalize as _normalize
-
             result = _normalize(result, mode="average_power")
 
     return _read_only(result)

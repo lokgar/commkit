@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..backend import get_array_module, to_device
+from ..frequency import correct_frequency_offset
 from .theme import (
     _decimate_minmax,
     _device_channels,
@@ -310,7 +311,6 @@ def plot_frequency_offset_blockwise_result(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    from ..frequency import correct_frequency_offset
 
     panels = _select(
         quantity, ("frequency", "phase"), label=label, xlim=xlim, ylim=ylim

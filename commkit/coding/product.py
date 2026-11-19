@@ -37,7 +37,7 @@ import numpy as np
 from ..backend import ArrayType, _device_tables, dispatch
 from ._galois import _Field
 from ._gf2 import matmul_mod2
-from .algebraic import _Algebraic, _correct
+from .algebraic import ReedSolomonCode, _Algebraic, _correct
 from .base import (
     _checked,
     _Code,
@@ -464,7 +464,6 @@ class Concatenated(_Code):
         codewords: ``k = 3 x 5140 = 15420``, ``n = 136 x 128 = 17408``,
         rate 0.886.
         """
-        from .algebraic import ReedSolomonCode
 
         kp4 = ReedSolomonCode.kp4()
         triple = _Repeat(kp4, 3)

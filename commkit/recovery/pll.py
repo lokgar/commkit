@@ -7,6 +7,7 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ..mapping._lattice import square_grid
+from ..math import normalize
 from ._common import _Context, _Phase, _resolve_pll_gains
 from .corrections import (
     _HISTORY_SPAN,
@@ -111,7 +112,6 @@ class PLL:
 
 def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
     """Decision-directed PLL phase of ``(C, N)`` symbols."""
-    from ..math import normalize
 
     constellation = ctx.need_constellation(method)
     mu, beta = method.gains

@@ -23,7 +23,7 @@ import math
 from fractions import Fraction
 from typing import Any
 
-from .backend import ArrayType, dispatch
+from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .logger import logger
 from .math import normalize as _normalize
@@ -352,8 +352,6 @@ def _resample_poly(arr: ArrayType, up: int, down: int, sp: Any) -> ArrayType:
     if sp.__name__.startswith("scipy"):
         return sp.signal.resample_poly(arr, up, down, axis=-1)
     import scipy.signal
-
-    from .backend import to_device
 
     g = math.gcd(up, down)
     max_rate = max(up, down) // g

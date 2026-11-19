@@ -12,6 +12,8 @@ import numpy as np
 
 from .. import _fft
 from ..backend import get_array_module, to_device
+from ..core._signal_adapter import adapt_signal
+from ..recovery import CarrierPhaseEstimate
 from .theme import (
     _device_channels,
     _finish,
@@ -78,7 +80,6 @@ def plot_carrier_phase_trajectory(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    from ..recovery import CarrierPhaseEstimate
 
     if isinstance(phase, CarrierPhaseEstimate):
         # Block methods only.
@@ -171,7 +172,6 @@ def plot_pilot_phase_estimate(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    from ..recovery import CarrierPhaseEstimate
 
     panels = _select(
         quantity, ("pilots", "trajectory"), label=label, xlim=xlim, ylim=ylim
@@ -327,7 +327,6 @@ def plot_pilot_tone_phase_estimate(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    from ..core._signal_adapter import adapt_signal
 
     _select(quantity, ("spectrum", "phase"), label=label, xlim=xlim, ylim=ylim)
     name = "plot_pilot_tone_phase_estimate()"

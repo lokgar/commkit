@@ -12,6 +12,7 @@ import numpy as np
 
 from .. import _fft
 from ..backend import get_array_module, to_device
+from ..equalization import ChannelEstimate, correct_channel
 from ..smoothing import moving_average
 from .theme import (
     _decimate_minmax,
@@ -274,7 +275,6 @@ def plot_channel_correction(
         "combined": "Combined |H·W(f)|",
     }
     panels = _select(quantity, tuple(names), label=label)
-    from ..equalization import ChannelEstimate, correct_channel
 
     if isinstance(how, ChannelEstimate):
         h, center = to_device(how.taps, "cpu"), how.center_tap

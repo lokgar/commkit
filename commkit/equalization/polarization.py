@@ -17,6 +17,7 @@ from typing import Any, cast
 import numpy as np
 
 from .. import _fft
+from .._peaks import refine_tones
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..core.signal import Signal
@@ -239,7 +240,6 @@ def _refine_tone_frequencies(
        either peak fit.  The mix-down needs it: a tone-frequency error
        leaves a slow residual rotation on the demultiplexed output.
     """
-    from .._peaks import refine_tones
 
     xw, xp, _ = dispatch(xw)
     N = int(xw.shape[-1])

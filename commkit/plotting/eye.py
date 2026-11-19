@@ -9,6 +9,7 @@ from matplotlib.collections import LineCollection
 from ..backend import dispatch, to_device
 from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..logger import logger
+from ..math import normalize
 from ..smoothing import smooth_density_2d
 from .theme import _finish, _grid_figsize
 
@@ -64,7 +65,6 @@ def _plot_eye_traces(
     samples, xp, _ = dispatch(samples)
 
     # Normalize to max amplitude 1.0
-    from ..math import normalize
 
     samples = normalize(samples, mode="peak")
 

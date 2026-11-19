@@ -18,6 +18,7 @@ from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
 from ._demap import _noise_variance
+from .constellation import Constellation
 
 if TYPE_CHECKING:
     from .constellation import Constellation
@@ -88,7 +89,6 @@ def compute_llr(
     ``m(s) = -(r - s)^2 / (2 sigma^2) + log P(s)`` for real ones: the
     Gaussian log-likelihood of the noise the symbols carry.
     """
-    from .constellation import Constellation
 
     signal_adapter = adapt_signal(symbols, function_name="compute_llr()")
     x = signal_adapter.symbol_array()

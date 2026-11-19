@@ -10,12 +10,15 @@ module imports only ``backend``: nothing from ``core``, DSP modules or
 plotting.
 """
 
+import sys
+import warnings
 from typing import Any, overload
 
 import numpy as np
 
 from .backend import (
     ArrayType,
+    PrecisionWarning,
     _is_cupy_array,
     _reject_foreign_array,
     get_array_module,
@@ -314,10 +317,6 @@ def warn_if_double(arr: Any, function_name: str, working: str = "complex64") -> 
     dtype = getattr(arr, "dtype", None)
     if dtype is None or dtype not in (np.complex128, np.float64):
         return
-    import sys
-    import warnings
-
-    from .backend import PrecisionWarning
 
     # Point the warning at the first frame outside commkit.
     frame: Any = sys._getframe(1)  # the caller: stacklevel 2
