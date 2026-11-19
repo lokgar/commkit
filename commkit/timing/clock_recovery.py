@@ -551,11 +551,7 @@ def correct_sampling_clock_offset(
         )
         y = _resample_static(x, ppm)
     out = restore_1d(was_1d, y)
-    sig = inp.signal
-    if sig is not None and sig.reference is not None:
-        num_symbols = int(out.shape[-1] // sps_int)
-        return inp.wrap(out, reference=sig.reference.head(num_symbols))
-    return inp.wrap(out)
+    return inp.wrap(out, num_symbols=out.shape[-1] // sps_int)
 
 
 def _resolve_even_sps(inp: SignalInput[Any], sps: int | None) -> int:

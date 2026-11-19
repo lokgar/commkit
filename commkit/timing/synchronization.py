@@ -815,9 +815,7 @@ def correct_timing(
     )
 
     out = restore_1d(was_1d, x)
-    sig = inp.signal
-    if mode == "slice" and sig is not None and sig.reference is not None:
-        # Alignment invariant: keep only the symbol periods still present.
-        num_symbols = int(out.shape[-1] // sig.sps)
-        return inp.wrap(out, reference=sig.reference.head(num_symbols))
-    return inp.wrap(out)
+    if mode != "slice" or inp.signal is None:
+        return inp.wrap(out)
+    # Alignment invariant: keep only the symbol periods still present.
+    return inp.wrap(out, num_symbols=int(out.shape[-1] // inp.sps()))
