@@ -14,24 +14,10 @@ import pytest
 from commkit import _fiber
 from commkit.filtering import correct_fiber_propagation
 from commkit.impairments import Fiber, apply_fiber_propagation
-from tests.common.conversions import to_numpy
+from tests.common.metrics import relative_rms_error
+from tests.common.signals import make_band_limited_field
 
 FS = 64e9
-
-
-def _field(num_channels, n=1 << 14, seed=1):
-    rng = np.random.default_rng(seed)
-    x = rng.standard_normal((num_channels, n)) + 1j * rng.standard_normal(
-        (num_channels, n)
-    )
-    spectrum = np.fft.fft(x, axis=-1)
-    spectrum[:, np.abs(np.fft.fftfreq(n)) > 0.25] = 0.0
-    return np.fft.ifft(spectrum, axis=-1).astype(np.complex64)
-
-
-def _rel(a, b):
-    a, b = to_numpy(a), to_numpy(b)
-    return float(np.sqrt(np.mean(np.abs(a - b) ** 2) / np.mean(np.abs(b) ** 2)))
 
 
 def _plain_ops(monkeypatch):
@@ -54,7 +40,7 @@ def test_fused_kernels_match_plain_stages(xp, monkeypatch, caplog, case):
     """Six spans: the PMD-free cases replay a captured span from the third
     span on; noise and waveplates come from the same seed in both runs."""
     num_channels, fiber, nf = CASES[case]
-    x = xp.asarray(_field(num_channels))
+    x = xp.asarray(make_band_limited_field(num_channels, 1 << 14))
     if num_channels == 1:
         x = x[0]
     kw = dict(
@@ -74,12 +60,12 @@ def test_fused_kernels_match_plain_stages(xp, monkeypatch, caplog, case):
     assert "capture failed" not in caplog.text
     _plain_ops(monkeypatch)
     plain = apply_fiber_propagation(x, **kw)
-    assert _rel(fused, plain) < 1e-4
+    assert relative_rms_error(fused, plain) < 1e-4
 
 
 @pytest.mark.gpu_only
 def test_fused_dbp_matches_plain_stages(xp, monkeypatch):
-    x = xp.asarray(_field(2))
+    x = xp.asarray(make_band_limited_field(2, 1 << 14))
     kw = dict(
         center_wavelength_nm=1550.0,
         fiber=Fiber(),
@@ -91,7 +77,7 @@ def test_fused_dbp_matches_plain_stages(xp, monkeypatch):
     )
     fused = correct_fiber_propagation(x, **kw)
     _plain_ops(monkeypatch)
-    assert _rel(fused, correct_fiber_propagation(x, **kw)) < 1e-4
+    assert relative_rms_error(fused, correct_fiber_propagation(x, **kw)) < 1e-4
 
 
 @pytest.mark.gpu_only
@@ -119,14 +105,14 @@ def test_fused_dispersion_phase_of_a_wideband_link(xp):
     )
     ref = apply_fiber_propagation(x, **kw)  # complex128 on the CPU
     gpu = apply_fiber_propagation(xp.asarray(x.astype(np.complex64)), **kw)
-    assert 20 * np.log10(_rel(gpu, ref)) < -95
+    assert 20 * np.log10(relative_rms_error(gpu, ref)) < -95
 
 
 @pytest.mark.gpu_only
 def test_gpu_matches_cpu(xp):
     """Noiseless and PMD-free, the GPU field equals the CPU field up to
     float32 rounding (the noise realizations differ between devices)."""
-    x = _field(2)
+    x = make_band_limited_field(2, 1 << 14)
     kw = dict(
         center_wavelength_nm=1550.0,
         fiber=Fiber(),
@@ -137,13 +123,13 @@ def test_gpu_matches_cpu(xp):
         sampling_rate=FS,
     )
     gpu = apply_fiber_propagation(xp.asarray(x), **kw)
-    assert _rel(gpu, apply_fiber_propagation(x, **kw)) < 1e-4
+    assert relative_rms_error(gpu, apply_fiber_propagation(x, **kw)) < 1e-4
 
 
 def test_dbp_leaves_pmd_alone():
     """A receiver cannot know the waveplates: DBP of a PMD fiber is DBP of
     the same fiber without PMD."""
-    x = _field(2, n=2048)
+    x = make_band_limited_field(2, 2048)
     kw = dict(
         center_wavelength_nm=1550.0,
         span_length_km=80.0,
@@ -158,7 +144,7 @@ def test_dbp_leaves_pmd_alone():
 
 
 def test_real_input_propagates_as_a_complex_field():
-    x = _field(1, n=2048)[0].real
+    x = make_band_limited_field(1, 2048)[0].real
     y = apply_fiber_propagation(
         x,
         center_wavelength_nm=1550.0,
@@ -208,7 +194,7 @@ def test_launch_power_errors(x, power, match):
 def test_complex128_on_the_gpu_matches_the_cpu(xp):
     """complex128 takes the plain CuPy stages (the fused kernels are
     complex64) and keeps double precision end to end."""
-    x = _field(2, n=4096).astype(np.complex128)
+    x = make_band_limited_field(2, 4096).astype(np.complex128)
     kw = dict(
         center_wavelength_nm=1550.0,
         fiber=Fiber(pmd_ps_sqrt_km=0.1),
@@ -221,14 +207,14 @@ def test_complex128_on_the_gpu_matches_the_cpu(xp):
     )
     gpu = apply_fiber_propagation(xp.asarray(x), **kw)
     assert gpu.dtype == xp.complex128
-    assert _rel(gpu, apply_fiber_propagation(x, **kw)) < 1e-10
+    assert relative_rms_error(gpu, apply_fiber_propagation(x, **kw)) < 1e-10
 
 
 @pytest.mark.gpu_only
 def test_repeated_calls_do_not_grow_the_memory_pool(xp):
     """The graph stream is reused across calls: CuPy caches freed blocks per
     stream, so a fresh stream per call would grow the pool every call."""
-    x = xp.asarray(_field(2, n=1 << 16))
+    x = xp.asarray(make_band_limited_field(2, 1 << 16))
     kw = dict(
         center_wavelength_nm=1550.0,
         fiber=Fiber(),

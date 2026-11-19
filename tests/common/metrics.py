@@ -79,3 +79,9 @@ def calc_freq_response(taps: Any, nfft: int = 1024) -> tuple[np.ndarray, np.ndar
     H = np.abs(np.fft.fft(t_np, nfft))
     freqs = np.fft.fftfreq(nfft)
     return freqs, H
+
+
+def relative_rms_error(a: Any, b: Any) -> float:
+    """RMS of ``a - b`` relative to the RMS of ``b``, on the host."""
+    a, b = to_numpy(a), to_numpy(b)
+    return float(np.sqrt(np.mean(np.abs(a - b) ** 2) / np.mean(np.abs(b) ** 2)))

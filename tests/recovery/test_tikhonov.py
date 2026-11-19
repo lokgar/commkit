@@ -10,6 +10,7 @@ from tests.common import scoring, theory
 from tests.common.signals import (
     make_test_psk_signal,
     make_test_qam_signal,
+    make_wiener_record,
 )
 
 FS = 1e6  # 1 MHz sampling rate, common to all tests
@@ -274,20 +275,6 @@ def test_linewidth_is_in_hz(xp, xpt):
         )
 
 
-def _wiener_record(constellation, linewidth_ts, esn0_db, n=20000, seed=1):
-    """``constellation`` at 1 SPS under a Wiener phase (increment variance
-    2πΔνT) with AWGN; returns ``(x, true_phase)``."""
-    rng = np.random.default_rng(seed)
-    s = constellation.points.astype(np.complex64)[
-        rng.integers(0, constellation.order, n)
-    ]
-    phase = np.cumsum(rng.standard_normal(n) * np.sqrt(2 * np.pi * linewidth_ts))
-    noise = np.sqrt(10 ** (-esn0_db / 10) / 2) * (
-        rng.standard_normal(n) + 1j * rng.standard_normal(n)
-    )
-    return (s * np.exp(1j * phase) + noise).astype(np.complex64), phase
-
-
 class TestWienerTracking:
     """Estimators following a Wiener phase, scored against the truth."""
 
@@ -296,7 +283,7 @@ class TestWienerTracking:
         the block estimates across blocks lowers the error by more than 20 %
         (measured 0.037 vs 0.059 rad); neither slips (one quantum removed)."""
         c = Constellation.psk(4)
-        x, phase = _wiener_record(c, 1e-5, 12.0)
+        x, _, phase = make_wiener_record(c, 1e-5, 12.0, n=20000, seed=1)
         x = xp.asarray(x)
         vv = recovery.estimate_carrier_phase(
             x, recovery.ViterbiViterbi(block_size=8), constellation=c
