@@ -9,8 +9,9 @@ import numpy as np
 
 from .. import spectral
 from .._constants import SPEED_OF_LIGHT
-from ..backend import _to_host, dispatch, to_device
+from ..backend import ArrayType, _to_host, dispatch, to_device
 from ..core._signal_input import SignalInput
+from ..core.signal import Signal
 from ..logger import logger
 from .theme import (
     _draw_channels,
@@ -22,7 +23,7 @@ __all__ = ["plot_psd", "plot_spectrogram"]
 
 
 def plot_psd(
-    samples: Any,
+    samples: ArrayType | Signal,
     *,
     sampling_rate: float | None = None,
     nperseg: int = 256,
@@ -193,7 +194,7 @@ def _check_domain(domain: Any) -> str:
 
 
 def plot_spectrogram(
-    samples: Any,
+    samples: ArrayType | Signal,
     *,
     sampling_rate: float | None = None,
     window: str | tuple[Any, ...] | Any = "hann",

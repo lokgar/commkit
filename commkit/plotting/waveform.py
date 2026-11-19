@@ -4,8 +4,9 @@ from typing import Any
 
 import numpy as np
 
-from ..backend import _to_host, dispatch
+from ..backend import ArrayType, _to_host, dispatch
 from ..core._signal_input import SignalInput
+from ..core.signal import Signal
 from ..logger import logger
 from .theme import (
     _draw_channels,
@@ -17,7 +18,7 @@ __all__ = ["plot_time_domain"]
 
 
 def plot_time_domain(
-    samples: Any,
+    samples: ArrayType | Signal,
     *,
     sampling_rate: float | None = None,
     start_symbol: int = 0,

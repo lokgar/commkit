@@ -6,8 +6,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
 
-from ..backend import _to_host, dispatch, to_device
+from ..backend import ArrayType, _to_host, dispatch, to_device
 from ..core._signal_input import SignalInput
+from ..core.signal import Signal
 from ..logger import logger
 from ..math import normalize
 from ..smoothing import smooth_density_2d
@@ -180,7 +181,7 @@ def _plot_eye_traces(
 
 
 def plot_eye_diagram(
-    samples: Any,
+    samples: ArrayType | Signal,
     *,
     sps: float | None = None,
     ax: Any | tuple[Any, Any] | None = None,

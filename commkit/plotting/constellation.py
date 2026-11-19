@@ -10,8 +10,9 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..backend import _to_host, dispatch, to_device
+from ..backend import ArrayType, _to_host, dispatch, to_device
 from ..core._signal_input import SignalInput, require_value
+from ..core.signal import Signal
 from ..logger import logger
 from ..mapping import Constellation
 from ..math import rms
@@ -145,7 +146,7 @@ def plot_ideal_constellation(
 
 
 def plot_constellation(
-    samples: Any,
+    samples: ArrayType | Signal,
     *,
     bins: int = 100,
     cmap: str = "inferno",
