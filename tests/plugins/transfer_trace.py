@@ -49,6 +49,8 @@ _PAYLOAD = "transmitted payload drawn on the host"
 _DOCUMENTED: dict[str, str] = {
     "_array.py::freeze_host": "value object: host copy of an array field",
     "analysis/linewidth/phase.py::_beta_separation": _REPORT,
+    "analysis/linewidth/phase.py::_increment_subtract": _HOST_VALUE
+    + " (reference symbols)",
     "analysis/linewidth/dsh.py::_dsh_fm_psd": _REPORT,
     "analysis/linewidth/dsh.py::_dsh_lorentzian": _REPORT,
     "analysis/linewidth/dsh.py::_not_a_beat": _REPORT,
@@ -87,6 +89,7 @@ _DOCUMENTED: dict[str, str] = {
     "filtering/fiber/estimation.py::_clock_tone": _REPORT
     + " (the dispersion scan, searched for its peak on the host)",
     "frequency.py::_mengali_morelli": _RECURSION + " (bootstrap over the lags)",
+    "frequency.py::_pilot_slope": _HOST_VALUE + " (pilot symbols and indices)",
     "_cuda/filters.py::_iir_factory.<locals>.launch": _HOST_VALUE
     + " (the IIR state transitions)",
     "metrics/_common.py::_paired": _HOST_VALUE + " (reference symbols)",
