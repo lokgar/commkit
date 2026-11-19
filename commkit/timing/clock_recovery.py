@@ -25,7 +25,7 @@ from .._array import as_2d, restore_1d, warn_if_double
 from .._fft import fft
 from .._interpolation import interpolate_piecewise
 from ..backend import ArrayType, _to_host, dispatch, to_device
-from ..core._signal_adapter import S, adapt_signal, require_integer_sps
+from ..core._signal_input import S, SignalInput
 from ..core.signal import Signal
 from ..logger import logger
 
@@ -441,11 +441,9 @@ def estimate_sampling_clock_offset(
             "estimate_sampling_clock_offset(): method must be Gardner(), got "
             f"{type(method).__name__}."
         )
-    signal_adapter = adapt_signal(
-        samples, function_name="estimate_sampling_clock_offset()"
-    )
-    sps_int = _resolve_even_sps(signal_adapter, sps, "estimate_sampling_clock_offset()")
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, "estimate_sampling_clock_offset()")
+    sps_int = _resolve_even_sps(inp, sps)
+    x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
     est = estimate_fn(x, xp, sps_int, method)
     if logger.isEnabledFor(logging.INFO):
@@ -527,9 +525,9 @@ def correct_sampling_clock_offset(
             f"SamplingClockOffsetEstimate, got {type(how).__name__}."
         )
     function_name = "correct_sampling_clock_offset()"
-    signal_adapter = adapt_signal(samples, function_name=function_name)
-    sps_int = _resolve_even_sps(signal_adapter, sps, function_name)
-    x, xp, _ = dispatch(signal_adapter.array)
+    inp = SignalInput(samples, function_name)
+    sps_int = _resolve_even_sps(inp, sps)
+    x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
     if isinstance(how, Gardner):
         pos, _, _ = _track(to_device(x, "cpu"), sps_int, how)
@@ -553,21 +551,18 @@ def correct_sampling_clock_offset(
         )
         y = _resample_static(x, ppm)
     out = restore_1d(was_1d, y)
-    sig = signal_adapter.signal
+    sig = inp.signal
     if sig is not None and sig.reference is not None:
         num_symbols = int(out.shape[-1] // sps_int)
-        return signal_adapter.wrap_samples(
-            out, reference=sig.reference.head(num_symbols)
-        )
-    return signal_adapter.wrap_samples(out)
+        return inp.wrap(out, reference=sig.reference.head(num_symbols))
+    return inp.wrap(out)
 
 
-def _resolve_even_sps(signal_adapter: Any, sps: int | None, function_name: str) -> int:
-    sps_value = signal_adapter.resolve_fact("sps", sps)
-    sps_int = require_integer_sps(sps_value, function_name=function_name)
+def _resolve_even_sps(inp: SignalInput[Any], sps: int | None) -> int:
+    sps_int = inp.integer_sps(sps)
     if sps_int < 2 or sps_int % 2:
         raise ValueError(
-            f"{function_name}: Gardner clock recovery needs an even sps "
+            f"{inp.function_name}: Gardner clock recovery needs an even sps "
             f"(a sample halfway between symbols), got {sps_int}."
         )
     return sps_int
