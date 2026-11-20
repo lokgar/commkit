@@ -40,10 +40,11 @@ jobs:
 
   notebooks:
     name: Notebooks carry no outputs
-    # Outputs (plots are base64 PNGs) would bloat the repository. The
-    # nbstripout git filter strips them on commit once a clone runs
-    # 'uv run nbstripout --install'; this required check catches a clone
-    # without it before anything reaches main.
+    # Outputs (plots are base64 PNGs) and local kernel metadata would bloat or
+    # churn the repository. The nbstripout git filter strips both on commit
+    # once a clone runs 'uv run nbstripout --install' and
+    # 'git config filter.nbstripout.extrakeys "metadata.kernelspec metadata.language_info.version"';
+    # this required check catches a clone without it before anything reaches main.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +53,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Every committed notebook is stripped
-        run: uvx nbstripout@0.9.1 --verify $(git ls-files '*.ipynb')
+        run: uvx nbstripout@0.9.1 --verify --extra-keys "metadata.kernelspec metadata.language_info.version" $(git ls-files '*.ipynb')
 
   test:
     name: Test (Python ${{ matrix.python-version }} | ${{ matrix.resolution }})

@@ -166,7 +166,8 @@ With [`uv`](https://github.com/astral-sh/uv), use `uv pip install` in place of `
 git clone https://github.com/lokgar/commkit.git
 cd commkit
 uv sync --all-extras
-uv run nbstripout --install      # once per clone: notebooks are committed without outputs
+uv run nbstripout --install      # once per clone: strip outputs and local kernel metadata on commit
+git config filter.nbstripout.extrakeys "metadata.kernelspec metadata.language_info.version"
 
 uv run pytest                    # CPU and GPU tests
 uv run pytest --device=cpu       # what CI runs

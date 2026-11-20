@@ -62,3 +62,16 @@ def test_example_has_no_outputs(notebook: Path) -> None:
         if c.cell_type == "code" and (c.get("outputs") or c.get("execution_count"))
     ]
     assert not dirty, f"cells with outputs: {dirty}"
+
+
+@pytest.mark.parametrize("notebook", EXAMPLES, ids=lambda p: p.stem)
+def test_example_has_clean_metadata(notebook: Path) -> None:
+    """Committed notebooks carry no local kernel or Python-version metadata.
+
+    Checks the staged copy, matching the nbstripout extra-keys config.
+    """
+    nb = nbformat.reads(_committed_text(notebook), as_version=4)
+    assert "kernelspec" not in nb.metadata
+    lang = nb.metadata.get("language_info", {})
+    assert "version" not in lang
+    assert lang.get("name") == "python"

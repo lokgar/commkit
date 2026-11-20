@@ -31,7 +31,8 @@ Always use `uv`. Python 3.12+.
 
 ```bash
 uv sync --all-extras                     # environment incl. GPU packages
-uv run nbstripout --install              # once per clone: strip notebook outputs on commit
+uv run nbstripout --install              # once per clone: strip outputs and local metadata on commit
+git config filter.nbstripout.extrakeys "metadata.kernelspec metadata.language_info.version"
 uv run pytest                            # CPU + GPU tests (default --device=all)
 uv run pytest --device=cpu               # what CI runs
 uv run pytest --run-slow                 # also the long statistical validation (marker slow)
@@ -263,7 +264,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 - **End-to-end chains** in `tests/test_receiver_chain.py` run several impairments and their receiver, scored against the source bits or AWGN theory, each with one correction left out as a failing baseline.
 - **Warnings are failures**: a WARNING from the `commkit` logger fails the test unless it is marked `allow_warnings` (it provokes a suspect result on purpose) or asserts the log through `caplog`. A WARNING that reports what the caller asked for is a log-level bug, fixed in the library.
 - **API changes never change expected values.** A signature change only changes how tests call the code; numerical changes land in their own commit with independent validation.
-- **Examples** are Jupyter notebooks in `examples/`, committed without outputs (the `nbstripout` filter, see [Commands](#2-commands)). `tests/test_examples.py` executes each one, so an API change updates the notebooks in the same commit.
+- **Examples** are Jupyter notebooks in `examples/`, committed without outputs or local kernel metadata (the `nbstripout` filter, see [Commands](#2-commands)). `tests/test_examples.py` executes each one, so an API change updates the notebooks in the same commit.
   - They form a course: one topic per notebook, `NN-lowercase-words.ipynb`, in teaching order (signals and DSP, channel and metrics, coding, receiver algorithms, fiber systems, characterization). Each opens with what it covers and links the notebooks it builds on, and ends with a link to the next. A new notebook takes its place in the order and updates `examples/README.md` and its neighbors' links.
   - Every claim in the text matches what the cells print: run the notebook and read its numbers before committing. Keep each under about 20 s on the CPU.
   - Plots of hand-computed arrays go through `to_device(x, "cpu")`, so the notebooks run unchanged on the GPU.
