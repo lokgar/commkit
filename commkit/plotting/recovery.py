@@ -25,7 +25,9 @@ from .theme import (
     _device_channels,
     _finish,
     _get_axis,
+    _marker_area,
     _panel_grid,
+    _reference_line,
     _require,
     _select,
     _series_label,
@@ -110,9 +112,8 @@ def plot_carrier_phase_trajectory(
     if num_train_symbols > 0:
         axi.axvline(
             num_train_symbols,
-            color="white",
-            linestyle="--",
             label=f"DD start ({num_train_symbols})",
+            **_reference_line(),
         )
 
     phi_mean = float(phi_deg.mean())
@@ -237,14 +238,15 @@ def plot_pilot_phase_estimate(
             ax1.scatter(
                 pilot_indices,
                 np.degrees(phi_p),
-                s=14,
+                s=_marker_area(0.62),
                 zorder=5,
                 label=label or r"Pilot $\phi$ (unwrapped)",
             )
             ax1.plot(
                 pilot_indices,
                 np.degrees(phi_fit),
-                "r--",
+                "--",
+                color="C3",
                 label=f"Fit  $\\Delta f$={f_label:.3f} Hz",
             )
             ax1.set_title(f"{title}{ch_suffix} - Pilots")
@@ -263,8 +265,8 @@ def plot_pilot_phase_estimate(
             ax2.scatter(
                 pilot_indices,
                 np.degrees(phi_p),
-                s=10,
-                color="r",
+                s=_marker_area(0.53),
+                color="C3",
                 zorder=5,
                 label="Pilots",
             )

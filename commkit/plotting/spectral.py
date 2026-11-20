@@ -16,10 +16,13 @@ from ..logger import logger
 from .theme import (
     _draw_channels,
     _finish,
+    _guide,
     _set_eng_formatter,
 )
 
 __all__ = ["plot_psd", "plot_spectrogram"]
+
+_GUIDE_3DB = "commkit-3db-guide"
 
 
 def plot_psd(
@@ -36,6 +39,8 @@ def plot_psd(
     center_frequency: float | None = None,
     domain: str | None = None,
     x_axis: str = "frequency",
+    relative: bool = False,
+    annotations: bool = False,
     ax: Any | None = None,
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
@@ -74,6 +79,13 @@ def plot_psd(
     x_axis : {"frequency", "wavelength"}, default "frequency"
         Horizontal axis: frequency in Hz, or wavelength ``c / f`` in nm
         (which needs ``center_frequency``).
+    relative : bool, default False
+        Draw each spectrum relative to its peak, in dB (0 dB at the
+        maximum), to compare shapes at different powers.
+    annotations : bool, default False
+        Draw a dashed line 3 dB below the peak, where it reads the 3 dB
+        bandwidth, in the theme's accent color and once per level (shared
+        by the overlays with ``relative``).
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
     xlim, ylim : tuple of float, optional
@@ -152,9 +164,20 @@ def plot_psd(
             ax.set_ylim(ylim)
 
         # Add epsilon to avoid log(0) warnings
-        ax.plot(x_values, 10 * np.log10(Pxx + 1e-20), label=label, **kwargs)
+        level = 10 * np.log10(Pxx + 1e-20)
+        if relative:
+            level = level - np.max(level)
+        ax.plot(x_values, level, label=label, **kwargs)
+        if annotations:
+            _guide(ax, float(np.max(level)) - 3.0, gid=_GUIDE_3DB)
         ax.set_xlabel(xlabel)
-        ax.set_ylabel("PSD [dB/Hz]")
+        ax.set_ylabel(
+            "Relative PSD [dB]"
+            if relative
+            else "PSD [dB/Hz]"
+            if scaling == "density"
+            else "Power [dB]"
+        )
         if x_axis != "wavelength":
             _set_eng_formatter(ax, "x")
         if title is not None:
@@ -207,11 +230,13 @@ def plot_spectrogram(
     mode: str = "psd",
     center_frequency: float | None = None,
     domain: str | None = None,
+    relative: bool = False,
+    dynamic_range_db: float | None = None,
     ax: Any | None = None,
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
     title: str | None = "Spectrogram",
-    cmap: str = "viridis",
+    cmap: str | None = None,
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
@@ -236,6 +261,15 @@ def plot_spectrogram(
     domain : {"DIG", "RF", "OPT"}, optional
         Signal domain, resolved as for :func:`plot_psd`; it only checks the
         ``center_frequency`` here.
+    relative : bool, default False
+        Draw the levels relative to the panel's peak, in dB (0 dB at the
+        maximum).  Needs a dB ``mode`` (``"psd"``, ``"magnitude"``,
+        ``"complex"``).
+    dynamic_range_db : float, optional
+        Show this many dB below the peak and clip what lies lower, so a few
+        empty or deep cells do not stretch the color scale over the noise.
+        Needs a dB ``mode``.  ``vmin`` or ``vmax`` in ``kwargs`` win.
+        ``None`` scales the colors to the full range.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
     xlim : tuple of float, optional
@@ -245,8 +279,8 @@ def plot_spectrogram(
         Time limits in seconds; the data is cropped to them too.
     title : str or None, default "Spectrogram"
         Title of the figure; ``None`` for none.
-    cmap : str, default "viridis"
-        Colormap.
+    cmap : str, optional
+        Colormap; ``None`` uses the theme's ``image.cmap``.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     **kwargs : Any
@@ -258,6 +292,14 @@ def plot_spectrogram(
         The figure and the Axes (an array of Axes for several panels);
         ``None`` with ``show=True``, which shows the figure instead.
     """
+    in_db = mode in ("psd", "magnitude", "complex")
+    if (relative or dynamic_range_db is not None) and not in_db:
+        raise ValueError(
+            f"plot_spectrogram(): relative and dynamic_range_db need a dB mode "
+            f"('psd', 'magnitude', 'complex'), got mode={mode!r}"
+        )
+    if dynamic_range_db is not None and not dynamic_range_db > 0:
+        raise ValueError("plot_spectrogram(): dynamic_range_db must be positive")
     inp = SignalInput(samples, "plot_spectrogram()")
     x = inp.samples
     sampling_rate = inp.sampling_rate(sampling_rate)
@@ -336,6 +378,14 @@ def plot_spectrogram(
             Sxx_plot = Sxx_slice
         # Time on the y-axis: (len(t_plot), len(f_plot)).
         image = _to_host(Sxx_plot.T)
+        limits: dict[str, float] = {}
+        if in_db and image.size:
+            peak = float(np.max(image))
+            if relative:
+                image = image - peak
+                peak = 0.0
+            if dynamic_range_db is not None:
+                limits = {"vmin": peak - dynamic_range_db, "vmax": peak}
 
         # The STFT grids are uniform, so an image with the cell edges as its
         # extent draws the same picture as pcolormesh, much faster.
@@ -354,12 +404,18 @@ def plot_spectrogram(
                 "interpolation": "nearest",
                 "extent": extent,
                 "cmap": cmap,
+                **limits,
             }
             imshow_kwargs.update(kwargs)
             mesh = ax.imshow(image, **imshow_kwargs)
         else:
             mesh = ax.pcolormesh(
-                f_plot, t_plot, image, cmap=cmap, shading="auto", **kwargs
+                f_plot,
+                t_plot,
+                image,
+                cmap=cmap,
+                shading="auto",
+                **{**limits, **kwargs},
             )
         ax.set_xlabel("Frequency [Hz]")
         ax.set_ylabel("Time [s]")
@@ -370,7 +426,9 @@ def plot_spectrogram(
 
         # Add colorbar
         cbar = ax.figure.colorbar(mesh, ax=ax)
-        if mode == "psd":
+        if relative:
+            cbar.set_label("Relative Level [dB]")
+        elif mode == "psd":
             cbar.set_label("PSD [dB/Hz]")
         elif mode in ("complex", "magnitude"):
             cbar.set_label("Magnitude [dB]")

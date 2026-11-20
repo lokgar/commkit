@@ -15,11 +15,11 @@ The notebooks run on the GPU when CuPy works and on the CPU otherwise. They are 
 
 | # | notebook | topics |
 | --- | --- | --- |
-| 00 | [Getting started](00-getting-started.ipynb) | `Signal` (properties, description, reference), `generate`, devices, functions that return new data, files, logging |
+| 00 | [Getting started](00-getting-started.ipynb) | `Signal` (properties, description, reference), `generate`, devices, functions that return new data, the dark and light plot themes, files, logging |
 | 01 | [Constellations and bit mapping](01-constellations-and-bit-mapping.ipynb) | QAM, PSK, PAM; Gray labels; mapping and hard decisions; rotational symmetry; probabilistic shaping |
-| 02 | [Spectral analysis](02-spectral-analysis.ipynb) | Welch PSD (resolution and variance), absolute levels, frequency shifts, pilot tones, spectrograms |
-| 03 | [Digital filters](03-digital-filters.ipynb) | FIR window design, overlap-save, IIR families and group delay, causal and zero-phase filtering, smoothing |
-| 04 | [Pulse shaping and matched filtering](04-pulse-shaping-and-matched-filtering.ipynb) | pulses, the Nyquist criterion, eye diagrams, the matched filter, roll-off and timing, pulse length |
+| 02 | [Spectral analysis](02-spectral-analysis.ipynb) | Welch PSD (resolution and variance), absolute levels, the 3 dB bandwidth, spectra relative to their peak, frequency shifts, pilot tones, spectrograms and their dynamic range |
+| 03 | [Digital filters](03-digital-filters.ipynb) | FIR window design and where its cutoff lies, overlap-save, aligned and causal group delay, IIR families and what their cutoff means, causal and zero-phase filtering, smoothing |
+| 04 | [Pulse shaping and matched filtering](04-pulse-shaping-and-matched-filtering.ipynb) | pulses on symbol-rate axes, the Nyquist criterion and its zero crossings, eye diagrams, the matched filter, roll-off and timing, pulse length |
 | 05 | [Multirate processing and resampling](05-multirate-and-resampling.ipynb) | upsampling, decimation and aliasing, the symbol-rate slicer, rational resampling, periodic AWG records |
 
 ## II. Channel and performance
@@ -30,7 +30,7 @@ The notebooks run on the GPU when CuPy works and on the CPU otherwise. They are 
 | 07 | [Channel coding](07-channel-coding.ipynb) | `encode` / `decode`, coded `generate`, post-FEC BER and FER, hard and soft decoding, error-rate curves and the decoding outcome, Reed-Solomon, LDPC, NGMI as a threshold, EXIT charts, polar, convolutional and turbo codes against Eb/N0, block length |
 | 08 | [Probabilistic shaping and coded modulation](08-probabilistic-shaping-and-coded-modulation.ipynb) | the CCDM, shaped `generate`, probabilistic amplitude shaping with LDPC, the shaping gain at the decoder |
 | 09 | [Laser phase noise](09-laser-phase-noise.ipynb) | the Wiener model, the Lorentzian line, `Δν·T`, a shared LO, flicker noise and the FM-noise PSD |
-| 10 | [Front-end impairments](10-front-end-impairments.ipynb) | IQ imbalance and its correction, IQ skew across the band, DC offsets, electrical bandwidth, carrier frequency offset, ADC quantization and loading, sampling jitter and ENOB |
+| 10 | [Front-end impairments](10-front-end-impairments.ipynb) | IQ imbalance in the constellation and the eye, and its correction, IQ skew across the band, DC offsets, electrical bandwidth, carrier frequency offset, ADC quantization and loading, sampling jitter and ENOB |
 
 ## III. Receiver algorithms
 

@@ -347,3 +347,23 @@ def test_convergence_training_marker_can_be_suppressed(xp: Any) -> None:
         result, quantity="convergence", ax=ax, label="second", annotations=False
     )
     assert sum("DD start" in line.get_label() for line in ax.lines) == 1
+
+
+def test_channel_correction_draws_the_zf_target(xp: Any) -> None:
+    """A 0 dB guide on the combined panels of the direct paths only."""
+
+    def targets(ax: Any) -> list[Any]:
+        return [line for line in ax.lines if line.get_gid() == "commkit-zf-target"]
+
+    h = xp.asarray([0.2, 1.0, -0.3, 0.1], dtype=xp.float32)
+    _, axes = plot_channel_correction(h, noise_var=0.01)
+    assert [len(targets(a)) for a in axes] == [0, 0, 1]
+    assert targets(axes[2])[0].get_ydata()[0] == 0.0
+    _, axes = plot_channel_correction(h, annotations=False)
+    assert not any(targets(a) for a in axes)
+    hm = xp.asarray(
+        np.random.default_rng(0).standard_normal((2, 2, 4)), dtype=xp.float32
+    )
+    _, axes = plot_channel_correction(hm, noise_var=0.01)
+    assert [len(targets(row[2])) for row in axes] == [1, 0, 0, 1]
+    plt.close("all")

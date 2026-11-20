@@ -68,19 +68,37 @@ def _pick_font_family() -> str | None:
     return None
 
 
-def apply_default_theme() -> None:
+def apply_default_theme(*, dark: bool = True) -> None:
     """Apply the library's Matplotlib style.
 
-    Matplotlib's ``dark_background`` style with Google Sans for text and
-    math (regular, bold, italic and bold italic), a 7 x 4.9 inch figure with
-    constrained layout, 300-dpi saving, a light grid, and inward ticks on all
-    four sides.  Roboto replaces Google Sans, and the default sans-serif font
-    replaces both (logged at INFO), when the font is not installed.
+    Google Sans for text and math (regular, bold, italic and bold italic), a
+    7 x 4.9 inch figure with constrained layout, 300-dpi saving, a light
+    grid, and inward ticks on all four sides.  Roboto replaces Google Sans,
+    and the default sans-serif font replaces both (logged at INFO), when the
+    font is not installed.
+
+    Parameters
+    ----------
+    dark : bool, default True
+        Light text on a black background (Matplotlib's ``dark_background``
+        style and its color cycle) with the ``afmhot`` color map, or dark
+        text on white (Matplotlib's default style and its ``tab10`` cycle)
+        with its reverse, ``afmhot_r``.  The color map's low end matches the
+        background (black, white), so the sparse edges of a density plot
+        fade into it, and both variants read the same way: brighter is
+        denser on black, darker is denser on white.
 
     Notes
     -----
     Changes ``matplotlib.rcParams`` globally, so call it once at the start of
-    a script or notebook.  The library never calls it on its own.
+    a script or notebook; a second call switches between the variants.  The
+    library never calls it on its own.
+
+    The plot functions take every color, font and size from
+    ``matplotlib.rcParams`` (the color cycle ``C0``, ``C1``, ...; the text
+    color for guides; ``image.cmap`` for density images and spectrograms;
+    ``lines.linewidth`` and ``lines.markersize`` for line widths and marker
+    sizes), so they follow this theme or any other style.
 
     Fonts installed after Matplotlib wrote its font cache are found by
     scanning the system font directories; the cache file is not modified.
@@ -96,7 +114,8 @@ def apply_default_theme() -> None:
     else:
         font_name = family
 
-    plt.style.use("dark_background")
+    # "default" first: switching from the dark variant must reset its colors.
+    plt.style.use(["default", "dark_background"] if dark else "default")
 
     mpl.rcParams.update(
         {
@@ -125,6 +144,8 @@ def apply_default_theme() -> None:
             "ytick.minor.size": 4,
             "xtick.top": True,
             "ytick.right": True,
+            "errorbar.capsize": 3,
+            "image.cmap": "afmhot" if dark else "afmhot_r",
         }
     )
 
@@ -136,6 +157,78 @@ def apply_default_theme() -> None:
     plt.rcParams["mathtext.it"] = f"{font_name}:italic"
     plt.rcParams["mathtext.bf"] = f"{font_name}:bold"
     plt.rcParams["mathtext.bfit"] = f"{font_name}:italic:bold"
+
+
+def _foreground() -> Any:
+    """The theme's text color, for guides that must contrast with the
+    background (reference lines, trajectories, marker faces)."""
+    return mpl.rcParams["text.color"]
+
+
+def _background() -> Any:
+    """The axes' background color (the figure's when the axes are clear)."""
+    face = mpl.rcParams["axes.facecolor"]
+    return mpl.rcParams["figure.facecolor"] if face == "none" else face
+
+
+def _marker_area(scale: float = 1.0) -> float:
+    """Scatter area in points², ``scale`` times the theme's marker diameter."""
+    return float((scale * mpl.rcParams["lines.markersize"]) ** 2)
+
+
+def _line_width(scale: float = 1.0) -> float:
+    """``scale`` times the theme's line width."""
+    return scale * float(mpl.rcParams["lines.linewidth"])
+
+
+# Reference lines and guides: a light red, far from the neutral grid; a
+# slightly deeper shade on a light background, where the lighter one fades.
+_ACCENT_ON_DARK = "#ff6b6b"
+_ACCENT_ON_LIGHT = "#e64545"
+
+
+def _accent() -> str:
+    """Color of reference lines and guides, by the background's luminance,
+    so a user's own dark or light style gets the matching shade."""
+    from matplotlib.colors import to_rgb
+
+    r, g, b = to_rgb(_background())
+    dark = 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5
+    return _ACCENT_ON_DARK if dark else _ACCENT_ON_LIGHT
+
+
+def _reference_line() -> dict[str, Any]:
+    """Line properties of a reference line or guide: the accent color, a
+    long dash and three quarters of the theme's line width, set apart from
+    the faint solid grid and from the curves."""
+    return {
+        "color": _accent(),
+        "linestyle": (0, (6, 3)),
+        "linewidth": _line_width(0.75),
+    }
+
+
+def _guide(axis: Any, value: float, *, gid: str, vertical: bool = False) -> None:
+    """Reference line at ``value`` (a level, or a position with
+    ``vertical``) in the style of :func:`_reference_line`, tagged ``gid``.
+
+    Drawn once per place: overlays whose guides coincide (normalized curves,
+    one symbol rate) share one line, and guides at other places get their
+    own, all in the accent color.
+    """
+    for other in axis.lines:
+        if other.get_gid() == gid:
+            at = other.get_xdata() if vertical else other.get_ydata()
+            if np.isclose(float(at[0]), value):
+                return
+    line = axis.axvline if vertical else axis.axhline
+    line(value, gid=gid, **_reference_line())
+
+
+def _density_image(h: np.ndarray) -> np.ndarray:
+    """``h`` with its empty cells masked, so the background shows through
+    whatever the color map's low end."""
+    return np.ma.masked_less_equal(h, 1e-6 * float(np.max(h)) if h.size else 0.0)
 
 
 def _get_axis(ax):

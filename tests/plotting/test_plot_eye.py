@@ -223,3 +223,25 @@ def test_selected_eye_component_multichannel(xp: Any) -> None:
     x = xp.ones((2, 200), dtype=xp.complex64) * (1 + 1j)
     _, axes = plot_eye_diagram(x, sps=2, quantity="i", kind="line")
     assert axes.shape == (2, 1)
+
+
+def test_eye_relative_keeps_the_iq_ratio(xp: Any) -> None:
+    """One factor for I and Q: Q at half the amplitude of I spans half the
+    height (a separate factor per part would draw both at full height); with
+    ``relative=False`` the axis is in the samples' own units."""
+    rng = np.random.default_rng(1)
+    i = np.repeat(rng.choice([-1.0, 1.0], 500), 8)
+    x = xp.asarray(5 * (i + 0.5j * np.roll(i, 8)))
+
+    def span(ax: Any) -> float:
+        y0, y1 = ax.images[0].get_extent()[2:]
+        return y1 - y0
+
+    _, (ax_i, ax_q) = plot_eye_diagram(x, sps=8)
+    assert span(ax_q) / span(ax_i) == pytest.approx(0.5, rel=1e-6)
+    assert span(ax_i) == pytest.approx(2.4)  # ±1 and a 10 % margin
+    assert ax_i.get_ylabel() == "Relative Amplitude"
+    _, (ax_i, _) = plot_eye_diagram(x, sps=8, relative=False)
+    assert span(ax_i) == pytest.approx(12.0)  # ±5 and the margin
+    assert ax_i.get_ylabel() == "Amplitude"
+    plt.close("all")

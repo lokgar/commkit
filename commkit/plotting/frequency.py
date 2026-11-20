@@ -22,7 +22,9 @@ from .theme import (
     _device_channels,
     _finish,
     _grid_figsize,
+    _marker_area,
     _panel_grid,
+    _reference_line,
     _require,
     _select,
     _set_eng_formatter,
@@ -125,21 +127,25 @@ def plot_mm_autocorrelation(
         if "phase" in panels:
             ax_phase = raw_axes[c, panels.index("phase")]
             ax_phase.scatter(
-                lags, theta, s=6, label=label or "Angle(R[m])  (wrapped)", zorder=3
+                lags,
+                theta,
+                s=_marker_area(0.41),
+                label=label or "Angle(R[m])  (wrapped)",
+                zorder=3,
             )
             if annotations:
                 ax_phase.plot(
                     lags,
                     (expected_phase + np.pi) % (2 * np.pi) - np.pi,
-                    color="red",
+                    color="C3",
                     linestyle="--",
                     label=f"Expected $2\\pi \\cdot \\Delta f \\cdot M \\cdot m/f_s$  "
                     f"($\\Delta f$={f_c:.2f} Hz)",
                 )
                 ax_phase.axhline(
-                    np.pi, color="gray", linestyle=":", label=r"$\pm\pi$ wrap boundary"
+                    np.pi, label=r"$\pm\pi$ wrap boundary", **_reference_line()
                 )
-                ax_phase.axhline(-np.pi, color="gray", linestyle=":")
+                ax_phase.axhline(-np.pi, **_reference_line())
             ax_phase.set_xlabel("Lag m")
             ax_phase.set_ylabel("Phase [rad]")
             ax_phase.set_ylim(-np.pi - 0.3, np.pi + 0.3)
@@ -232,7 +238,7 @@ def plot_frequency_offset_spectrum(
         if annotations:
             axi.axvline(
                 f_est,
-                color="r",
+                color="C3",
                 linestyle="--",
                 label=rf"$\hat{{f}}$ = {f_est:.2f} Hz",
             )
@@ -241,7 +247,7 @@ def plot_frequency_offset_spectrum(
                     search_range[0],
                     search_range[1],
                     alpha=0.4,
-                    color="green",
+                    color="C2",
                     label="Search range",
                 )
         axi.set_title(f"{title}{ch_suffix}")
@@ -361,7 +367,7 @@ def plot_frequency_offset_blockwise_result(
         ax_f.scatter(
             t_centers,
             df_estimates,
-            s=50,
+            s=_marker_area(1.18),
             zorder=5,
             color="C1",
             label="Block estimate",

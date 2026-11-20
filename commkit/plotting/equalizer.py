@@ -17,7 +17,9 @@ from ..smoothing import moving_average
 from .theme import (
     _decimate_minmax,
     _finish,
+    _guide,
     _panel_grid,
+    _reference_line,
     _select,
     _series_label,
     _set_eng_formatter,
@@ -133,9 +135,8 @@ def plot_equalizer_result(
         if annotations and n_train > 0:
             ax_conv.axvline(
                 n_train,
-                color="white",
-                linestyle="--",
                 label=f"DD start ({n_train})",
+                **_reference_line(),
             )
             ax_conv.legend()
 
@@ -214,6 +215,7 @@ def plot_channel_correction(
     nfft: int = 1024,
     sampling_rate: float = 1.0,
     quantity: str | None = None,
+    annotations: bool = True,
     label: str | None = None,
     legend: bool | None = None,
     ax=None,
@@ -249,6 +251,10 @@ def plot_channel_correction(
         Sampling rate in Hz, for the frequency axis.
     quantity : {"channel", "equalizer", "combined"}, optional
         Plot only that response. ``None`` draws all three panels per path.
+    annotations : bool, default True
+        Draw the 0 dB target of ZF on the combined response (on the
+        diagonal paths for MIMO), against which the MMSE mask shows its
+        attenuation.  ``False`` leaves only the responses.
     label : str, optional
         Label for a selected response, for comparisons on one axis.
     legend : bool, optional
@@ -332,6 +338,8 @@ def plot_channel_correction(
                 20 * np.log10(np.abs(responses[name]) + 1e-12),
                 label=label,
             )
+            if annotations and name == "combined" and i == j:
+                _guide(axi, 0.0, gid="commkit-zf-target")
             if quantity is None:
                 axi.set_title(f"{row_label} {names[name]}".strip())
             else:

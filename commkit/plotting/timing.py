@@ -102,10 +102,10 @@ def plot_timing_correlation(
                 *_trace(c_ch, max_points, x0=offset),
                 label=label or f"Ch {i}  metric={metric_val:.2f}",
             )
-            ax1.axhline(peak_val, color="r", linestyle="--", label="Peak")
-            ax1.axvline(pk_idx + offset, color="r", linestyle="--")
+            ax1.axhline(peak_val, color="C3", linestyle="--", label="Peak")
+            ax1.axvline(pk_idx + offset, color="C3", linestyle="--")
             if abs_thresh > 0:
-                ax1.axhline(abs_thresh, color="g", linestyle=":", label="Thresh")
+                ax1.axhline(abs_thresh, color="C2", linestyle=":", label="Thresh")
             ax1.set_title(f"{title}{ch_suffix}")
             ax1.set_xlabel("Sample Index")
             ax1.set_ylabel("|R|")
@@ -117,12 +117,12 @@ def plot_timing_correlation(
             ax2.plot(x_zoom, zoom, label=label or "Peak area")
             ax2.axvline(
                 pk_idx + offset,
-                color="r",
+                color="C3",
                 linestyle="--",
                 label=f"Pk @ {pk_idx + offset}",
             )
             if abs_thresh > 0:
-                ax2.axhline(abs_thresh, color="g", linestyle=":", label="Thresh")
+                ax2.axhline(abs_thresh, color="C2", linestyle=":", label="Thresh")
             ax2.set_title(f"{title}{ch_suffix} - Detail")
             ax2.set_xlabel("Sample Index")
             ax2.set_ylabel("|R|")

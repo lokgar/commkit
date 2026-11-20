@@ -6,8 +6,10 @@ that draws a Signal, an array or a result object (an estimate, an
 that needs a calculation calls the corresponding public compute function;
 device arrays are reduced on the device and only what is drawn is transferred.
 Tick labels use SI prefixes.
-:func:`apply_default_theme` sets the library's Matplotlib style; importing the
-package changes no Matplotlib settings.
+:func:`apply_default_theme` sets the library's Matplotlib style, dark or
+light; importing the package changes no Matplotlib settings. The plot
+functions take colors, fonts and sizes from ``matplotlib.rcParams``, so they
+follow that theme or any other style.
 
 - :mod:`~commkit.plotting.waveform`, :mod:`~commkit.plotting.eye`,
   :mod:`~commkit.plotting.constellation`, :mod:`~commkit.plotting.spectral`:

@@ -295,3 +295,99 @@ def test_psd_comparison_legend(xp: Any) -> None:
         "before",
         "after",
     ]
+
+
+# -----------------------------------------------------------------------------
+# relative, annotations, dynamic range
+# -----------------------------------------------------------------------------
+
+
+def _rrc_signal(backend_device: str, num_symbols: int = 2**15) -> Any:
+    return generate(
+        Constellation.qam(16),
+        num_symbols=num_symbols,
+        symbol_rate=1e9,
+        sps=8,
+        pulse=RRC(0.2),
+        rng=1,
+        device=backend_device,
+    )
+
+
+def test_psd_relative_compares_shapes(backend_device: str) -> None:
+    """A signal 20 dB stronger draws the same relative PSD, peaking at 0 dB."""
+    sig = _rrc_signal(backend_device, 2**12)
+    loud = sig.replace(samples=10 * sig.samples)
+    _, ax = plot_psd(sig, relative=True)
+    plot_psd(loud, relative=True, ax=ax)
+    a, b = (line.get_ydata() for line in ax.lines)
+    band = a > -50  # deeper, single-precision rounding of the samples shows
+    np.testing.assert_allclose(a[band], b[band], atol=1e-3)
+    assert np.max(a) == pytest.approx(0.0)
+    assert ax.get_ylabel() == "Relative PSD [dB]"
+    _, raw = plot_psd(sig)
+    plot_psd(loud, ax=raw)
+    a, b = (line.get_ydata() for line in raw.lines)
+    np.testing.assert_allclose((b - a)[band], 20.0, atol=1e-3)
+    plt.close("all")
+
+
+def test_psd_3db_guide_reads_the_rrc_bandwidth(backend_device: str) -> None:
+    """The -3 dB line crosses an RRC spectrum at half the symbol rate.
+
+    ``|H(Rs/2)|² = 1/2`` for any roll-off.  The guide hangs from the noisy
+    Welch peak: about 250 averaged segments leave each bin a relative
+    standard deviation near 6 %, so the largest of some 400 in-band bins sits
+    about 0.8 dB above the mean level, and the line with it.  At the
+    roll-off's slope there (68 dB per symbol rate for β = 0.2), that moves
+    the crossing inward by about 0.01 Rs; the tolerance is 0.03 Rs.
+    """
+    _, ax = plot_psd(_rrc_signal(backend_device), nperseg=1024, relative=True,
+                     annotations=True)  # fmt: skip
+    (guide,) = [line for line in ax.lines if line.get_gid() == "commkit-3db-guide"]
+    level = guide.get_ydata()[0]
+    assert level == pytest.approx(-3.0)
+    f, y = ax.lines[0].get_xdata(), ax.lines[0].get_ydata()
+    upper = f > 0
+    above = np.nonzero(upper & (y >= level))[0]
+    edge = f[above[-1]]
+    assert edge / 1e9 == pytest.approx(0.5, abs=0.03)
+    plt.close("all")
+
+
+def test_psd_guides_shared_when_relative(backend_device: str) -> None:
+    sig = _rrc_signal(backend_device, 2**12)
+    _, ax = plot_psd(sig, relative=True, annotations=True, label="a")
+    plot_psd(sig, relative=True, annotations=True, ax=ax, label="b", legend=True)
+    guides = [line for line in ax.lines if line.get_gid() == "commkit-3db-guide"]
+    assert len(guides) == 1
+    assert [t.get_text() for t in ax.get_legend().get_texts()] == ["a", "b"]
+    _, ax = plot_psd(sig, annotations=True)
+    plot_psd(sig.replace(samples=2 * sig.samples), annotations=True, ax=ax)
+    guides = [line for line in ax.lines if line.get_gid() == "commkit-3db-guide"]
+    assert len(guides) == 2
+    assert guides[1].get_ydata()[0] - guides[0].get_ydata()[0] == pytest.approx(
+        20 * np.log10(2), abs=1e-3
+    )
+    plt.close("all")
+
+
+def test_spectrogram_relative_and_dynamic_range(backend_device: str) -> None:
+    """Relative levels peak at 0 dB; the dynamic range sets the color
+    limits to (peak - range, peak); explicit vmin wins."""
+    sig = _rrc_signal(backend_device, 2**12)
+    _, ax = plot_spectrogram(sig)
+    raw = ax.images[0].get_array()
+    _, ax = plot_spectrogram(sig, relative=True, dynamic_range_db=40)
+    image = ax.images[0]
+    np.testing.assert_allclose(image.get_array(), raw - raw.max(), atol=1e-4)
+    assert image.get_clim() == (-40.0, 0.0)
+    assert ax.figure.axes[-1].get_ylabel() == "Relative Level [dB]"
+    _, ax = plot_spectrogram(sig, dynamic_range_db=30)
+    assert ax.images[0].get_clim() == pytest.approx((raw.max() - 30, raw.max()))
+    _, ax = plot_spectrogram(sig, dynamic_range_db=30, vmin=-500)
+    assert ax.images[0].get_clim()[0] == -500
+    for bad in ({"mode": "angle", "relative": True}, {"dynamic_range_db": 0}):
+        with pytest.raises(ValueError):
+            plot_spectrogram(sig, **bad)
+    plt.close("all")

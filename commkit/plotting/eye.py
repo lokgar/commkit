@@ -10,9 +10,9 @@ from ..backend import ArrayType, _to_host, dispatch, to_device
 from ..core._signal_input import SignalInput
 from ..core.signal import Signal
 from ..logger import logger
-from ..math import normalize
+from ..math import normalize as _normalize
 from ..smoothing import smooth_density_2d
-from .theme import _finish, _grid_figsize
+from .theme import _density_image, _finish, _grid_figsize
 
 __all__ = ["plot_eye_diagram"]
 
@@ -40,6 +40,7 @@ def _plot_eye_traces(
     title: str | None,
     vmin: float | None = None,
     vmax: float | None = None,
+    relative: bool = True,
     **kwargs: Any,
 ) -> None:
     """Internal helper to plot eye diagram traces for a single signal component.
@@ -60,14 +61,13 @@ def _plot_eye_traces(
         Title for the subplot.
     vmin, vmax : float, optional
         Color limits of the ``"hist"`` image.
+    relative : bool, default True
+        Whether the caller scaled the samples to unit peak, for the axis
+        label.
     **kwargs : Any
         Additional plotting parameters.
     """
     samples, xp, _ = dispatch(samples)
-
-    # Normalize to max amplitude 1.0
-
-    samples = normalize(samples, mode="peak")
 
     # We want to include the endpoint to avoid a gap at the end of the plot
     # So we need one extra sample per trace
@@ -162,19 +162,18 @@ def _plot_eye_traces(
             "origin": "lower",
             "extent": [0.0, float(num_symbols), y_lo, y_hi],
             "aspect": "auto",
-            "cmap": "inferno",
             "vmin": vmin,
             "vmax": vmax,
         }
         imshow_kwargs.update(kwargs)
 
-        ax.imshow(h, **imshow_kwargs)
+        ax.imshow(_density_image(h), **imshow_kwargs)
 
     else:
         raise ValueError(f"Unknown kind: {kind}. Supported: 'line', 'hist'")
 
     ax.set_xlabel("Time [Symbol Periods]")
-    ax.set_ylabel("Amplitude")
+    ax.set_ylabel("Relative Amplitude" if relative else "Amplitude")
     ax.set_xlim(0, num_symbols)
     if title is not None:
         ax.set_title(title)
@@ -188,6 +187,7 @@ def plot_eye_diagram(
     num_symbols: int = 2,
     kind: str = "hist",
     quantity: str | None = None,
+    relative: bool = True,
     title: str | None = "Eye Diagram",
     vmin: float | None = None,
     vmax: float | None = None,
@@ -219,10 +219,17 @@ def plot_eye_diagram(
     quantity : {"i", "q"}, optional
         Draw only the in-phase or quadrature component. ``None`` draws both
         for complex input; ``"q"`` requires complex input.
+    relative : bool, default True
+        Draw each channel relative to its peak: scaled to unit peak by the
+        larger of its I and Q peaks, so that an I/Q imbalance stays visible.
+        ``False`` draws the samples' own amplitude, to compare levels between
+        eyes.
     title : str or None, default "Eye Diagram"
         Title of the figure; ``None`` for none.
     vmin, vmax : float, optional
-        Color limits for ``kind="hist"``.
+        Color limits for ``kind="hist"``, whose image uses the theme's
+        ``image.cmap`` (``cmap=`` in ``kwargs`` replaces it) and leaves
+        empty cells clear.
     xlim, ylim : tuple of float, optional
         Limits applied to the displayed axes.
     show : bool, default False
@@ -258,6 +265,9 @@ def plot_eye_diagram(
     per_channel = 2 if is_complex else 1  # I and Q panels for complex samples
 
     def draw(axes_row: Any, row: Any, title: str | None) -> None:
+        if relative:
+            # One factor for I and Q, so an I/Q imbalance stays visible.
+            row = _normalize(row, mode="dac_peak")
         if is_complex:
             for k, (part, name) in enumerate(((row.real, "I"), (row.imag, "Q"))):
                 _plot_eye_traces(
@@ -269,12 +279,14 @@ def plot_eye_diagram(
                     title=f"{title} ({name})" if title else f"{name}-Channel",
                     vmin=vmin,
                     vmax=vmax,
+                    relative=relative,
                     **kwargs,
                 )
         else:
             _plot_eye_traces(
                 row, sps, num_symbols, axes_row[0], kind,
-                title=title, vmin=vmin, vmax=vmax, **kwargs,
+                title=title, vmin=vmin, vmax=vmax, relative=relative,
+                **kwargs,
             )  # fmt: skip
 
     many = isinstance(ax, (list, tuple, np.ndarray))

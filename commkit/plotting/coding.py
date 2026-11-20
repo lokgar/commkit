@@ -25,8 +25,10 @@ from ..core.signal import Reference
 from ..logger import logger
 from .theme import (
     _finish,
+    _foreground,
     _get_axis,
     _panel_grid,
+    _reference_line,
     _select,
     _series_label,
     _square_figsize,
@@ -223,7 +225,6 @@ def plot_error_rate(
                     yerr=[c.fer[seen] - low[seen], high[seen] - c.fer[seen]],
                     fmt="none",
                     ecolor=color,
-                    capsize=3,
                 )
                 a.semilogy(x[~seen], high[~seen], "v", color=color)
     for panel in panels:
@@ -420,7 +421,7 @@ def plot_llr_distribution(
         if span[0] > span[1]:
             span = [-lim, lim]
         if annotations:
-            ax_cons.plot(span, span, "--", color="gray", label="consistent")
+            ax_cons.plot(span, span, label="consistent", **_reference_line())
         ax_cons.set_xlabel("LLR L")
         ax_cons.set_ylabel("log p(L | b = 0) / p(L | b = 1)")
         ax_cons.set_title("Consistency")
@@ -631,13 +632,13 @@ def plot_exit_chart(
         axi.plot(
             chart.trajectory[:, 0],
             chart.trajectory[:, 1],
-            color="white",
+            color=_foreground(),
             alpha=0.8,
             label="trajectory",
         )
     if not chart.converges:
         x, y = chart.trajectory[-1]
-        axi.plot([x], [y], "o", color="red", label="stalls")
+        axi.plot([x], [y], "o", color="C3", label="stalls")
     axi.set_xlim(0, 1)
     axi.set_ylim(0, 1)
     axi.set_aspect("equal")

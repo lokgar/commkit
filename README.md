@@ -62,17 +62,24 @@ long = ck.filtering.fir_taps(sampling_rate=1e6, num_taps=101, cutoff=100e3)
 response = ck.filtering.filter_response(long, sampling_rate=1e6)
 print(response.frequencies, response.response, response.group_delay)
 
-ck.plotting.apply_default_theme()
+ck.plotting.apply_default_theme()  # dark=False for dark text on white
 _, ax = ck.plotting.plot_filter_response(
-    short, sampling_rate=1e6, quantity="magnitude", label="21 taps"
+    short, sampling_rate=1e6, quantity="magnitude", label="21 taps",
+    relative=True, annotations=True,
 )
 ck.plotting.plot_filter_response(
     long, sampling_rate=1e6, quantity="magnitude", ax=ax,
-    label="101 taps", legend=True, show=True,
+    label="101 taps", legend=True, relative=True, annotations=True, show=True,
 )
 ```
 
-See notebook 03 for filter and smoothing comparisons. The multi-panel
+`relative=True` draws each magnitude relative to its peak, 0 dB, so taps of
+any scaling compare, and `annotations=True` adds a dashed line at -3 dB. An FIR
+filter is drawn as `fir_filter` applies it, aligned on its centre tap;
+`causal=True` shows the causal convolution's delay. `plot_psd` and
+`plot_spectrogram` take `relative=True` too, the spectrogram also
+`dynamic_range_db=`. See notebook 03 for filter and smoothing comparisons
+and notebook 04 for pulses on symbol-rate axes (`sps=`). The multi-panel
 equalizer, timing, recovery and coding diagnostics take `quantity=` in the
 same way: draw a second result on the returned axis with its own `label=`,
 and `annotations=False` to leave out repeated fits and guides.

@@ -27,6 +27,7 @@ from .theme import (
     _finish,
     _get_axis,
     _panel_grid,
+    _reference_line,
     _require,
     _series_label,
     _set_eng_formatter,
@@ -125,9 +126,8 @@ def plot_carrier_phase_decomposition(
     if num_train_symbols > 0:
         axi.axvline(
             num_train_symbols / float(symbol_rate),
-            color="white",
-            ls="--",
             label=f"DD start ({num_train_symbols})",
+            **_reference_line(),
         )
 
     _set_eng_formatter(axi, "x")
@@ -206,8 +206,8 @@ def plot_frequency_drift(
         )
 
     if reference_amplitude is not None:
-        axi.axhline(reference_amplitude, color="white", ls="--", label="±amplitude")
-        axi.axhline(-reference_amplitude, color="white", ls="--")
+        axi.axhline(reference_amplitude, label="±amplitude", **_reference_line())
+        axi.axhline(-reference_amplitude, **_reference_line())
 
     _set_eng_formatter(axi, "x")
     _set_eng_formatter(axi, "y")
@@ -356,7 +356,7 @@ def plot_frequency_noise_psd(
             axi.loglog(
                 f_c[shown],
                 b_c[shown],
-                color="#ff5555",
+                color="C5",
                 ls="--",
                 label=r"$\beta$-separation line",
             )
@@ -370,7 +370,7 @@ def plot_frequency_noise_psd(
                 b_c[pos],
                 S_c[0, pos],
                 where=a_c[pos].tolist(),
-                color="#ff5555",
+                color="C5",
                 alpha=0.4,
                 lw=0,
                 label=r"$\beta$-area (integrated region)",
@@ -385,7 +385,7 @@ def plot_frequency_noise_psd(
                 fm, mm = _log_cell_median(fp, m_i, np.isfinite(m_i))
             else:
                 fm, mm = fp, m_i
-            axi.loglog(fm, mm, color="#ef476f", label="Fitted model", zorder=3)
+            axi.loglog(fm, mm, color="C3", label="Fitted model", zorder=3)
 
         used_label = "Fit bins"
         if used is not None:
@@ -398,7 +398,7 @@ def plot_frequency_noise_psd(
                     fp[sel],
                     S_c[0, pos][sel],
                     ".",
-                    color="#06d6a0",
+                    color="C2",
                     ls="none",
                     label=used_label,
                 )
@@ -406,14 +406,14 @@ def plot_frequency_noise_psd(
                 # Dense mask: highlight the log-binned median over the accepted
                 # region instead of splattering one marker per bin.
                 fg, sg = _log_cell_median(fp, S_c[0, pos], sel)
-                axi.loglog(fg, sg, color="#06d6a0", label="Fit region")
+                axi.loglog(fg, sg, color="C2", label="Fit region")
 
         if floor is not None:
             floors = np.atleast_1d(np.asarray(floor, dtype=np.float64))
             floor_mean = float(np.mean(floors))
             axi.axhline(
                 floor_mean / np.pi,
-                color="#ffd166",
+                color="C4",
                 ls=":",
                 label=r"White-FM floor  $\Delta\nu/\pi$",
             )
@@ -430,7 +430,7 @@ def plot_frequency_noise_psd(
                     axi.axvspan(
                         float(fp[dom].min()),
                         float(fp[dom].max()),
-                        color="#ffd166",
+                        color="C4",
                         alpha=0.18,
                         lw=0,
                         label="Plateau (model within 10 % of floor)",
@@ -444,12 +444,12 @@ def plot_frequency_noise_psd(
                 axi.axvspan(
                     lo,
                     band[1],
-                    color="#06d6a0",
+                    color="C2",
                     alpha=0.4,
                     label="Analysis band [f_min, f_max]",
                 )
             for edge in (lo, float(band[1])):
-                axi.axvline(edge, color="#06d6a0")
+                axi.axvline(edge, color="C2")
 
     _set_eng_formatter(axi, "x")
     axi.set_xlabel("Frequency [Hz]")
@@ -534,9 +534,8 @@ def plot_allan_deviation(
             axi.loglog(
                 tau,
                 guide,
-                color="gray",
-                ls=":",
                 label=r"$\tau^{-1/2}$ (white-FM)",
+                **_reference_line(),
             )
 
     _set_eng_formatter(axi, "x")
@@ -633,9 +632,8 @@ def plot_increment_variance(
             )
         axi.axhline(
             float(np.mean(ic)),
-            color="gray",
-            ls=":",
             label=r"Intercept (noise $2\sigma_\phi^2$)",
+            **_reference_line(),
         )
 
     _set_eng_formatter(axi, "x")

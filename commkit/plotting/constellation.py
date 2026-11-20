@@ -18,8 +18,13 @@ from ..mapping import Constellation
 from ..math import rms
 from ..smoothing import smooth_density_2d
 from .theme import (
+    _background,
+    _density_image,
     _draw_channels,
     _finish,
+    _foreground,
+    _line_width,
+    _marker_area,
     _square_figsize,
 )
 
@@ -90,16 +95,15 @@ def plot_ideal_constellation(
         sc = ax.scatter(
             real,
             imag,
-            s=100,
+            s=_marker_area(10 / 6),
             c=np.asarray(pmf, dtype=np.float64),
-            cmap="YlOrRd",
-            edgecolors="black",
-            linewidths=0.5,
+            edgecolors=_foreground(),
+            linewidths=_line_width(0.25),
             zorder=10,
         )
         plt.colorbar(sc, ax=ax, label="P(sₘ)")
     else:
-        ax.scatter(real, imag, s=100, zorder=10)
+        ax.scatter(real, imag, s=_marker_area(10 / 6), zorder=10)
         for point, bits in zip(const, constellation.bit_labels, strict=True):
             label = "".join(str(int(b)) for b in bits)
             ax.annotate(
@@ -117,8 +121,8 @@ def plot_ideal_constellation(
 
     # Center lines
     ax.grid(False)
-    ax.axhline(0, color="white", alpha=0.4, zorder=0)
-    ax.axvline(0, color="white", alpha=0.4, zorder=0)
+    ax.axhline(0, color=_foreground(), alpha=0.4, zorder=0)
+    ax.axvline(0, color=_foreground(), alpha=0.4, zorder=0)
 
     # Limits and Aspect
     max_range = np.max(np.abs(const))
@@ -149,7 +153,7 @@ def plot_constellation(
     samples: ArrayType | Signal,
     *,
     bins: int = 100,
-    cmap: str = "inferno",
+    cmap: str | None = None,
     ax: Any | None = None,
     overlay_ideal: bool = False,
     overlay_reference: bool = False,
@@ -175,8 +179,9 @@ def plot_constellation(
         channel).
     bins : int, default 100
         Histogram bins per axis.
-    cmap : str, default "inferno"
-        Colormap of the density.
+    cmap : str, optional
+        Colormap of the density; ``None`` uses the theme's ``image.cmap``.
+        Empty cells are left clear, showing the background.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
     overlay_ideal : bool, default False
@@ -251,7 +256,7 @@ def plot_constellation(
             imshow_kwargs["vmax"] = vmax
         imshow_kwargs.update(kwargs)
 
-        ax.imshow(h, **imshow_kwargs)
+        ax.imshow(_density_image(h), **imshow_kwargs)
 
         # Overlay the constellation, scaled from its unit average power (under
         # its pmf) to the row' RMS.
@@ -263,18 +268,18 @@ def plot_constellation(
             ax.scatter(
                 const.real,
                 const.imag,
-                c="lime",
-                edgecolors="dimgray",
-                linewidths=1.5,
-                s=30,
+                c=_foreground(),
+                edgecolors=_background(),
+                linewidths=_line_width(0.75),
+                s=_marker_area(0.9),
                 zorder=10,
                 marker="o",
             )
 
         # Add center lines
         ax.grid(False)
-        ax.axhline(0, color="white", alpha=0.4, zorder=0)
-        ax.axvline(0, color="white", alpha=0.4, zorder=0)
+        ax.axhline(0, color=_foreground(), alpha=0.4, zorder=0)
+        ax.axvline(0, color=_foreground(), alpha=0.4, zorder=0)
 
         ax.set_xlabel("In-Phase (I)")
         ax.set_ylabel("Quadrature (Q)")
@@ -307,10 +312,10 @@ def plot_constellation(
             axis.scatter(
                 symbols.real,
                 symbols.imag,
-                c="lime",
-                edgecolors="dimgray",
-                linewidths=1.5,
-                s=30,
+                c=_foreground(),
+                edgecolors=_background(),
+                linewidths=_line_width(0.75),
+                s=_marker_area(0.9),
                 zorder=10,
                 marker="o",
             )

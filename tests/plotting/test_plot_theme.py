@@ -3,6 +3,7 @@
 from typing import Any
 from unittest.mock import patch
 
+import matplotlib as mpl
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,6 +12,13 @@ import pytest
 import commkit.plotting.theme as theme
 from commkit.plotting import apply_default_theme
 from commkit.plotting.theme import _create_subplot_grid
+
+
+@pytest.fixture(autouse=True)
+def _restore_rcparams() -> Any:
+    """The themes these tests apply do not leak into other tests."""
+    with mpl.rc_context():
+        yield
 
 
 class TestPlotThemeAndGridUtilities:
@@ -236,3 +244,152 @@ class TestDeviceReduction:
             self._cases(xp)[case]()
         plt.close("all")
         assert sizes and max(sizes) <= 2 * (4000 + 2000), sizes
+
+
+# -----------------------------------------------------------------------------
+# dark and light themes
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_theme_variants(dark: bool) -> None:
+    """Each variant sets matching background, text, cycle and color map, and
+    the light one resets what an earlier dark call set."""
+    from matplotlib.colors import to_hex, to_rgb
+
+    apply_default_theme(dark=not dark)
+    apply_default_theme(dark=dark)
+    rc = plt.rcParams
+    background, text = (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)
+    if not dark:
+        background, text = text, background
+    for key in ("figure.facecolor", "axes.facecolor"):
+        assert to_rgb(rc[key]) == background, key
+    for key in ("text.color", "axes.labelcolor", "xtick.color", "axes.edgecolor"):
+        assert to_rgb(rc[key]) == text, key
+    assert rc["image.cmap"] == ("afmhot" if dark else "afmhot_r")
+    cycle = rc["axes.prop_cycle"].by_key()["color"]
+    assert (to_hex(cycle[0]) == "#1f77b4") is (not dark)  # tab10 on white
+    assert rc["errorbar.capsize"] == 3
+    assert rc["lines.linewidth"] == 2  # shared settings in both variants
+
+
+def test_density_low_end_matches_the_background() -> None:
+    """The color map starts at the background's luminance in both variants."""
+    for dark in (True, False):
+        apply_default_theme(dark=dark)
+        low = np.mean(plt.get_cmap(plt.rcParams["image.cmap"])(0.0)[:3])
+        assert (low < 0.1) if dark else (low > 0.8)
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_plots_follow_the_theme(xp: Any, backend_device: str, dark: bool) -> None:
+    """Guides take the text color, overlay markers contrast with the
+    background, density images use the theme's map with empty cells clear."""
+    from matplotlib.colors import to_rgba
+
+    import commkit as ck
+    from commkit.mapping import Constellation
+
+    apply_default_theme(dark=dark)
+    fg = to_rgba(plt.rcParams["text.color"])
+    bg = to_rgba(plt.rcParams["axes.facecolor"])
+    sig = ck.generate(
+        Constellation.qam(16),
+        num_symbols=4000,
+        symbol_rate=1e9,
+        sps=1,
+        rng=1,
+        device=backend_device,
+    )
+    sig = ck.impairments.apply_awgn(sig, esn0_db=25, rng=2)
+
+    _, ax = ck.plotting.plot_constellation(sig, overlay_ideal=True)
+    image = ax.images[0]
+    assert image.get_cmap().name == plt.rcParams["image.cmap"]
+    data = image.get_array()
+    assert np.ma.is_masked(data) and data.mask[0, 0]  # corner: no samples
+    ideal = ax.collections[-1]
+    assert tuple(ideal.get_facecolor()[0]) == fg
+    assert tuple(ideal.get_edgecolor()[0]) == bg
+    axis_lines = [line for line in ax.lines if line.get_alpha() == 0.4]
+    assert axis_lines and all(
+        to_rgba(line.get_color())[:3] == fg[:3] for line in axis_lines
+    )
+
+    _, ax = ck.plotting.plot_eye_diagram(xp.asarray(np.sin(np.arange(4000) / 3)), sps=8)
+    assert ax.images[0].get_cmap().name == plt.rcParams["image.cmap"]
+
+    _, ax = ck.plotting.plot_filter_response(
+        [0.25, 0.5, 0.25], quantity="magnitude", relative=True, annotations=True
+    )
+    guide = ax.lines[-1]
+    assert guide.get_color() == theme._accent()
+    assert guide.get_linewidth() == pytest.approx(
+        0.75 * plt.rcParams["lines.linewidth"]
+    )
+    assert guide.get_alpha() is None  # full opacity, unlike the grid
+    plt.close("all")
+
+
+def test_marker_and_line_sizes_scale_with_the_theme() -> None:
+    with mpl.rc_context({"lines.markersize": 10, "lines.linewidth": 3}):
+        assert theme._marker_area(1.5) == pytest.approx(225.0)
+        assert theme._line_width(0.5) == pytest.approx(1.5)
+
+
+def test_plot_sources_take_style_from_rcparams() -> None:
+    """No plot module names a color (other than cycle colors and gray), a
+    font size, a fixed line width or marker size, or a color map."""
+    import re
+    from pathlib import Path
+
+    forbidden = [
+        # color keywords with a literal other than "C<n>" or "gray"
+        r"""\b(?:color|colors|c|ecolor|edgecolors?|facecolors?|mfc|mec)\s*=\s*["'](?!C\d["']|gray["'])""",
+        r"""["']#[0-9a-fA-F]{3,8}["']""",  # hex anywhere
+        r"""["'][rgbcmykw](?:--|-\.|-|:|o|\.|v|\^|s|x|\+)["']""",  # "r--" formats
+        r"""\b(?:fontsize|labelsize|titlesize|capsize|markersize)\s*=\s*\d""",
+        r"""\b(?:linewidths?|lw)\s*=\s*(?!0\b)\d""",  # 0 (no edge) is allowed
+        r"""\bs\s*=\s*\d""",  # scatter areas
+        r"""\bcmap\s*=\s*["']""",
+        r"""["']cmap["']\s*:\s*["']""",
+        r"""\bfigsize\s*=\s*\(\s*\d""",
+    ]
+    root = Path(theme.__file__).parent
+    offenders = []
+    for path in sorted(root.glob("*.py")):
+        if path.name == "theme.py":
+            continue
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            code = line.split("#", 1)[0] if not re.search(r"""["']#""", line) else line
+            for pattern in forbidden:
+                if re.search(pattern, code):
+                    offenders.append(f"{path.name}:{number}: {line.strip()}")
+    assert not offenders, "\n".join(offenders)
+
+
+def test_accent_follows_the_background_and_stands_apart() -> None:
+    """The guide color is a light red on a dark background and a deeper one
+    on a light background (a user's own style included): a saturated hue
+    against the gray grid, readable against either background."""
+    from matplotlib.colors import rgb_to_hsv, to_rgb
+
+    def luminance(color: Any) -> float:
+        r, g, b = to_rgb(color)
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    for dark in (True, False):
+        apply_default_theme(dark=dark)
+        accent = theme._accent()
+        assert accent == (theme._ACCENT_ON_DARK if dark else theme._ACCENT_ON_LIGHT)
+        hue, saturation, _ = rgb_to_hsv(to_rgb(accent))
+        assert min(hue, 1 - hue) < 0.03 and saturation > 0.5  # a red
+        assert rgb_to_hsv(to_rgb(plt.rcParams["grid.color"]))[1] < 0.1  # gray
+        # Luminance at least 0.3 away from the background's.
+        gap = abs(luminance(accent) - luminance(plt.rcParams["axes.facecolor"]))
+        assert gap > 0.3
+    with mpl.rc_context({"axes.facecolor": "#202020"}):
+        assert theme._accent() == theme._ACCENT_ON_DARK
+    with mpl.rc_context({"axes.facecolor": "#f0f0e8"}):
+        assert theme._accent() == theme._ACCENT_ON_LIGHT
