@@ -4,6 +4,37 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-11-20
+
+Plots for both backgrounds and for comparisons: `apply_default_theme(dark=False)` adds a light theme, and every plot takes its colors, color maps and sizes from the current style, so guides stay visible on white and under a style of your own. `relative=True` draws filter responses, spectra, spectrograms and eyes relative to their peaks, `annotations=True` adds -3 dB, half-symbol-rate, symbol-instant and final-value guides, and `plot_filter_response` draws an FIR filter as `fir_filter` applies it. The group delay of linear-phase filters is exact, so its plot is flat instead of spiking at the stopband zeros. Eight notebooks show the new features.
+
+### Changes that may need code updates
+
+- The plot functions take every color, color map and size from `matplotlib.rcParams` instead of fixed values, so their guides and markers stay visible on a white background. Plots drawn without `apply_default_theme()` change look: density images (`plot_constellation`, `plot_eye_diagram`) and `plot_spectrogram` use the style's `image.cmap` (Matplotlib's default is viridis) where they used inferno and viridis; reference lines take the text color instead of white; ideal and reference points take the text color, edged in the background color, instead of lime; annotation colors are cycle colors (`C2`, `C3`, ...). Pass `cmap=` to keep a map. Empty cells of the density images are clear, showing the background. `apply_default_theme()` sets the `afmhot` map, so themed density images and spectrograms change from inferno and viridis to it.
+- `plot_filter_response` draws an FIR filter as `fir_filter` applies it, aligned on tap `(L - 1) // 2`, in every panel: the phase and group delay are measured from that tap (zero group delay for a linear-phase filter of odd length, where they showed the causal delay of `(L - 1) / 2` samples), and the step response and an impulse response of explicit length start at `-(L - 1) // 2`. The impulse panel of an even-length filter moves by half a sample, to where `fir_filter` puts it. Pass `causal=True` for the former phase and group delay. IIR filters are unchanged.
+- `plot_filter_response` counts samples and cycles per sample when neither `sps` nor `sampling_rate` is given (`sps` defaulted to 1 and labelled samples as symbol periods); with `sps` alone, frequency is in symbol rates, matching the time axis in symbol periods.
+- `plot_eye_diagram` scales I and Q of a channel by one factor, the larger of their peaks, so an I/Q imbalance shows; each was scaled to its own peak.
+
+### Added
+
+- `apply_default_theme(dark=False)`: dark text on white, with Matplotlib's `tab10` cycle and the `afmhot_r` color map; `dark=True`, the default, keeps the black theme, now with `afmhot`. The two maps are each other's reverse, and the low end of each matches its background, so the sparse edges of a density plot fade into it. A second call switches between the two variants.
+- `plot_filter_response(relative=True)` removes the taps' scale for comparisons: the impulse response relative to its peak magnitude, and the step response and magnitude relative to the peak gain (0 dB at the maximum of `|H(f)|`, which also works for high-pass and band-pass filters). Phase and group delay do not depend on the gain and are unchanged.
+- `plot_filter_response(annotations=True)` draws guides: a dashed line 3 dB below the magnitude's peak and, with `sps`, one at half the symbol rate; markers at the symbol instants of the impulse response, where a Nyquist pulse has its zero crossings; the final value of the step response. `causal=True` draws the causal convolution.
+- `plot_psd(relative=True)` draws each spectrum relative to its peak, and `annotations=True` a line 3 dB below it. The vertical label reads `Power [dB]` for `scaling="spectrum"`.
+- `plot_spectrogram(relative=True)` draws levels relative to the peak, and `dynamic_range_db=` clips the colors that many dB below it, so deep cells do not stretch the scale over the noise.
+- `plot_eye_diagram(relative=False)` draws the samples' own amplitude, to compare levels between eyes.
+- `plot_channel_correction(annotations=True)`, the default, draws the 0 dB target of ZF on the combined response of the direct paths.
+- Reference lines and guides (the training start of equalizer and carrier-phase plots, ±π wrap boundaries, slope and intercept guides, the LLR consistency diagonal, the new guides above) share one style: a light red (a deeper shade on a light background), at full opacity and three quarters of the line width, with a long dash, also where a guide belongs to one curve (the -3 dB line of an unnormalized response, a step's final value). They were white or gray, as faint as the grid.
+
+### Fixed
+
+- The group-delay panel of `plot_filter_response` drew a linear-phase FIR filter's constant delay as spikes next to its stopband zeros, with every tick reading the same value: the autoscaled axis spanned only the rounding of the computed delay (about 1e-7 relative where `|H|` is near 1e-6). `filter_response` now returns exactly `(L - 1) / 2` samples for conjugate-symmetric or antisymmetric taps wherever the delay is defined, and the plot's frequency panels span at least 0.1 dB, 0.01 rad and 0.01 samples, so any flat response draws flat.
+
+### Development
+
+- Notebook 00 shows the light theme; notebook 02 the 3 dB guide on an RRC spectrum, spectra at different powers relative to their peaks, and a spectrogram's dynamic range; notebook 03 where the window method's cutoff lies (-6 dB) against the -3 dB point, aligned and causal group delay, and what `cutoff` means in each IIR family; notebook 04 the pulses on symbol-rate axes with the symbol-instant and half-symbol-rate guides; notebook 10 an I/Q imbalance in the eye diagram; notebook 16 the ZF target on the combined response; notebook 20 the aligned group delay of the dispersion compensator; notebook 22 eyes at three received powers on one absolute scale.
+- `tests/plotting/test_plot_theme.py` scans the plot modules for literal colors, font sizes, line widths, marker sizes and color maps.
+
 ## [3.9.0] - 2026-11-20
 
 Your own Signal-aware functions: `commkit.core.SignalInput`, the helper behind every function that takes an array or a Signal, is public, with one typed method per property or default of the Signal. Value objects with array fields accept device arrays, `estimate_timing` on the GPU is twice as fast, and the rest is structure: shared helpers in place of copies, estimators that build their own result classes, and the words properties and defaults for what a Signal provides. Results are unchanged apart from the fixes below.
@@ -639,7 +670,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.9.0...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.10.0...HEAD
+[3.10.0]: https://github.com/lokgar/commkit/compare/v3.9.0...v3.10.0
 [3.9.0]: https://github.com/lokgar/commkit/compare/v3.8.0...v3.9.0
 [3.8.0]: https://github.com/lokgar/commkit/compare/v3.7.1...v3.8.0
 [3.7.1]: https://github.com/lokgar/commkit/compare/v3.7.0...v3.7.1
