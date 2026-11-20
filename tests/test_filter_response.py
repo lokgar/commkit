@@ -299,3 +299,45 @@ def test_iir_default_lengths_follow_slowest_pole(xp):
 
     ultra_slow = (xp.asarray([1e-12]), xp.asarray([1.0, -(1.0 - 1e-12)]))
     assert filtering.impulse_response(ultra_slow).size == 100_000
+
+
+@pytest.mark.parametrize(
+    "kind", ["symmetric", "antisymmetric", "conjugate symmetric", "even length"]
+)
+def test_linear_phase_delay_is_exact(xp, kind):
+    """Linear-phase taps have a group delay of exactly (L - 1) / 2 wherever
+    it is defined, with no rounding next to the stopband zeros.
+
+    The general ratio Re(Σ n h[n] z^-n / H) carries rounding that grows as
+    1 / |H|: for this 101-tap low-pass about 1e-6 samples at the grid points
+    next to its -130 dB zeros (taps whose symmetry is broken by 1e-12 show
+    it, the baseline below).  An exact comparison fails on any of it.
+    """
+    taps = filtering.fir_taps(sampling_rate=1.0, num_taps=101, cutoff=0.1)
+    if kind == "antisymmetric":  # a type III band-pass: odd, zero at DC
+        taps = taps * np.sin(2 * np.pi * 0.25 * (np.arange(101) - 50))
+    elif kind == "conjugate symmetric":  # shifted to positive frequencies
+        taps = taps * np.exp(2j * np.pi * 0.2 * (np.arange(101) - 50))
+    elif kind == "even length":
+        taps = filtering.fir_taps(sampling_rate=1.0, num_taps=100, cutoff=0.1)
+    delay = to_device(filtering.filter_response(xp.asarray(taps)).group_delay, "cpu")
+    defined = delay[np.isfinite(delay)]
+    assert defined.size > 0.9 * delay.size
+    assert np.all(defined == (taps.size - 1) / 2)
+
+    broken = taps.copy()
+    broken[0] += 1e-12 * np.max(np.abs(taps))
+    general = to_device(
+        filtering.filter_response(xp.asarray(broken)).group_delay, "cpu"
+    )
+    assert np.nanmax(np.abs(general - (taps.size - 1) / 2)) > 1e-9
+
+
+def test_non_linear_phase_delay_is_unchanged(xp, xpt):
+    """A minimum-phase pair keeps the general formula: τ(ω) for h = [1, r]
+    is r (r + cos ω) / (1 + 2 r cos ω + r²)."""
+    r = 0.5
+    result = filtering.filter_response(xp.asarray([1.0, r]), nfft=64)
+    w = 2 * np.pi * to_device(result.frequencies, "cpu")
+    expected = r * (r + np.cos(w)) / (1 + 2 * r * np.cos(w) + r**2)
+    xpt.assert_allclose(result.group_delay, xp.asarray(expected), atol=1e-12)

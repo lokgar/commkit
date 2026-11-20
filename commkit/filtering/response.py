@@ -96,7 +96,10 @@ def filter_response(
     Notes
     -----
     The group delay is the sum of the section delays for SOS filters. It is
-    undefined at a zero or pole and is returned as ``nan`` there. Values
+    undefined at a zero or pole and is returned as ``nan`` there. For FIR
+    taps that are conjugate symmetric or antisymmetric (linear phase, to
+    within a few rounding steps) it is exactly ``(L - 1) / 2`` samples
+    wherever it is defined. Values
     indistinguishable from zero in the coefficient precision are also marked
     undefined. Frequency grids and phase wrapping use float64; coefficient
     arithmetic follows the coefficient dtype.
@@ -179,7 +182,29 @@ def filter_response(
         with np.errstate(divide="ignore", invalid="ignore"):
             response *= h / d
             delay += xp.where(valid, xp.real(hn / h - dn / d), xp.nan)
+    if (kind == "fir" or (kind == "ba" and a is not None and a.size == 1)) and (
+        _linear_phase(b, xp)
+    ):
+        # Exactly (L - 1) / 2 wherever the response is not zero.  The ratio
+        # above carries rounding that grows as 1 / |H| next to the stopband
+        # zeros (about 1e-7 relative at -130 dB), which an autoscaled plot of
+        # the constant delay magnifies into spikes.
+        delay = xp.where(xp.isnan(delay), delay, xp.full_like(delay, (b.size - 1) / 2))
     return FilterResponse(f, response, delay / scale)
+
+
+def _linear_phase(taps: ArrayType, xp: Any) -> bool:
+    """Whether ``taps`` are conjugate symmetric or antisymmetric, up to a few
+    rounding steps: a linear-phase FIR filter, whose group delay is
+    ``(L - 1) / 2`` at every frequency where its response is not zero."""
+    if taps.size < 2:
+        return True
+    mirrored = xp.conj(taps[::-1])
+    eps = xp.finfo(xp.result_type(taps.dtype, xp.float32)).eps
+    tol = 4 * eps * xp.max(xp.abs(taps))
+    return bool(
+        xp.max(xp.abs(taps - mirrored)) <= tol or xp.max(xp.abs(taps + mirrored)) <= tol
+    )
 
 
 _IIR_DECAY = 1e-5
