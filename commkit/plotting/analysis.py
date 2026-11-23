@@ -10,6 +10,7 @@ or the phase and drift split of
 from typing import Any
 
 import numpy as np
+from matplotlib.ticker import EngFormatter
 
 from ..analysis import (
     AllanDeviation,
@@ -713,7 +714,11 @@ def plot_dsh_beat_psd(
     fig, axi = _get_axis(ax)
 
     for i in range(C):
-        p_db = 10.0 * np.log10(p[i] / p[i].max())
+        peak = float(p[i].max()) if p[i].size else 0.0
+        if peak > 0.0:
+            p_db = 10.0 * np.log10(np.maximum(p[i] / peak, 1e-20))
+        else:
+            p_db = np.full_like(p[i], -200.0, dtype=np.float64)
         axi.plot(
             f_c - f0,
             p_db,
@@ -814,7 +819,11 @@ def plot_carrier_phase_characterization(
     """
     fig, axes = _panel_grid(ax, 2, 2)
 
-    lp = f"  (LP {drift_cutoff / 1e6:.1f} MHz)" if drift_cutoff else ""
+    lp = (
+        f"  (LP {EngFormatter(unit='Hz', places=1).format_data(drift_cutoff)})"
+        if drift_cutoff
+        else ""
+    )
     plot_carrier_phase_decomposition(
         phi,
         drift_phase,

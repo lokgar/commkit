@@ -108,6 +108,10 @@ def plot_psd(
         The figure and the Axes (an array of Axes for several panels);
         ``None`` with ``show=True``, which shows the figure instead.
     """
+    if x_axis not in ("frequency", "wavelength"):
+        raise ValueError(
+            f"plot_psd(): x_axis must be 'frequency' or 'wavelength', got {x_axis!r}."
+        )
     inp = SignalInput(samples, "plot_psd()")
     x = inp.samples
     sampling_rate = inp.sampling_rate(sampling_rate)
@@ -158,11 +162,6 @@ def plot_psd(
         else:
             xlabel = "Frequency [Hz]"
 
-        if xlim is not None:
-            ax.set_xlim(xlim)
-        if ylim is not None:
-            ax.set_ylim(ylim)
-
         # Add epsilon to avoid log(0) warnings
         level = 10 * np.log10(Pxx + 1e-20)
         if relative:
@@ -183,10 +182,9 @@ def plot_psd(
         if title is not None:
             ax.set_title(title)
 
-        if legend:
-            ax.legend()
-
-    return _finish(_draw_channels(x, ax, title, draw), show)
+    return _finish(
+        _draw_channels(x, ax, title, draw), show, xlim=xlim, ylim=ylim, legend=legend
+    )
 
 
 def _resolve_band(

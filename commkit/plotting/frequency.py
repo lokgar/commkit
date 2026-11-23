@@ -7,7 +7,6 @@
 
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from ..backend import _to_host, get_array_module
@@ -18,10 +17,8 @@ from ..frequency import (
     correct_frequency_offset,
 )
 from .theme import (
-    _decimate_minmax,
     _device_channels,
     _finish,
-    _grid_figsize,
     _marker_area,
     _panel_grid,
     _reference_line,
@@ -222,12 +219,8 @@ def plot_frequency_offset_spectrum(
     f0 = float(freqs[0]) / M
     df = float(freqs[1] - freqs[0]) / M if freqs.size > 1 else 0.0
 
-    if ax is None:
-        fig, raw_axes = plt.subplots(1, C, figsize=_grid_figsize(1, C), squeeze=False)
-        axes_list = list(raw_axes[0])
-    else:
-        axes_list = list(ax) if hasattr(ax, "__len__") else [ax]
-        fig = axes_list[0].figure
+    fig, grid = _panel_grid(ax, 1, C)
+    axes_list = list(grid[0])
 
     for i in range(C):
         axi = axes_list[i]
@@ -334,31 +327,32 @@ def plot_frequency_offset_blockwise_result(
     )
     centers = estimate.block_centers
     # The probe lives on the estimate's device, as the samples it was made from.
+    # Unwrap, differentiate and decimate on-device so only the plotted points
+    # cross to the host.
     xp = get_array_module(estimate.block_values)
+    probe_shape = (
+        (estimate.block_values.shape[0], num_samples)
+        if estimate.block_values.ndim > 1
+        else (num_samples,)
+    )
     rotation = correct_frequency_offset(
-        xp.ones(num_samples, dtype=xp.complex128),
+        xp.ones(probe_shape, dtype=xp.complex128),
         estimate,
         sampling_rate=sampling_rate,
     )
-    phase = -np.unwrap(np.angle(np.atleast_2d(_to_host(rotation))[0]))
-    df_dense = np.gradient(phase) * sampling_rate / (2.0 * np.pi)
+    rot_row = rotation[0] if rotation.ndim > 1 else rotation
+    phase = -xp.unwrap(xp.angle(rot_row))
+    df_dense = xp.gradient(phase) * (sampling_rate / (2.0 * np.pi))
     block_values = np.atleast_2d(_to_host(estimate.block_values))[0]
-    t_centers = centers
-    df_estimates = block_values
-    n_grid = np.arange(num_samples)
-    phase_trajectory = phase
-    t_centers = _to_host(t_centers, np.float64)
-    df_estimates = _to_host(df_estimates, np.float64)
-    n_grid = _to_host(n_grid, np.float64)
-    df_dense = _to_host(df_dense, np.float64)
-    phase_trajectory = _to_host(phase_trajectory, np.float64)
+    t_centers = _to_host(centers, np.float64)
+    df_estimates = _to_host(block_values, np.float64)
 
     fig, grid = _panel_grid(ax, 1, len(panels))
     axes = grid[0]
 
-    # Decimate the dense per-sample traces for fast rendering (envelope-preserving).
-    nf, df_k = _decimate_minmax(n_grid, df_dense, max_points)
-    np_, ph_deg = _decimate_minmax(n_grid, np.degrees(phase_trajectory), max_points)
+    # Decimate the dense per-sample traces on device for fast rendering.
+    nf, df_k = _trace(df_dense, max_points)
+    np_, ph_deg = _trace(phase * (180.0 / np.pi), max_points)
 
     if "frequency" in panels:
         # Panel 1: frequency trajectory

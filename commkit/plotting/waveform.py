@@ -87,6 +87,8 @@ def plot_time_domain(
     sampling_rate = inp.sampling_rate(sampling_rate)
     if inp.signal is not None:
         sps = inp.sps(sps)
+    if num_symbols is not None and sps is None:
+        raise ValueError("plot_time_domain(): num_symbols requires sps.")
     logger.debug("Generating time-domain plot.")
     x, xp, _ = dispatch(x)
 
@@ -116,7 +118,7 @@ def plot_time_domain(
                 f"{label} {component}" if label and component else (label or component)
             )
             ax.plot(t, y, label=line_label, **kwargs)
-        if legend or (legend is None and len(parts) > 1):
+        if legend is None and len(parts) > 1:
             ax.legend()
         ax.set_xlabel("Time [s]")
         ax.set_ylabel("Amplitude")
@@ -124,7 +126,9 @@ def plot_time_domain(
         if title is not None:
             ax.set_title(title)
 
-    return _finish(_draw_channels(x, ax, title, draw), show, xlim=xlim, ylim=ylim)
+    return _finish(
+        _draw_channels(x, ax, title, draw), show, xlim=xlim, ylim=ylim, legend=legend
+    )
 
 
 def _envelope(

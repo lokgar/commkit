@@ -208,10 +208,10 @@ def plot_constellation(
         ``None`` with ``show=True``, which shows the figure instead.
     """
     inp = SignalInput(samples, "plot_constellation()")
-    sig = inp.signal
     constellation = inp.constellation(
         constellation, required=overlay_ideal, purpose=" for overlay_ideal"
     )
+    ref_symbols = inp.reference_symbols(required=True) if overlay_reference else None
     logger.debug("Generating constellation density plot.")
     x, xp, _ = dispatch(inp.samples)
 
@@ -292,16 +292,11 @@ def plot_constellation(
     result = _draw_channels(x, ax, title, draw, panel=_square_figsize())
 
     if overlay_reference:
-        if sig is None or sig.reference is None:
-            raise ValueError(
-                "plot_constellation(): overlay_reference needs a Signal with a "
-                "reference."
-            )
-        assert result is not None
+        assert result is not None and ref_symbols is not None
         _, axes = result
         # Each distinct symbol once: a scatter of every reference symbol
         # draws the same few points thousands of times.
-        ref, xp_ref, _ = dispatch(sig.reference.symbols)
+        ref, xp_ref, _ = dispatch(ref_symbols)
         src: Any = (
             [to_device(xp_ref.unique(row), "cpu") for row in ref]
             if ref.ndim > 1

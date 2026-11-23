@@ -162,7 +162,6 @@ class TestDeviceReduction:
 
     @staticmethod
     def _cases(xp: Any) -> dict[str, Any]:
-        from types import SimpleNamespace as NS
 
         from commkit import plotting
         from commkit.analysis import FrequencyDrift
@@ -177,6 +176,11 @@ class TestDeviceReduction:
                 np.complex64
             )
         )
+        from commkit.frequency import (
+            BlockwiseFrequencyEstimate,
+        )
+        from commkit.timing import TimingEstimate
+
         value = xp.asarray([1.0, 2.0])
         return {
             "trajectory": lambda: plotting.plot_carrier_phase_trajectory(phase),
@@ -196,6 +200,18 @@ class TestDeviceReduction:
                     spectrum_frequencies=np.arange(n) - n / 2.0,
                 )
             ),
+            "blockwise frequency": lambda: (
+                plotting.plot_frequency_offset_blockwise_result(
+                    BlockwiseFrequencyEstimate(
+                        value=value,
+                        weights=value,
+                        block_centers=np.array([2500.0, 7500.0]),
+                        block_values=xp.asarray([[1e6, 2e6], [1e6, 2e6]]),
+                    ),
+                    num_samples=n,
+                    sampling_rate=1e9,
+                )
+            ),
             "autocorrelation": lambda: plotting.plot_mm_autocorrelation(
                 MengaliMorelliEstimate(
                     value=value, weights=value, power=4, autocorrelation=samples
@@ -203,7 +219,14 @@ class TestDeviceReduction:
                 sampling_rate=1e9,
             ),
             "timing": lambda: plotting.plot_timing_correlation(
-                NS(correlation=samples, integer=xp.asarray([50, 900]), search_start=10)
+                TimingEstimate(
+                    integer=xp.asarray([50, 900]),
+                    fractional=xp.asarray([0.0, 0.0]),
+                    metric=xp.asarray([10.0, 10.0]),
+                    coherence=xp.asarray([1.0, 1.0]),
+                    correlation=samples,
+                    search_start=10,
+                )
             ),
             "pilot tone": lambda: plotting.plot_pilot_tone_phase_estimate(
                 PilotToneEstimate(value=phase, tone_frequencies=np.array([1e6, 1e6])),
@@ -216,8 +239,16 @@ class TestDeviceReduction:
     @pytest.mark.gpu_only
     @pytest.mark.parametrize(
         "case",
-        ["trajectory", "decomposition", "drift", "spectrum", "autocorrelation",
-         "timing", "pilot tone"],
+        [
+            "trajectory",
+            "decomposition",
+            "drift",
+            "spectrum",
+            "blockwise frequency",
+            "autocorrelation",
+            "timing",
+            "pilot tone",
+        ],
     )  # fmt: skip
     def test_moves_only_the_drawn_points(self, xp: Any, case: str) -> None:
         """Every device-to-host copy is at most the 4000 points of a trace
@@ -284,7 +315,7 @@ def test_density_low_end_matches_the_background() -> None:
 
 @pytest.mark.parametrize("dark", [True, False])
 def test_plots_follow_the_theme(xp: Any, backend_device: str, dark: bool) -> None:
-    """Guides take the text color, overlay markers contrast with the
+    """Guides take the accent color, overlay markers contrast with the
     background, density images use the theme's map with empty cells clear."""
     from matplotlib.colors import to_rgba
 
@@ -393,3 +424,18 @@ def test_accent_follows_the_background_and_stands_apart() -> None:
         assert theme._accent() == theme._ACCENT_ON_DARK
     with mpl.rc_context({"axes.facecolor": "#f0f0e8"}):
         assert theme._accent() == theme._ACCENT_ON_LIGHT
+
+
+def test_si_formatter_preserves_fractional_tick_offsets() -> None:
+    """Ticks with an integer step and fractional offset keep the needed decimal."""
+    fig, ax = plt.subplots()
+    ax.set_xlabel("Frequency [Hz]")
+    ax.set_xlim(0.0, 3.0e6)
+    fmt = theme._SIAxisFormatter()
+    ax.xaxis.set_major_formatter(fmt)
+    locs = [0.5e6, 1.5e6, 2.5e6]
+    fmt.set_locs(locs)
+    labels = [fmt(v) for v in locs]
+    assert labels == ["0.5", "1.5", "2.5"]
+    assert ax.get_xlabel() == "Frequency [MHz]"
+    plt.close(fig)

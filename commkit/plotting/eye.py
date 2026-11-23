@@ -301,13 +301,16 @@ def plot_eye_diagram(
             )
         elif many:
             axes_flat = np.array(ax).flatten()
-            if len(axes_flat) < num_channels * per_channel:
+            needed = num_channels * per_channel
+            if len(axes_flat) < needed:
                 raise ValueError(
-                    f"Not enough axes provided. Need {num_channels * per_channel}."
+                    f"Not enough axes provided. Need {needed}, got {len(axes_flat)}."
                 )
-            axes = axes_flat[: num_channels * per_channel].reshape(
-                num_channels, per_channel
-            )
+            if len(axes_flat) > needed:
+                raise ValueError(
+                    f"Too many axes provided. Need {needed}, got {len(axes_flat)}."
+                )
+            axes = axes_flat.reshape(num_channels, per_channel)
             fig = axes[0, 0].figure
         else:
             raise ValueError(
@@ -325,11 +328,17 @@ def plot_eye_diagram(
                 fig, target = plt.subplots(1, 1)
             many = is_complex
         else:
+            if is_complex:
+                if not many or len(target) != 2:
+                    raise ValueError(
+                        "plot_eye_diagram(): for complex signals, 'ax' must be "
+                        "a sequence of 2 axes."
+                    )
+            elif many:
+                raise ValueError(
+                    "plot_eye_diagram(): for a real 1-D signal, 'ax' must be a single Axes."
+                )
             fig = (target[0] if many else target).figure
-        if is_complex and (not many or len(target) < 2):
-            raise ValueError(
-                "For complex signals, 'ax' must be a list/tuple of at least 2 axes."
-            )
         draw(target if many else [target], x, title)
         result = (fig, target)
     return _finish(result, show, xlim=xlim, ylim=ylim)

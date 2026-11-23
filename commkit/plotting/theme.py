@@ -95,10 +95,10 @@ def apply_default_theme(*, dark: bool = True) -> None:
     library never calls it on its own.
 
     The plot functions take every color, font and size from
-    ``matplotlib.rcParams`` (the color cycle ``C0``, ``C1``, ...; the text
-    color for guides; ``image.cmap`` for density images and spectrograms;
-    ``lines.linewidth`` and ``lines.markersize`` for line widths and marker
-    sizes), so they follow this theme or any other style.
+    ``matplotlib.rcParams`` (the color cycle ``C0``, ``C1``, ...; the accent
+    color for reference lines and guides; ``image.cmap`` for density images
+    and spectrograms; ``lines.linewidth`` and ``lines.markersize`` for line
+    widths and marker sizes), so they follow this theme or any other style.
 
     Fonts installed after Matplotlib wrote its font cache are found by
     scanning the system font directories; the cache file is not modified.
@@ -160,8 +160,8 @@ def apply_default_theme(*, dark: bool = True) -> None:
 
 
 def _foreground() -> Any:
-    """The theme's text color, for guides that must contrast with the
-    background (reference lines, trajectories, marker faces)."""
+    """The theme's text color, for markers and labels that must contrast
+    with the background."""
     return mpl.rcParams["text.color"]
 
 
@@ -603,7 +603,8 @@ class _SIAxisFormatter(mpl.ticker.Formatter):
         values = np.asarray(locs, dtype=float)
         if self.axis is not None:
             lo, hi = sorted(self.axis.get_view_interval())
-            values = values[(values >= lo - 1e-9 * abs(hi - lo)) & (values <= hi)]
+            tol = 1e-9 * abs(hi - lo)
+            values = values[(values >= lo - tol) & (values <= hi + tol)]
         finite = values[np.isfinite(values) & (values != 0)]
         exponent = 0
         if finite.size:
@@ -611,13 +612,16 @@ class _SIAxisFormatter(mpl.ticker.Formatter):
             exponent = min(max(exponent, -24), 18)
         self._scale = 10.0**exponent
         prefix = _SI_PREFIXES[exponent]
-        # Decimals: as many as the tick step needs in the chosen unit.
+        # Decimals: as many as the scaled tick values need in the chosen unit.
         self._decimals = 0
-        if values.size > 1:
-            step = float(np.min(np.diff(np.sort(values)))) / self._scale
-            while self._decimals < 6 and abs(
-                step * 10**self._decimals - round(step * 10**self._decimals)
-            ) > 1e-6 * max(1.0, step * 10**self._decimals):
+        if finite.size:
+            scaled = np.abs(finite) / self._scale
+            while self._decimals < 6 and np.any(
+                np.abs(
+                    scaled * 10**self._decimals - np.round(scaled * 10**self._decimals)
+                )
+                > 1e-6 * np.maximum(1.0, scaled * 10**self._decimals)
+            ):
                 self._decimals += 1
         self._suffix = "" if self._relabel(prefix) else (f" {prefix}" if prefix else "")
 

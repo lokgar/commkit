@@ -296,15 +296,15 @@ def plot_filter_response(
                 if q == "group_delay":
                     _set_eng_formatter(axis, "y")
         axis.set_title(title if title is not None else default_title)
-        if xlim is not None:
-            axis.set_xlim(xlim)
-        if ylim is not None:
-            axis.set_ylim(ylim)
-        if legend or (
-            legend is None and q in ("impulse", "step") and np.iscomplexobj(y)
-        ):
+        if legend is None and q in ("impulse", "step") and np.iscomplexobj(y):
             axis.legend()
-    return _finish((fig, tuple(axes) if quantity is None else axes[0]), show)
+    return _finish(
+        (fig, tuple(axes) if quantity is None else axes[0]),
+        show,
+        xlim=xlim,
+        ylim=ylim,
+        legend=legend,
+    )
 
 
 def _mark_symbol_instants(

@@ -351,6 +351,7 @@ def plot_llr_distribution(
             f"plot_llr_distribution(): llrs {x.shape} and bits {b.shape} differ "
             "in shape."
         )
+    b = to_device(b, "cpu" if xp is np else "gpu")
     m = 1 if bits_per_symbol is None else int(bits_per_symbol)
     if m < 1 or (x.ndim and x.shape[-1] % m):
         raise ValueError(

@@ -8,10 +8,12 @@ from typing import Any
 import numpy as np
 
 from ..backend import _to_host, get_array_module
+from ..timing import TimingEstimate
 from .theme import (
     _device_channels,
     _finish,
     _panel_grid,
+    _require,
     _select,
     _trace,
 )
@@ -73,6 +75,9 @@ def plot_timing_correlation(
         shows the figure instead.
     """
     panels = _select(quantity, ("full", "detail"), label=label, xlim=xlim, ylim=ylim)
+    estimate = _require(
+        estimate, TimingEstimate, "plot_timing_correlation()", "a TimingEstimate"
+    )
     corr = _device_channels(estimate.correlation)
     xp = get_array_module(corr)
     corr = xp.abs(corr)  # on the device; only drawn points are transferred

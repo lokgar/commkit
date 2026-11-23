@@ -278,7 +278,7 @@ def plot_channel_correction(
     names = {
         "channel": "Channel |H(f)|",
         "equalizer": "Equalizer |W(f)|",
-        "combined": "Combined |H·W(f)|",
+        "combined": "Combined |W·H(f)|",
     }
     panels = _select(quantity, tuple(names), label=label)
 
@@ -309,6 +309,11 @@ def plot_channel_correction(
     # The equalizer's impulse response from input j: an impulse at the
     # record's centre (room for the anti-causal tail), rolled back to lag 0.
     hm = h[None, None, :] if siso else h
+    if nfft < hm.shape[-1]:
+        raise ValueError(
+            f"plot_channel_correction(): nfft ({nfft}) must be >= number of "
+            f"channel taps ({hm.shape[-1]})."
+        )
     c = hm.shape[0]
     w = np.empty((c, c, nfft), dtype=np.complex64)
     for j in range(c):
@@ -354,8 +359,3 @@ def plot_channel_correction(
     else:
         result = axes[0, 0] if siso else axes[:, 0]
     return _finish((fig, result), show, xlim=xlim, ylim=ylim, legend=legend)
-
-
-# -----------------------------------------------------------------------------
-# CARRIER-PHASE CHARACTERIZATION DIAGNOSTICS
-# -----------------------------------------------------------------------------

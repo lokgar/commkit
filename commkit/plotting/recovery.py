@@ -436,7 +436,7 @@ def plot_pilot_tone_phase_estimate(
     if len(theta_deg) > 1:
         ax_phase.legend(loc="upper right")
 
-    return _finish((fig, (ax_spec, ax_phase)), show)
+    return _finish((fig, (ax_spec, ax_phase)), show, legend=legend)
 
 
 def plot_pilot_tones_phase_estimate(
