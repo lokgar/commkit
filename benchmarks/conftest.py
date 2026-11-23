@@ -95,15 +95,18 @@ def _warm_numba_threads():
 
 @pytest.fixture
 def backend_device(request):
-    """Current backend device name; skips GPU benches without functional CuPy."""
+    """Current backend device name; fails on explicit --device=gpu or broken CuPy."""
     device = request.param
+    device_opt = request.config.getoption("--device")
     if device == "gpu":
         if not _CUPY_AVAILABLE:
+            if device_opt == "gpu":
+                pytest.fail("--device=gpu was requested but CuPy is not installed")
             pytest.skip("CuPy not installed, skipping GPU benchmarks")
         try:
             cp.zeros(1)
         except Exception as e:  # pragma: no cover - environment-dependent
-            pytest.skip(f"CuPy installed but not functional: {e}")
+            pytest.fail(f"CuPy is installed but not functional: {e}")
     yield device
 
 

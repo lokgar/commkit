@@ -59,6 +59,7 @@ FILES=(
   tests/mapping/test_llr.py tests/mapping/test_gray.py tests/recovery/test_bps.py
   tests/test_filtering.py tests/test_fiber.py tests/impairments/test_fiber_channel_nonlinear.py
   tests/coding/test_ldpc_kernel.py tests/coding/test_algebraic.py
+  tests/coding/test_linear_codes.py tests/coding/test_gf2.py
   tests/test_interpolation.py tests/impairments/test_frontend.py tests/timing/test_clock_recovery.py
 )
 # One process per file, and one per test for test_block.py: under the sanitizer
@@ -66,12 +67,16 @@ FILES=(
 # before it in the process (one took 10 minutes after 26 others, 61 s alone).
 mapfile -t BLOCK < <("$PY" -m pytest --device=gpu -q --collect-only tests/equalization/test_block.py | grep '::')
 
+status=0
 for tool in "${TOOLS[@]}"; do
   filter=()
   [[ $tool == racecheck || $tool == synccheck ]] && filter=("${OWN[@]}")
   for target in "${FILES[@]}" "${BLOCK[@]}"; do
     echo "== $tool $target"
-    "$S" --tool "$tool" "${filter[@]}" "$PY" -m pytest --device=gpu -p no:cacheprovider -q "$target" \
-      2>&1 | grep -E "SUMMARY|passed|failed" || true
+    if ! out=$("$S" --error-exitcode 1 --tool "$tool" "${filter[@]}" "$PY" -m pytest --device=gpu -p no:cacheprovider -q "$target" 2>&1); then
+      status=1
+    fi
+    printf '%s\n' "$out" | grep -E "SUMMARY|passed|failed|ERROR" || true
   done
 done
+exit "$status"

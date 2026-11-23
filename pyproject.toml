@@ -172,7 +172,7 @@ module = [
     "commkit.multirate",
     "commkit.smoothing",
     "commkit.spectral",
-    "commkit.timing",
+    "commkit.timing.*",
 ]
 # `strict` is global-only in mypy; these are its per-module flags.
 disallow_untyped_defs = true
@@ -191,6 +191,7 @@ module = [
     "commkit.equalization._numba_loops",
     "commkit.mapping._numba_llr",
     "commkit.recovery._numba_loops",
+    "commkit.timing._numba_loops",
 ]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
