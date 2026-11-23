@@ -242,6 +242,10 @@ def _prepare_block(
             new = np.zeros(offset + N, dtype=bool)
             new[: smask_np.size] = smask_np[: offset + N]
             smask_np = new[offset:]
+        elif smask_np.size != N:
+            full = np.zeros(N, dtype=bool)
+            full[: smask_np.size] = smask_np[:N]
+            smask_np = full
         smask = xp.asarray(smask_np)
         samples = samples.copy()
         samples[..., smask] /= amp
@@ -257,9 +261,8 @@ def _prepare_block(
 
     if state is None:
         c_tap = num_taps // 2
-        pad_total = max(0, n_sym * sps - N + num_taps - 1)
-        lead = min(c_tap, pad_total)
-        pad_right = pad_total - lead
+        lead = c_tap
+        pad_right = max(0, n_sym * sps + num_taps - 1 - (lead + N))
         real_end = lead + N
         # Padding runs on the samples' device, whatever the pad mode.
         x_padded = _build_padded_samples(

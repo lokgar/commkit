@@ -237,11 +237,10 @@ class _BlockBps:
         # Causal K-sample window that continues across blocks: the last K-1
         # metrics of the previous block are prepended.  The window sum ranks
         # the phases like its mean (always a full K-sample window).
-        K = min(self.K, B)
-        combined = xp.concatenate([self.d2_hist, min_d2], axis=2)
-        cat_d2 = combined[:, :, self.hist_len - (K - 1) :]  # (P, C, K-1+B)
+        K = self.K
+        combined = xp.concatenate([self.d2_hist, min_d2], axis=2)  # (P, C, K-1+B)
         cs_d2 = xp.concatenate(
-            [xp.zeros((P, C, 1), dtype=xp.float32), cat_d2.cumsum(axis=2)], axis=2
+            [xp.zeros((P, C, 1), dtype=xp.float32), combined.cumsum(axis=2)], axis=2
         )  # (P, C, K+B)
         win_sum = cs_d2[:, :, K:] - cs_d2[:, :, :-K]  # (P, C, B)
         if self.joint and C > 1:
@@ -306,7 +305,7 @@ class _BlockBps:
 
         two_pi = xp.float64(2.0 * np.pi)
         phi_wrapped = (phi_f64 - xp.round(phi_f64 / two_pi) * two_pi).astype(xp.float32)
-        return phi_wrapped, phi_f64.astype(xp.float32)
+        return phi_wrapped, phi_f64
 
 
 @dataclass
@@ -723,8 +722,8 @@ def block_lms(
     )
 
     if bps is not None:
-        bps.phi_all = xp.zeros((C, n_sym), dtype=xp.float32)
-        bps.phi_ws = xp.empty((C, block_size), dtype=xp.float32)
+        bps.phi_all = xp.zeros((C, n_sym), dtype=xp.float64)
+        bps.phi_ws = xp.empty((C, block_size), dtype=xp.float64)
     loop = _BlockLmsRun(
         run=run,
         slicer=slicer,
@@ -812,7 +811,7 @@ def _block_bps(
     """BPS state for ``block_lms``: continued from ``carrier``, or cold."""
     P = test_phases
     angles_np = np.linspace(
-        0.0, 2.0 * np.pi / symmetry, P, endpoint=False, dtype=np.float32
+        0.0, 2.0 * np.pi / symmetry, P, endpoint=False, dtype=np.float64
     )
     hist_len = max(0, window - 1)
     if carrier is not None:
@@ -825,7 +824,7 @@ def _block_bps(
         cs_stats = carrier.cs_stats.copy()
         d2_hist = xp.array(carrier.d2_hist, dtype=xp.float32)
     else:
-        cs_H = min(history, n_sym)
+        cs_H = history
         prev4 = np.zeros(C, dtype=np.float64)
         offset4 = np.zeros(C, dtype=np.float64)
         cs_buf_y = np.zeros((C, cs_H), dtype=np.float64)

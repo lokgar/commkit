@@ -60,6 +60,8 @@ class PilotInterpolation:
         values = freeze_host(self, "values", self.values)
         if indices.ndim != 1 or indices.size < 1:
             raise ValueError("indices must be 1-D with at least one pilot.")
+        if int(indices[0]) < 0:
+            raise ValueError(f"indices must be non-negative, got {int(indices[0])}.")
         if np.any(np.diff(indices) <= 0):
             raise ValueError("indices must be strictly increasing.")
         if values.shape[-1] != indices.size or values.ndim not in (1, 2):
@@ -71,6 +73,10 @@ class PilotInterpolation:
             raise ValueError(
                 f"Unknown interpolation method: {self.interpolation!r}. "
                 "Choose 'linear' or 'cubic'."
+            )
+        if self.interpolation == "cubic" and indices.size < 2:
+            raise ValueError(
+                "PilotInterpolation with interpolation='cubic' requires at least 2 pilots."
             )
 
     @classmethod
@@ -576,7 +582,34 @@ def _pilot_tones(
     samples, xp, _ = dispatch(samples)
     C, N = samples.shape
 
-    # 1) Extract each tone's scalar phasor stream z_k(n) and its (S_k, σ_k²).
+    # 1) Validate tone frequencies and channel assignments before FFT work.
+    for f_k in tone_frequencies:
+        if not (-sampling_rate / 2.0 < f_k < sampling_rate / 2.0):
+            raise ValueError(
+                f"PilotTones: tone frequency {f_k} Hz is outside "
+                f"(-fs/2, fs/2) = ({-sampling_rate / 2.0}, {sampling_rate / 2.0}) Hz."
+            )
+    if per_tone_channel is not None:
+        for k, ch in enumerate(per_tone_channel):
+            if not (0 <= int(ch) < C):
+                raise ValueError(
+                    f"PilotTones: per_tone_channel[{k}]={ch} is out of range "
+                    f"for {C} channel(s)."
+                )
+    if not (np.isfinite(differential_bandwidth) and differential_bandwidth > 0):
+        raise ValueError(
+            f"PilotTones: differential_bandwidth must be finite and > 0, got "
+            f"{differential_bandwidth!r}."
+        )
+    if method.search_band is not None and (
+        not np.isfinite(method.search_band) or method.search_band <= 0
+    ):
+        raise ValueError(
+            f"PilotTones: search_band must be finite and > 0, got "
+            f"{method.search_band!r}."
+        )
+
+    # 2) Extract each tone's scalar phasor stream z_k(n) and its (S_k, σ_k²).
     # One shared working-precision FFT of the record serves every tone's
     # refinement and extraction (K windowed IFFTs remain, nothing else scales
     # with K·N).
@@ -618,7 +651,10 @@ def _pilot_tones(
     snr_gate = 10.0 ** (method.snr_gate_db / 10.0)
 
     z_comb = xp.zeros(N, dtype=z_ref.dtype)
-    delta, used = [], []
+    # Build every tone's slow differential phasor c_k first, then batch the
+    # coherence reductions into a single host transfer (no per-tone sync).
+    c_tones: list[Any] = []
+    coh_nums: list[Any] = []
     for k in range(K):
         if k == ref:
             # Self-product: LPF(|z|²) ≈ |A|² + σ²; subtract the floor so the
@@ -630,7 +666,7 @@ def _pilot_tones(
                 xp,
             )
             c_k = xp.clip(xp.real(c_k) - noise[ref], 1e-30, None).astype(z_ref.dtype)
-            coh = 1.0
+            c_tones.append(c_k)
         else:
             # Cross-product: the two tones' noises are independent => the LPF
             # rejects them, so c_k ≈ A_k A_0* - carries |A_k||A_0| and e^{jδ_k}.
@@ -640,7 +676,20 @@ def _pilot_tones(
                 differential_bandwidth,
                 xp,
             )
-            coh = float(xp.mean(xp.abs(c_k))) / np.sqrt(max(sig[k] * sig[ref], 1e-30))
+            c_tones.append(c_k)
+            coh_nums.append(xp.mean(xp.abs(c_k)))
+    coh_nums_host = (
+        to_device(xp.stack(coh_nums), "cpu").astype(np.float64)
+        if coh_nums
+        else np.empty(0, dtype=np.float64)
+    )
+    coh_idx = 0
+    delta, used = [], []
+    for k in range(K):
+        c_k = c_tones[k]
+        if k != ref:
+            coh = float(coh_nums_host[coh_idx]) / np.sqrt(max(sig[k] * sig[ref], 1e-30))
+            coh_idx += 1
             if snr[k] < snr_gate or coh < method.coherence_gate:
                 logger.info(
                     "CPR (pilot-tones): tone %s dropped (SNR=%.1f dB, coherence=%.2f).",

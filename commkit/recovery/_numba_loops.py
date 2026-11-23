@@ -16,6 +16,7 @@ their own precision and widened as they are read.
 import numba
 import numpy as np
 
+_strict = numba.njit(cache=True, nogil=True)
 _fast = numba.njit(cache=True, fastmath=True, nogil=True)
 _parallel = numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
 # A step shared by the kernels, inlined into each before it is compiled.
@@ -346,7 +347,7 @@ def cs_push(n, H, Sy, Sxy, y_old, y):
     return Sy + y, Sxy + np.float64(n) * y
 
 
-@_fast
+@_strict
 def cycle_slip(phi_u, symmetry, history_length, threshold):
     """Detect and correct cycle slips by linear extrapolation (Numba).
 

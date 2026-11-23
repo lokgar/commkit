@@ -851,11 +851,15 @@ def correct_polarization(
     inp = SignalInput(samples, "correct_polarization()")
     x, xp, _ = dispatch(inp.samples)
     if isinstance(how, PolarizationEstimate):
+        if inp.signal is not None and sampling_rate is not None:
+            inp.sampling_rate(sampling_rate)
         track = how
     elif type(how) in _ESTIMATORS:
         fs = inp.sampling_rate(sampling_rate)
         track = _estimate(x, cast(PolarizationMethod, how), fs)
     else:
+        if inp.signal is not None and sampling_rate is not None:
+            inp.sampling_rate(sampling_rate)
         matrix = xp.asarray(how)
         if matrix.ndim != 2:
             raise ValueError(
@@ -884,6 +888,11 @@ def correct_polarization(
     else:
         demuxed = _apply_interpolated_matrix(x, M, track.grid_positions)
     guard = track.edge if trim_edges else 0
+    if 2 * guard >= N:
+        raise ValueError(
+            f"correct_polarization(): trim_edges drops {2 * guard} samples from "
+            f"a record of length {N}."
+        )
     valid = slice(guard, N - guard)
     demuxed = demuxed[:, valid]
     if normalize:

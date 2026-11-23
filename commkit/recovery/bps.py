@@ -84,10 +84,10 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> BlockPhaseEstimate:
     # amplitude-agnostic.
     symbols = normalize(symbols, mode="average_power", axis=-1)
 
-    # Candidate test phases over one ambiguity interval [0, 2π/M).
+    # Candidate test phases over one ambiguity interval [0, 2π/M), in float64.
     M = int(constellation.rotational_symmetry)
     B = num_test_phases
-    candidates = xp.arange(B, dtype=symbols.real.dtype) * (2.0 * np.pi / M / B)
+    candidates = xp.arange(B, dtype=xp.float64) * (2.0 * np.pi / M / B)
 
     N_blocks = _num_blocks(N, block_size)
 

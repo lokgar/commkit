@@ -135,9 +135,8 @@ def _prepare_sequential(
     if state is None:
         n_sym = n_new // stride
         c_tap = center_tap if center_tap is not None else num_taps // 2
-        pad_total = max(0, n_sym * stride - n_new + num_taps - 1)
-        lead = min(c_tap, pad_total)
-        pad_right = pad_total - lead
+        lead = c_tap
+        pad_right = max(0, n_sym * stride + num_taps - 1 - (lead + n_new))
         offset = 0  # position of the new samples relative to symbol 0
     else:
         lead = state.lead
@@ -160,7 +159,7 @@ def _prepare_sequential(
         amp = np.float32(10.0 ** (pilot_gain_db / 20.0))
         smask = np.repeat(pilot_mask.astype(bool), stride)  # per sample of x
         if state is None:
-            samples_np[..., smask] /= amp
+            samples_np[..., : smask.size][..., smask] /= amp
         else:  # the pending samples were de-boosted by the previous call
             new = np.zeros(offset + n_new, dtype=bool)
             new[: smask.size] = smask[: offset + n_new]
@@ -374,16 +373,16 @@ def _inline_cpr(cpr: Any, constellation: Any, function_name: str) -> _InlineCpr 
         mu, beta = PLL().gains  # unused by the BPS path
         test_phases, window, phase_init = cpr.test_phases, cpr.block_size, 0.0
     symmetry = _cpr_symmetry(constellation)
-    angles = np.linspace(
-        0.0, 2.0 * np.pi / symmetry, int(test_phases), endpoint=False, dtype=np.float32
+    angles_f64 = np.linspace(
+        0.0, 2.0 * np.pi / symmetry, int(test_phases), endpoint=False, dtype=np.float64
     )
     return _InlineCpr(
         kind="pll" if isinstance(cpr, PLL) else "bps",
         pll_mu=mu,
         pll_beta=beta,
         phase_init=phase_init,
-        angles=angles,
-        phases_neg=np.exp(-1j * angles).astype(np.complex64),
+        angles=angles_f64,
+        phases_neg=np.exp(-1j * angles_f64).astype(np.complex64),
         window=int(window),
         joint=bool(cpr.joint_channels),
         symmetry=symmetry,

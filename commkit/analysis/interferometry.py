@@ -181,7 +181,9 @@ def _combine_polarizations(z2, sampling_rate: float, xp):
     # Parallel transport: rotate each block's vector into phase with the
     # previous one, so the weights (and the combined phase) stay continuous.
     step = xp.angle(xp.sum(xp.conj(v[:-1]) * v[1:], axis=-1))
-    turn = xp.concatenate([xp.zeros(1), xp.cumsum(step)])
+    turn = xp.concatenate(
+        [xp.zeros(1, dtype=xp.float64), xp.cumsum(step, dtype=xp.float64)]
+    )
     v = v * xp.exp(-1j * turn)[:, None]
 
     # Linear interpolation between the block centers (k + 1/2)·block, held

@@ -204,12 +204,12 @@ def smooth_phase(
 
 
 def correct_cycle_slips(
-    phase: np.ndarray,
+    phase: ArrayType,
     *,
     symmetry: int = 4,
     history: int = 20,
     threshold: float = np.pi / 4,
-) -> np.ndarray:
+) -> ArrayType:
     """Detect and correct cycle slips in a phase trajectory.
 
     After the M-fold unwrap, cycle slips can remain where the unwrap chose
@@ -254,6 +254,26 @@ def correct_cycle_slips(
     A sequential scan per row, Numba-compiled on the CPU; GPU input makes
     one host round trip for the whole array.
     """
+    if (
+        isinstance(symmetry, bool)
+        or not isinstance(symmetry, int | np.integer)
+        or symmetry < 1
+    ):
+        raise ValueError(
+            f"correct_cycle_slips(): symmetry must be an integer >= 1, got {symmetry!r}."
+        )
+    if (
+        isinstance(history, bool)
+        or not isinstance(history, int | np.integer)
+        or history < 1
+    ):
+        raise ValueError(
+            f"correct_cycle_slips(): history must be an integer >= 1, got {history!r}."
+        )
+    if not (np.isfinite(threshold) and threshold > 0):
+        raise ValueError(
+            f"correct_cycle_slips(): threshold must be finite and > 0, got {threshold!r}."
+        )
     phase, xp, _ = dispatch(phase)
     if phase.ndim not in (1, 2):
         raise ValueError(f"phase must be (B,) or (C, B), got shape {phase.shape}.")
@@ -567,6 +587,16 @@ def _resolve_channel_permutation_array(
 
     from scipy.optimize import linear_sum_assignment
 
+    if metric not in ("coherence", "phase_increment"):
+        raise ValueError(
+            f"resolve_channel_permutation(): metric must be 'coherence' or "
+            f"'phase_increment', got {metric!r}."
+        )
+    if num_skip_symbols < 0:
+        raise ValueError(
+            f"resolve_channel_permutation(): num_skip_symbols must be >= 0, "
+            f"got {num_skip_symbols!r}."
+        )
     symbols, xp, _ = dispatch(symbols)
     was_1d = symbols.ndim == 1
     if was_1d:
@@ -577,6 +607,11 @@ def _resolve_channel_permutation_array(
 
     ref = broadcast_channels(xp.asarray(ref_symbols), C, xp, name="ref_symbols")
     n = min(N, ref.shape[-1])
+    if num_skip_symbols >= n:
+        raise ValueError(
+            f"resolve_channel_permutation(): num_skip_symbols={num_skip_symbols} "
+            f"leaves no symbols (n={n})."
+        )
     y = symbols[:, num_skip_symbols:n]
     s = ref[:, num_skip_symbols:n]
 

@@ -25,10 +25,10 @@ def _unit_reference(tx: ArrayType, xp: Any) -> tuple[ArrayType, ArrayType]:
     A reference already at unit power (within 1e-3) is kept as it is; the
     power is measured once and remeasured only after normalizing.
     """
-    pwr = xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True)
+    pwr = xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True, dtype=xp.float64)
     if not xp.allclose(pwr, 1.0, atol=1e-3):
         tx = normalize(tx, axis=-1, mode="average_power")
-        pwr = xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True)
+        pwr = xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True, dtype=xp.float64)
     return tx, pwr
 
 
@@ -175,9 +175,9 @@ def _gain(
     A channel without reference power or correlation gets ``g = 1``.
     ``tx_power`` is ``<|s|^2>`` ``(..., 1)`` when the caller has it.
     """
-    num = xp.abs(xp.mean(rx * xp.conj(tx), axis=-1, keepdims=True))
+    num = xp.abs(xp.mean(rx * xp.conj(tx), axis=-1, keepdims=True, dtype=xp.complex128))
     den = (
-        xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True)
+        xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True, dtype=xp.float64)
         if tx_power is None
         else tx_power
     )

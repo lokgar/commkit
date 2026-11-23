@@ -546,6 +546,13 @@ def cpr_loop(
                 cs_buf_ptr[i] += np.int64(1)
                 if n_b < np.int64(H):
                     cs_buf_n[i] = n_b + np.int64(1)
+                if phi_corr != phi_hat:
+                    if cpr_mode == 1:
+                        pll_phi[i] = phi_corr
+                    else:
+                        bps_prev4[i] = bps_prev4[i] + (phi_corr - phi_hat) * np.float64(
+                            symmetry
+                        )
             else:
                 phi_corr = np.float64(phi_hat)
 
@@ -679,7 +686,7 @@ def rde_loop(
             _store_weights(W, w_hist_out, idx)
 
 
-@_fast
+@_strict
 def cs_block(
     phi_blk,
     phi_corr,

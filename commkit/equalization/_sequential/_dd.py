@@ -694,10 +694,11 @@ def rls(
         phase_out=phase_out,
         tail_trim=tail_trim,
     )
-    result = _log_equalizer_exit(result, name="RLS")
-    result = _check_decision_power(result, constellation, "rls()")
     # A P that lost positive definiteness without tripping the kernel surfaces
-    # as non-finite taps: one sync on the assembled weights catches it.
+    # as non-finite taps: one sync on the assembled weights catches it before
+    # logging or checking decision power.
     if not bool(run.xp.isfinite(result.weights).all()):
         raise RuntimeError(_rls_divergence_message(forgetting_factor, regularization))
+    result = _log_equalizer_exit(result, name="RLS")
+    result = _check_decision_power(result, constellation, "rls()")
     return _attach_equalized_signal(result, sig, state)

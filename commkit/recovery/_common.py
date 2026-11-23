@@ -140,7 +140,8 @@ def _mth_power_geometry(constellation: Any) -> tuple[int, bool, float]:
     project = bool(np.ptp(mag) > 1e-9 * float(np.max(mag)))
     pmf = constellation.pmf
     weights = np.full(pts.size, 1.0 / pts.size) if pmf is None else np.asarray(pmf)
-    z = complex(np.sum(weights * (pts / mag) ** M))
+    unit = np.where(mag > 0, pts / np.where(mag > 0, mag, 1.0), 0.0)
+    z = complex(np.sum(weights * unit**M))
     quantum = 2.0 * np.pi / M
     bias = (float(np.angle(z)) / M) % quantum
     if quantum - bias < 1e-9:  # -0 rounds up to a full quantum

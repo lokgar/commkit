@@ -17,7 +17,7 @@ import numpy as np
 from .. import _fft
 from .._array import as_2d, restore_1d
 from .._overlap_save import ols_apply
-from ..backend import ArrayType, dispatch
+from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_input import S, SignalInput
 from ..core.signal import Signal
 from ..logger import logger
@@ -316,10 +316,11 @@ def apply_taps(
         # _build_padded_samples is backend-generic: pad on the input device
         # instead of round-tripping the full signal through the host.
         shift = 0
+        pad_right = max(0, (n_sym - 1) * sps + num_taps - (c_tap + N))
         padded = _build_padded_samples(
-            x.astype(xp.complex64),
+            x.astype(dtype, copy=False),
             c_tap,
-            n_sym * sps - N + num_taps - 1 - c_tap,
+            pad_right,
             samples_prefix,
             pad_mode,
             _at_eq_norm,
@@ -410,9 +411,28 @@ def estimate_channel(
         the input's device.
     """
     received = SignalInput(samples, "estimate_channel()").samples
-    reference = SignalInput(reference, "estimate_channel()").samples
-    x, xp, _ = dispatch(reference)
-    y = xp.asarray(received)
+    ref_raw = SignalInput(reference, "estimate_channel()").samples
+    y, xp, _ = dispatch(received)
+    x = to_device(ref_raw, "cpu" if xp is np else "gpu")
+    if x.shape != y.shape:
+        raise ValueError(
+            f"estimate_channel(): samples shape {y.shape} does not match "
+            f"reference shape {x.shape}."
+        )
+    if nfft < 2:
+        raise ValueError(f"estimate_channel(): nfft must be >= 2, got {nfft!r}.")
+    if max_windows < 1:
+        raise ValueError(
+            f"estimate_channel(): max_windows must be >= 1, got {max_windows!r}."
+        )
+    if regularization < 0:
+        raise ValueError(
+            f"estimate_channel(): regularization must be >= 0, got {regularization!r}."
+        )
+    if num_taps is not None and num_taps < 1:
+        raise ValueError(
+            f"estimate_channel(): num_taps must be >= 1, got {num_taps!r}."
+        )
     single = x.ndim == 1
     if single:
         x, y = x[None, :], y[None, :]

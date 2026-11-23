@@ -119,9 +119,10 @@ def _build_padded_samples(
     samples_arr, xp, _ = dispatch(samples_np)
     if samples_prefix is not None:
         # Normalize prefix by the same factor used for the main block.
+        work_dtype = samples_arr.dtype
         prefix = xp.ascontiguousarray(
             to_device(samples_prefix, "cpu" if xp is np else "gpu"),
-            dtype=xp.complex64,
+            dtype=work_dtype,
         )
         if prefix.ndim == 1:
             prefix = prefix[None, :]
@@ -135,13 +136,13 @@ def _build_padded_samples(
             if prefix.shape[0] == 1:
                 prefix = prefix / float(nf_arr[0])
             else:
-                prefix = prefix / xp.asarray(nf_arr)[:, None]
+                prefix = prefix / xp.asarray(nf_arr, dtype=prefix.real.dtype)[:, None]
         left_pad = prefix[:, -pad_left:]
         if samples_arr.ndim == 1:
             samples_2d = samples_arr[None, :]
         else:
             samples_2d = samples_arr
-        right_zero = xp.zeros((samples_2d.shape[0], pad_right), dtype=xp.complex64)
+        right_zero = xp.zeros((samples_2d.shape[0], pad_right), dtype=work_dtype)
         padded = xp.concatenate([left_pad, samples_2d, right_zero], axis=-1)
         return padded
     if pad_mode == "zeros":

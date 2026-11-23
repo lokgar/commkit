@@ -165,9 +165,9 @@ def _vv_observation_variance(
     points (pmf-weighted) and the noise, by 2-D Gauss-Hermite quadrature.
     """
     pts = np.asarray(constellation.points, dtype=np.complex128)
-    pts = pts / np.sqrt(np.mean(np.abs(pts) ** 2))
     pmf = constellation.pmf
     w_pts = np.full(pts.size, 1.0 / pts.size) if pmf is None else np.asarray(pmf)
+    pts = pts / np.sqrt(float(np.dot(w_pts, np.abs(pts) ** 2)))
     t, w = np.polynomial.hermite.hermgauss(24)
     n = np.sqrt(1.0 / snr_lin) * (t[:, None] + 1j * t[None, :]).ravel()
     w_n = (w[:, None] * w[None, :]).ravel() / np.pi
@@ -198,12 +198,13 @@ def _tikhonov(
 
     snr_lin = 10.0 ** (method.snr_db / 10.0)
     linewidth_symbol_periods = method.linewidth / ctx.need_sampling_rate(method)
+    joint = method.joint_channels and C > 1
     # The long-run increment of the block means, not the variance of adjacent
     # differences (2/3 of it, correlated); see the class Notes.
     sigma_p2 = float(2.0 * np.pi * linewidth_symbol_periods * block_size)
-    sigma_v2 = _vv_observation_variance(constellation, M, project, snr_lin, block_size)
+    eff_block = C * block_size if joint else block_size
+    sigma_v2 = _vv_observation_variance(constellation, M, project, snr_lin, eff_block)
 
-    joint = method.joint_channels and C > 1
     phi_u = _vv_block_phase(
         symbols, xp, M, project, bias, block_size, method.joint_channels
     )

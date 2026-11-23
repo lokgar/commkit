@@ -434,8 +434,8 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmFit, fs: float) -> DshFmFitEsti
         # carrier's distance from DC and Nyquist; beyond it the analytic
         # signal has no support and the PSD reads fake-low.  Those bins are
         # neither fitted nor reported.
-        fh = float(np.min(np.abs(np.asarray(f_hat))))
-        support = min(fh, fs / 2.0 - fh)
+        abs_f = np.abs(np.asarray(f_hat))
+        support = float(np.min(np.minimum(abs_f, fs / 2.0 - abs_f)))
         fmax = min(fmax, support)
     band = (f_cpu > 0) & (f_cpu >= fmin) & (f_cpu <= fmax)
     if int(band.sum()) < 8:

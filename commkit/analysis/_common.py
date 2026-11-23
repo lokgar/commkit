@@ -341,9 +341,12 @@ def _whittle_fit(
     theta = np.zeros(X.shape[1])
     for _ in range(max_rounds):
         Pk, Xk = P[kept], X[kept]
+        if Pk.size == 0 or float(np.max(Pk)) <= 0.0:
+            break
+        Pk_safe = np.maximum(Pk, 1e-300)
         # Start from relative least squares (weights 1/P), then reweight by
         # the model: the fixed point solves the Whittle score equation.
-        theta = nnls(Xk / Pk[:, None], np.ones(Pk.size))[0]
+        theta = nnls(Xk / Pk_safe[:, None], np.ones(Pk.size))[0]
         for _ in range(max_iter):
             M = np.maximum(Xk @ theta, 1e-300)
             new = nnls(Xk / M[:, None], Pk / M)[0]
@@ -353,7 +356,7 @@ def _whittle_fit(
                 break
         threshold = chi2.isf(alpha / P.size, dof) / dof
         spurs = kept & (P > threshold * np.maximum(X @ theta, 1e-300))
-        if not spurs.any():
+        if not spurs.any() or int((kept & ~spurs).sum()) < X.shape[1]:
             break
         kept &= ~spurs
     return theta, kept
