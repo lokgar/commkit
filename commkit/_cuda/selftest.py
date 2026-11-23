@@ -18,7 +18,12 @@ def _selftest_scale_factory(dtype: str = "float32") -> Callable:
 
     from . import compiler
 
-    ctype = {"float32": "float", "float64": "double"}[dtype]
+    ctypes = {"float32": "float", "float64": "double"}
+    if dtype not in ctypes:
+        raise ValueError(
+            f"selftest_scale: dtype must be 'float32' or 'float64', got {dtype!r}."
+        )
+    ctype = ctypes[dtype]
     kern = compiler.get_raw_kernel("selftest", f"selftest_scale<{ctype}>")
     np_dtype = cp.dtype(dtype)
     block = 256
@@ -29,6 +34,8 @@ def _selftest_scale_factory(dtype: str = "float32") -> Callable:
         compiler.check_arrays(("x", x, np_dtype, (None,) * x.ndim))
         y = cp.empty_like(x)
         n = x.size
+        if n == 0:
+            return y
         grid = (n + block - 1) // block
         kern((grid,), (block,), (x, y, np_dtype.type(alpha), cp.int64(n)))
         return y

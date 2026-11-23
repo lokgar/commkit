@@ -283,3 +283,34 @@ def test_curves_on_the_gpu_match_the_cpu(backend_device: str) -> None:
     np.testing.assert_allclose(
         to_device(here.extrinsic, "cpu"), cpu.extrinsic, atol=0.02
     )
+
+
+def test_demapper_exit_curve_uses_constellation_is_complex() -> None:
+    """Complex BPSK uses complex noise variance, not half-power real noise."""
+    bpsk_c = Constellation(np.array([-1.0 + 0.0j, 1.0 + 0.0j]))
+    bpsk_r = Constellation.pam(2)
+    # Same channel Es/N0 = 3 dB: complex noise_var = 0.5, real noise_var = 0.25.
+    c_curve = demapper_exit_curve(
+        bpsk_c, noise_var=0.5, num_points=3, num_symbols=4000, rng=0
+    )
+    r_curve = demapper_exit_curve(
+        bpsk_r, noise_var=0.25, num_points=3, num_symbols=4000, rng=0
+    )
+    np.testing.assert_allclose(c_curve.extrinsic, r_curve.extrinsic, atol=0.03)
+
+
+def test_decoder_exit_curve_handles_infinite_llrs() -> None:
+    """Deterministic zero bits produce +inf LLRs without NaN or zeroing MI."""
+    import math
+
+    from commkit.coding import LinearBlockCode, MaximumLikelihood
+
+    code = LinearBlockCode([[1, 0]])
+    curve = decoder_exit_curve(
+        code, method=MaximumLikelihood(), num_points=3, num_blocks=2000, rng=0
+    )
+    # Bit 0 has extrinsic LLR 0 (uniform 0/1) and bit 1 is always 0 (+inf LLR),
+    # so p0 = (1/3 at 0, 2/3 at +inf), p1 = (1 at 0): symmetric MI is
+    # 1/6 + 1/2 * log2(3/2) ~= 0.45915 bits.
+    expected = 1.0 / 6.0 + 0.5 * math.log2(1.5)
+    np.testing.assert_allclose(curve.extrinsic, expected, atol=0.03)

@@ -60,11 +60,15 @@ def _llr_factory() -> Callable:
         """LLRs of the ``(n,)`` complex64 symbols ``x``, shape ``(n, k)``."""
         if not 1 <= k <= LLR_MAX_K:
             raise ValueError(f"bits per symbol must be in [1, {LLR_MAX_K}], got {k}")
+        compiler.check_arrays(
+            ("x", x, cp.complex64, (None,)),
+            ("points", points, cp.complex64, (None,)),
+        )
         n = x.shape[0]
         M = points.shape[0]
+        if M < 1:
+            raise ValueError(f"points must be non-empty, got M={M}")
         compiler.check_arrays(
-            ("x", x, cp.complex64, (n,)),
-            ("points", points, cp.complex64, (M,)),
             ("log_pmf", log_pmf, cp.float32, (M,)),
             ("labels", labels, cp.int32, (M,)),
         )
@@ -106,20 +110,25 @@ def _llr_separable_factory() -> Callable:
         ``re`` and ``im`` are each ``(levels, log_prior, labels, positions)``
         of one axis: float32, float32 and int32 ``(L,)``, int32 ``(k_axis,)``.
         """
+        compiler.check_arrays(("x", x, cp.complex64, (None,)))
         n = x.shape[0]
-        checks = [("x", x, cp.complex64, (n,))]
+        checks: list[tuple[str, Any, Any, tuple[int, ...]]] = []
         axis_args: list[Any] = []
         for name, (lev, logp, lab, pos) in (("re", re), ("im", im)):
+            compiler.check_arrays(
+                (f"{name} levels", lev, cp.float32, (None,)),
+                (f"{name} positions", pos, cp.int32, (None,)),
+            )
             L, kb = lev.shape[0], pos.shape[0]
+            if L < 1:
+                raise ValueError(f"the {name} axis needs at least 1 level, got {L}")
             if not 1 <= kb <= LLR_MAX_K:
                 raise ValueError(
                     f"bits of the {name} axis must be in [1, {LLR_MAX_K}], got {kb}"
                 )
             checks += [
-                (f"{name} levels", lev, cp.float32, (L,)),
                 (f"{name} log prior", logp, cp.float32, (L,)),
                 (f"{name} labels", lab, cp.int32, (L,)),
-                (f"{name} positions", pos, cp.int32, (kb,)),
             ]
             axis_args += [lev, logp, lab, pos, cp.int32(L), cp.int32(kb)]
         compiler.check_arrays(*checks)
@@ -164,12 +173,15 @@ def _llr_separable_maxlog_factory() -> Callable:
         one axis: float32 and int32 ``(L,)``, int32 ``(k_axis, L)`` twice,
         int32 ``(k_axis,)``; ``L >= 2`` equally spaced ascending levels.
         """
+        compiler.check_arrays(("x", x, cp.complex64, (None,)))
         n = x.shape[0]
-        checks: list[tuple[str, Any, Any, tuple[int, ...]]] = [
-            ("x", x, cp.complex64, (n,))
-        ]
+        checks: list[tuple[str, Any, Any, tuple[int, ...]]] = []
         axis_args: list[Any] = []
         for name, (lev, lab, lo, hi, pos) in (("re", re), ("im", im)):
+            compiler.check_arrays(
+                (f"{name} levels", lev, cp.float32, (None,)),
+                (f"{name} positions", pos, cp.int32, (None,)),
+            )
             L, kb = lev.shape[0], pos.shape[0]
             if not 1 <= kb <= LLR_MAX_K:
                 raise ValueError(
@@ -178,11 +190,9 @@ def _llr_separable_maxlog_factory() -> Callable:
             if L < 2:
                 raise ValueError(f"the {name} axis needs at least 2 levels, got {L}")
             checks += [
-                (f"{name} levels", lev, cp.float32, (L,)),
                 (f"{name} labels", lab, cp.int32, (L,)),
                 (f"{name} lo", lo, cp.int32, (kb, L)),
                 (f"{name} hi", hi, cp.int32, (kb, L)),
-                (f"{name} positions", pos, cp.int32, (kb,)),
             ]
             axis_args += [lev, lab, lo, hi, pos, cp.int32(L), cp.int32(kb)]
         compiler.check_arrays(*checks)

@@ -262,6 +262,32 @@ class TestStaircase:
         xpt.assert_array_equal(res.bits, u)
         assert res.valid.tolist() == [True]
 
+    def test_rejects_miscorrections_into_known_zeros(self, xp: Any) -> None:
+        """A BCH miscorrection flipping a known-zero position in B_-1 is reverted."""
+        code = StaircaseCode(1)
+        u = xp.zeros(code.k, dtype=np.int8)
+        c = encode(u, code=code)
+        # Find a 5-error pattern in the right half of row 10 of B_0 that causes
+        # _COMPONENT.correct to miscorrect into the known-zero left half.
+        rng = np.random.default_rng(0)
+        word = np.zeros(_COMPONENT.n, dtype=np.int8)
+        pattern = None
+        for _ in range(500):
+            cand = word.copy()
+            pos = rng.choice(np.arange(512, _COMPONENT.n), 5, replace=False)
+            cand[pos] ^= 1
+            fixed, ok = _COMPONENT.correct(cand[None])
+            if bool(ok[0]) and bool(fixed[0, :512].any()):
+                pattern = pos - 512
+                break
+        assert pattern is not None
+        noisy = c.copy()
+        noisy[10 * 510 + xp.asarray(pattern)] ^= 1
+        res = decode(noisy, code=code, method=HardIterations(1))
+        # The known-zero-violating miscorrection must not inject extra errors into B_0.
+        flips = int((res.bits != u).sum())
+        assert flips <= len(pattern)
+
     def test_validation(self) -> None:
         with pytest.raises(ValueError, match="blocks_per_frame"):
             StaircaseCode(0)

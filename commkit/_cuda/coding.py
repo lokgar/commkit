@@ -43,6 +43,11 @@ def _ldpc_layered_factory(sum_product: bool = False) -> Callable:
             ("layer_ptr", layer_ptr, cp.int32, (None,)),
         )
         B, N = app.shape
+        if row_ptr.size < 2 or layer_ptr.size < 2:
+            raise ValueError(
+                f"row_ptr and layer_ptr need at least 2 entries, got "
+                f"{row_ptr.size} and {layer_ptr.size}"
+            )
         m, E = row_ptr.size - 1, cols.size
         iters = cp.zeros(B, dtype=cp.int32)
         valid = cp.zeros(B, dtype=cp.uint8)
@@ -90,13 +95,22 @@ def _algebraic_correct_factory() -> Callable:
         binary: bool,
     ) -> Any:
         """Correct ``words`` ``(B, n m)`` int8 in place; ``valid`` ``(B,)``."""
-        B = words.shape[0]
-        n = locator_logs.size
+        if t < 1:
+            raise ValueError(f"t must be >= 1, got {t}")
+        if m < 1:
+            raise ValueError(f"m must be >= 1, got {m}")
         compiler.check_arrays(
-            ("s", s, cp.int64, (B, 2 * t)),
+            ("words", words, cp.int8, (None, None)),
+            ("locator_logs", locator_logs, cp.int64, (None,)),
             ("exp", exp, cp.int64, (None,)),
             ("log", log, cp.int64, (None,)),
-            ("locator_logs", locator_logs, cp.int64, (None,)),
+        )
+        B = words.shape[0]
+        n = locator_logs.size
+        if log.size < 2:
+            raise ValueError(f"log table must have at least 2 entries, got {log.size}")
+        compiler.check_arrays(
+            ("s", s, cp.int64, (B, 2 * t)),
             ("words", words, cp.int8, (B, n * m)),
         )
         if exp.size != 2 * log.size:

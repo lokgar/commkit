@@ -22,7 +22,10 @@ def _bps_min_d2_factory(mode: str = "table", return_argmin: bool = False) -> Cal
 
     from . import compiler
 
-    mode_id = {"table": 0, "grid": 1}[mode]
+    modes = {"table": 0, "grid": 1}
+    if mode not in modes:
+        raise ValueError(f"bps_min_d2: mode must be 'table' or 'grid', got {mode!r}.")
+    mode_id = modes[mode]
     if mode_id == 1 and return_argmin:
         raise ValueError("return_argmin is only supported in TABLE mode")
     kern = compiler.get_raw_kernel(
@@ -144,7 +147,11 @@ def _cs_block_factory() -> Callable:
         ``max_block`` symbols.
         """
         C = cs_buf_ptr.shape[0] if cs_buf_ptr.ndim == 1 else -1
+        if C < 1:
+            raise ValueError(f"cs_block: expected at least 1 channel, got C={C}")
         cs_H = int(cs_H)
+        if cs_H < 1:
+            raise ValueError(f"cs_block: cs_H must be >= 1, got {cs_H}")
         compiler.check_arrays(
             ("cs_buf_y", cs_buf_y, cp.float64, (C, cs_H)),
             ("cs_buf_ptr", cs_buf_ptr, cp.int64, (C,)),
@@ -219,15 +226,17 @@ def _bps_anchor_factory() -> Callable:
         """Anchored phase ``(C, n)`` float64 and the new ``(C, K-1)`` history."""
         compiler.check_arrays(("y", y, cp.complex64, (None, None)))
         C, n = y.shape
+        if C < 1:
+            raise ValueError("y must have at least one channel")
         if n < 1:
             raise ValueError("y must have at least one training column")
-        H = hist.shape[-1]
         compiler.check_arrays(
             ("d", d, cp.complex64, (C, n)),
-            ("hist", hist, cp.complex64, (C, H)),
+            ("hist", hist, cp.complex64, (C, None)),
             ("offset4", offset4, cp.float64, (C,)),
             ("prev4", prev4, cp.float64, (C,)),
         )
+        H = hist.shape[-1]
         phi = cp.empty((C, n), dtype=cp.float64)
         hist_out = cp.empty((C, H), dtype=cp.complex64)
         total = cp.zeros(n if joint else 0, dtype=cp.complex64)

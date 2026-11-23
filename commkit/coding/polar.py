@@ -29,7 +29,7 @@ from typing import Any
 import numpy as np
 
 from .._array import freeze_host
-from ..backend import ArrayType, _to_host, dispatch, to_device
+from ..backend import ArrayType, _device_tables, _to_host, dispatch, to_device
 from .base import _CODECS, _Code, _Codec, _Decoded, _encode_blocks, _numba
 from .crc import CRC
 
@@ -275,7 +275,8 @@ def _encode(code: PolarCode, bits: ArrayType) -> ArrayType:
     _, xp, _ = dispatch(bits)
     payload = bits if code.crc is None else _encode_blocks(code.crc, bits)
     u = xp.zeros((bits.shape[0], code.length), dtype=np.int8)
-    u[:, xp.asarray(code.info_positions)] = payload
+    (pos,) = _device_tables(code, "info_positions", xp, lambda: (code.info_positions,))
+    u[:, pos] = payload
     return _transform(u)
 
 

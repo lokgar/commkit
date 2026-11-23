@@ -82,7 +82,8 @@ class GraphRunner:
     def __exit__(self, *exc: object) -> None:
         if self._stream is not None:
             self._stream.__exit__(*exc)
-            self._stream.synchronize()
+            if exc[0] is None:
+                self._stream.synchronize()
 
     def run(self, key: Hashable, body: Callable[[], Any]) -> Any:
         """Run ``body()`` for ``key``; ``None`` or ``False`` runs it eagerly.
@@ -100,6 +101,7 @@ class GraphRunner:
         self._stream.begin_capture()
         try:
             out = body()
+            graph = self._stream.end_capture()
         except BaseException as exc:
             with contextlib.suppress(Exception):
                 self._stream.end_capture()
@@ -107,7 +109,6 @@ class GraphRunner:
                 f"{self.name}: CUDA-graph capture failed; the captured body must "
                 "only launch work on fixed buffers"
             ) from exc
-        graph = self._stream.end_capture()
         self._graphs[key] = graph
         graph.launch()
         return out

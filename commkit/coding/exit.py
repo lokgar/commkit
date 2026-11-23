@@ -532,10 +532,10 @@ def demapper_exit_curve(
             f"{name}: the constellation is shaped; the demapper's a-priori model "
             "assumes independent bits, which holds for uniform symbols only."
         )
-    real = not np.any(np.asarray(constellation.points).imag)
+    real = not constellation.is_complex
     if (noise_var is None) == (esn0_db is None):
         raise ValueError(f"{name}: give one of noise_var and esn0_db.")
-    es = float(np.mean(np.abs(constellation.points) ** 2))
+    es = constellation.power()
     if noise_var is None:
         n0 = es / 10 ** (float(esn0_db) / 10)  # type: ignore[arg-type]
         nv = n0 / 2 if real else n0
@@ -897,7 +897,10 @@ def _information(llrs: ArrayType, bits: ArrayType) -> float:
     x, xp, _ = dispatch(llrs)
     x = x.reshape(-1)
     b = bits.reshape(-1)
-    lim = float(xp.percentile(xp.abs(x), 99.9)) or 1.0
+    finite = x[xp.isfinite(x)]
+    lim = float(xp.percentile(xp.abs(finite), 99.9)) if finite.size else 1.0
+    if not (np.isfinite(lim) and lim > 0.0):
+        lim = 1.0
     x = xp.clip(x, -lim, lim)
     edges = xp.linspace(-lim, lim, _BINS + 1)
     h0 = to_device(xp.histogram(x[b == 0], bins=edges)[0], "cpu").astype(np.float64)

@@ -328,6 +328,16 @@ def _decode_staircase(
             word = word_of(i)
             fixed, _ok = _COMPONENT.correct(word.reshape(-1, _COMPONENT.n))
             fixed = fixed.reshape(rows, _ROWS, _COMPONENT.n)
+            # Reject any row miscorrection that flips a known-zero position:
+            # shortened left halves of rows 0..1 on every block, all of B_{-1}
+            # on block 0, and the terminating block's zero information bits.
+            bad = xp.zeros((rows, _ROWS), dtype=bool)
+            bad[:, :2] |= fixed[:, :2, :_ROWS].any(axis=2)
+            if i == 0:
+                bad |= fixed[:, :, :_ROWS].any(axis=2)
+            if i == num:
+                bad |= fixed[:, :, _ROWS : _ROWS + _INFO].any(axis=2)
+            fixed = xp.where(bad[:, :, None], word, fixed)
             changed |= (fixed != word).any()
             blocks[:, i] = fixed[:, :, _ROWS:]
             if i > 0:
