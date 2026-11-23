@@ -4,6 +4,44 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.10.1] - 2026-11-23
+
+Bug fixes and alignment cleanups across the library from a full audit: stricter precision and host-sync hygiene, staircase and EXIT-chart correctness fixes, SI tick formatting, lazy `filtering` import, and tightened input validation. No public signatures changed.
+
+### Fixed
+
+- **Core, I/O and mapping**:
+  - `import commkit` no longer eagerly imports `commkit.filtering` (nor Numba). `Preamble.symbols` and cached `SingleCarrierFrame` payload/pilot arrays are now read-only.
+  - `save_npz` and `load_npz` append `.npz` when missing without clobbering earlier dots in the filename (e.g. `run_1.5GHz` saves to `run_1.5GHz.npz`).
+  - `optimal_nu` and `Constellation.shaped(entropy=...)` reject entropies at or below the minimum-energy shell limit `log2(m_min)` instead of overflowing and returning the wrong entropy.
+  - `compute_llr` and `Constellation.llr` accept Python lists/sequences, reject non-positive or non-finite `noise_var`, and `Constellation._nearest` preserves double precision for non-square constellations and no longer divides by zero on integer inputs.
+  - `shape_pulse` handles integer symbol inputs and complex taps without truncation; `to_device` and `db_to_linear` reject foreign array types with `TypeError`; `validate_array` accepts NumPy scalars; `set_log_level` validates level names with `ValueError`.
+- **Front-end DSP (`filtering`, `impairments`, `multirate`, `spectral`, `smoothing`, `timing`, `frequency`)**:
+  - `_numba_interpolation.interp` matches the GPU kernel when `p - floor(p)` rounds to `1.0` (e.g. `p = -1e-17`), preventing `NaN` outputs; empty `interpolate_piecewise` inputs now behave identically on CPU and GPU.
+  - `fir_filter(..., periodic=True)` folds taps on the data's device (no record-length host allocation on GPU), handles empty inputs and complex taps on real samples cleanly; `iir_filter` rejects empty `(0, 6)` SOS arrays; `fir_taps` validates `btype`.
+  - `apply_frequency_offset` accepts GPU `offset` arrays; `correct_frequency_offset` validates channel counts instead of broadcasting 1-D inputs into 2-D; `apply_coherent_detection` avoids catastrophic cancellation when LO RIN dominates; `add_pilot_tone` delivers the requested PSR on real inputs (`sqrt(2)` cosine amplitude); `decimate(..., factor=1)` succeeds with the default method.
+  - `correct_timing(mode="zero")` handles scalar shifts `abs(shift) >= N`; `correct_sampling_clock_offset` allows odd `sps` when given a `SamplingClockOffsetEstimate`; conflicting `Signal` properties are now checked in `apply_polarization_mixing` (`drift_rate=0`), `apply_awgn` (`snr_db`/`noise_var`), `estimate_timing` (array template) and `correct_polarization` (estimate/matrix).
+  - Fixed the dispersion sign in `apply_fiber_propagation`'s NLSE docstring to match the code (`+ j β₂/2`).
+- **Receiver DSP (`equalization`, `recovery`, `metrics`, `analysis`)**:
+  - `cycle_slip` and `cs_block` Numba kernels compile without `fastmath` so running sums are not reassociated; inline cycle-slip repair in `cpr_loop` updates `bps_prev4`/`pll_phi` after a slip.
+  - `apply_taps` preserves `complex128` with `samples_prefix` / non-zero `pad_mode` and avoids NEP 50 promotion on MIMO prefixes; `block_lms` stores `phase_trajectory` in `float64`, keeps full BPS window length across short/final blocks and preserves `cs_H` across continuation calls.
+  - Adaptive equalizers align `lead = c_tap` and pilot de-boosting cleanly when `N % sps != 0`; `estimate_channel` dispatches on `samples` (not `reference`); `rls` checks weight finiteness before logging decision-power warnings.
+  - `Tikhonov` uses PMF-weighted power for shaped constellations and accounts for `C * block_size` in joint-channel mode; `_mth_power_geometry` handles constellations with a point at `0+0j`; `PilotTones` batches coherence host transfers out of the per-tone loop and validates Nyquist/channel bounds; BPS candidate angles are formed in `float64`; metrics `_unit_reference` and `_gain` accumulate in double precision; `dsh_phase` accumulates parallel transport in `float64`; `_dsh_fm_psd` computes real-beat support across all MIMO channels; `_whittle_fit` guards zero PSD bins.
+- **Channel coding and CUDA wrappers**:
+  - `StaircaseCode` decoding rejects BCH row miscorrections that flip known-zero positions instead of injecting errors into the frame.
+  - `demapper_exit_curve` detects real constellations via `constellation.is_complex` (fixing a 3 dB noise-variance mismatch on complex BPSK); `decoder_exit_curve` handles infinite LLRs without `NaN` or zeroing mutual information.
+  - `PolarCode` encoding caches `info_positions` on the device via `_device_tables`.
+  - CUDA launch wrappers guard empty/zero grids and array dimensions and raise `ValueError` on invalid specializations; `GraphRunner` captures `end_capture()` failures with context and avoids masking exceptions in `__exit__`.
+- **Plotting**:
+  - `_SIAxisFormatter` picks decimal precision from the scaled tick values instead of only the tick step, fixing duplicate/rounded labels on offset ticks (e.g. `[0.5, 1.5, 2.5] MHz`).
+  - `plot_frequency_offset_blockwise_result` reduces and decimates on-device (no full sample-rate GPU→CPU copy) and handles multi-channel estimates cleanly.
+  - `plot_llr_distribution` moves `bits` to `llrs`'s device; `plot_constellation(..., overlay_reference=True)` validates before opening a figure; `plot_channel_correction` titles the combined response `|W·H(f)|` and validates `nfft >= len(h)`; `plot_dsh_beat_psd` floors zero PSD bins; `plot_eye_diagram`, `plot_frequency_offset_spectrum`, `plot_psd`, `plot_time_domain`, `plot_filter_response`, `plot_pilot_tone_phase_estimate` and `plot_timing_correlation` tighten axis, legend and argument validation.
+
+### Development
+
+- CI `kernel-coverage` `--include` list updated to cover all current Numba kernel modules (`coding/_numba_loops.py`, `mapping/_numba_llr.py`, `recovery/_numba_loops.py`, `equalization/_numba_loops.py`, `timing/_numba_loops.py`, `_numba_interpolation.py`, `_numba_frequency.py`; 99 % coverage).
+- Strict mypy enabled for `commkit.timing.*`; `scripts/sanitize.sh` covers `test_linear_codes.py` and `test_gf2.py` and propagates non-zero exit codes; `benchmarks/conftest.py` fails on broken CuPy or missing CuPy under `--device=gpu`.
+
 ## [3.10.0] - 2026-11-20
 
 Plots for both backgrounds and for comparisons: `apply_default_theme(dark=False)` adds a light theme, and every plot takes its colors, color maps and sizes from the current style, so guides stay visible on white and under a style of your own. `relative=True` draws filter responses, spectra, spectrograms and eyes relative to their peaks, `annotations=True` adds -3 dB, half-symbol-rate, symbol-instant and final-value guides, and `plot_filter_response` draws an FIR filter as `fir_filter` applies it. The group delay of linear-phase filters is exact, so its plot is flat instead of spiking at the stopband zeros. Eight notebooks show the new features.
@@ -670,7 +708,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.10.0...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.10.1...HEAD
+[3.10.1]: https://github.com/lokgar/commkit/compare/v3.10.0...v3.10.1
 [3.10.0]: https://github.com/lokgar/commkit/compare/v3.9.0...v3.10.0
 [3.9.0]: https://github.com/lokgar/commkit/compare/v3.8.0...v3.9.0
 [3.8.0]: https://github.com/lokgar/commkit/compare/v3.7.1...v3.8.0
