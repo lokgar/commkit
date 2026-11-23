@@ -182,7 +182,7 @@ class SignalInput(Generic[S]):
                     "(domain='OPT', center_frequency > 0)."
                 )
             return float(supplied)
-        if supplied is not None and abs(supplied - carrier) > 1e-4 * carrier:
+        if supplied is not None and not (abs(supplied - carrier) <= 1e-4 * carrier):
             raise ValueError(
                 f"{self.function_name}: center_wavelength_nm={supplied!r} conflicts "
                 f"with the optical Signal's carrier, {carrier:.3f} nm at "

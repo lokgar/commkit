@@ -193,7 +193,10 @@ def db_to_linear(db: ArrayType | float, *, power: bool = True) -> ArrayType | fl
         The linear ratio, same type as ``db``.
     """
     exponent = 10.0 if power else 20.0
-    return 10.0 ** (db / exponent)
+    if isinstance(db, int | float | np.integer | np.floating):
+        return float(10.0 ** (float(db) / exponent))
+    x, _, _ = dispatch(db)
+    return 10.0 ** (x / exponent)
 
 
 def linear_to_db(x: ArrayType, *, power: bool = True) -> ArrayType:

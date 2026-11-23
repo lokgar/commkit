@@ -35,6 +35,20 @@ class _ColorFormatter(logging.Formatter):
         logging.CRITICAL: BOLD_RED,
     }
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._formatters = {
+            lvl: logging.Formatter(
+                f"{color}{self.FORMAT}{self.RESET}",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+            for lvl, color in self.LEVEL_COLORS.items()
+        }
+        self._default_formatter = logging.Formatter(
+            f"{self.RESET}{self.FORMAT}{self.RESET}",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+
     def format(self, record: logging.LogRecord) -> str:
         """Format the log record with ANSI color codes.
 
@@ -48,11 +62,7 @@ class _ColorFormatter(logging.Formatter):
         str
             The formatted log message with embedded ANSI escape sequences.
         """
-        log_color = self.LEVEL_COLORS.get(record.levelno, self.RESET)
-        formatter = logging.Formatter(
-            f"{log_color}{self.FORMAT}{self.RESET}",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
+        formatter = self._formatters.get(record.levelno, self._default_formatter)
         return formatter.format(record)
 
 
@@ -62,6 +72,17 @@ class _ColorFormatter(logging.Formatter):
 # warnings stay visible; INFO/DEBUG diagnostics appear once the application
 # configures logging or calls ``set_log_level``.
 logger = logging.getLogger("commkit")
+
+_LEVEL_NAMES = {
+    "CRITICAL": logging.CRITICAL,
+    "FATAL": logging.FATAL,
+    "ERROR": logging.ERROR,
+    "WARN": logging.WARNING,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+    "NOTSET": logging.NOTSET,
+}
 
 
 def set_log_level(level: int | str) -> None:
@@ -80,7 +101,17 @@ def set_log_level(level: int | str) -> None:
         A standard logging level, e.g. ``logging.DEBUG`` or ``"INFO"``.
     """
     if isinstance(level, str):
-        level = getattr(logging, level.upper())
+        resolved = _LEVEL_NAMES.get(level.upper())
+        if resolved is None:
+            raise ValueError(
+                f"set_log_level(): unknown level {level!r}; expected one of "
+                f"{sorted(_LEVEL_NAMES)}."
+            )
+        level = resolved
+    elif isinstance(level, bool) or not isinstance(level, int):
+        raise ValueError(
+            f"set_log_level(): level must be a logging level int or str, got {level!r}."
+        )
     logger.setLevel(level)
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)

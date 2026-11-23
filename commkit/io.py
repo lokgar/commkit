@@ -53,11 +53,10 @@ import numpy as np
 
 from . import backend as _backend
 from . import core as _core
-from . import filtering
 from .core import Reference, Signal
 from .core._signal_input import require_device
 from .logger import logger
-from .mapping import Constellation
+from .mapping.constellation import Constellation
 
 __all__ = ["load_npz", "save_npz"]
 
@@ -121,22 +120,22 @@ def save_npz(
     """
     path = Path(path)
     if path.suffix != ".npz":
-        path = path.with_suffix(".npz")
+        path = path.with_name(path.name + ".npz")
 
     # -------------------------------------------------------------------------
     # Collect arrays
     # -------------------------------------------------------------------------
-    arrays: dict[str, Any] = {"samples": _backend.to_device(signal.samples, "CPU")}
+    arrays: dict[str, Any] = {"samples": _backend._to_host(signal.samples)}
 
     meta: dict = {f: getattr(signal, f) for f in _META_FIELDS}
 
     ref = signal.reference
     if ref is not None:
-        arrays["reference_symbols"] = _backend.to_device(ref.symbols, "CPU")
+        arrays["reference_symbols"] = _backend._to_host(ref.symbols)
         if ref.bits is not None:
-            arrays["reference_bits"] = _backend.to_device(ref.bits, "CPU")
+            arrays["reference_bits"] = _backend._to_host(ref.bits)
         if ref.info_bits is not ref.bits:
-            arrays["reference_info_bits"] = _backend.to_device(ref.info_bits, "CPU")
+            arrays["reference_info_bits"] = _backend._to_host(ref.info_bits)
             arrays["reference_code_block"] = np.asarray(ref.code_block, np.int64)
         meta["reference_code"] = _put_code(ref.code, "reference_code", arrays)
 
@@ -338,7 +337,7 @@ def load_npz(
     device = require_device(device, "load_npz()")
     path = Path(path)
     if path.suffix != ".npz":
-        path = path.with_suffix(".npz")
+        path = path.with_name(path.name + ".npz")
 
     # Metadata is stored as plain unicode arrays, so pickle is never needed:
     # loading an untrusted archive cannot execute code.
@@ -379,6 +378,8 @@ def _read_signal(data: Any, path: Path) -> Signal:
         )
     kwargs["constellation"] = _get_constellation("constellation", data, meta)
     if meta["pulse"] is not None:
+        from . import filtering
+
         pulse_fields = dict(meta["pulse"])
         pulse_type = pulse_fields.pop("type")
         if pulse_type not in _PULSE_TYPES:
@@ -420,20 +421,32 @@ def _read_signal(data: Any, path: Path) -> Signal:
         # Refill the frame's cache, so that its payload and pilots are the
         # stored ones, not generated again.
         cache = frame._cache
-        cache["payload_symbols"] = data["frame_payload_symbols"]
-        cache["payload_bits"] = data["frame_payload_bits"]
+        for key, arr_name in (
+            ("payload_symbols", "frame_payload_symbols"),
+            ("payload_bits", "frame_payload_bits"),
+        ):
+            arr = data[arr_name]
+            arr.setflags(write=False)
+            cache[key] = arr
         cache["payload_info_bits"] = cache["payload_bits"]
         cache["payload_reference_code"] = None
         if "frame_payload_info_bits" in data:
-            cache["payload_info_bits"] = data["frame_payload_info_bits"]
+            info_arr = data["frame_payload_info_bits"]
+            info_arr.setflags(write=False)
+            cache["payload_info_bits"] = info_arr
             cache["payload_reference_code"] = (
                 frame.payload_code
                 if reference_code == "payload_code"
                 else _get_code(reference_code, data, path)
             )
         if "frame_pilot_symbols" in data:
-            cache["pilot_symbols"] = data["frame_pilot_symbols"]
-            cache["pilot_bits"] = data["frame_pilot_bits"]
+            for key, arr_name in (
+                ("pilot_symbols", "frame_pilot_symbols"),
+                ("pilot_bits", "frame_pilot_bits"),
+            ):
+                arr = data[arr_name]
+                arr.setflags(write=False)
+                cache[key] = arr
 
         sig = sig.replace(frame=frame)
     return sig

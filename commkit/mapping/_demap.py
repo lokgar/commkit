@@ -61,8 +61,16 @@ def _noise_variance(
     if (noise_var is None) == (esn0_db is None):
         raise ValueError(f"{function_name}: give one of noise_var and esn0_db.")
     if noise_var is not None:
-        return float(noise_var)
-    n0 = constellation.power() / 10 ** (float(esn0_db) / 10)  # type: ignore[arg-type]
+        nv = float(noise_var)
+        if not np.isfinite(nv) or nv <= 0.0:
+            raise ValueError(
+                f"{function_name}: noise_var must be finite and > 0, got {noise_var!r}."
+            )
+        return nv
+    snr = float(esn0_db)  # type: ignore[arg-type]
+    if not np.isfinite(snr):
+        raise ValueError(f"{function_name}: esn0_db must be finite, got {esn0_db!r}.")
+    n0 = constellation.power() / 10 ** (snr / 10)
     return n0 / 2 if real else n0
 
 

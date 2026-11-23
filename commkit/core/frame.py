@@ -6,22 +6,26 @@ payload, pilots, guard intervals, MIMO channels) and builds it into a
 cuts the payload out of a frame Signal at one sample per symbol.
 """
 
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
 from .._circular import convolve_periodic
 from ..backend import ArrayType, dispatch, to_device
-from ..filtering.pulses import Pulse
 from ..logger import logger
-from ..mapping import Constellation
+from ..mapping.constellation import Constellation
 from ..math import db_to_linear, normalize
 from . import generation
 from ._signal_input import _same_value, require_device, require_integer_sps
 from .preamble import Preamble, _check_int
 from .signal import Reference, Signal
+
+if TYPE_CHECKING:
+    from ..filtering.pulses import Pulse
 
 __all__ = ["FrameStructure", "SingleCarrierFrame", "extract_payload"]
 
@@ -148,7 +152,7 @@ class SingleCarrierFrame:
     length and set ``payload_pad=True``.
     """
 
-    # None until __post_init__ resolves it (1000, or from payload_blocks).
+    # None until __post_init__ resolves it from payload_blocks.
     payload_num_symbols: int = None  # type: ignore[assignment]
     payload_constellation: Constellation = field(default_factory=_qpsk)
     payload_rng: int | np.random.Generator | None = None
@@ -383,6 +387,9 @@ class SingleCarrierFrame:
         )
         ref = sig.reference
         assert ref is not None
+        for arr in (ref.bits, ref.info_bits, ref.symbols):
+            if arr is not None:
+                arr.setflags(write=False)
         self._cache["payload_bits"] = ref.bits
         self._cache["payload_info_bits"] = ref.info_bits
         # The payload_code, or the matcher generate() picked for a shaped
@@ -409,6 +416,9 @@ class SingleCarrierFrame:
         )
         ref = sig.reference
         assert ref is not None
+        for arr in (ref.bits, ref.symbols):
+            if arr is not None:
+                arr.setflags(write=False)
         self._cache["pilot_bits"] = ref.bits
         self._cache["pilot_symbols"] = ref.symbols
 
@@ -731,6 +741,12 @@ class SingleCarrierFrame:
         """
         sps = require_integer_sps(sps, "SingleCarrierFrame.to_signal()")
         device = require_device(device, "SingleCarrierFrame.to_signal()")
+        pulse_obj: Pulse | None = None
+        if pulse is not None:
+            from ..filtering.pulses import Pulse
+
+            if isinstance(pulse, Pulse):
+                pulse_obj = pulse
         logger.info(
             "Building frame: %s symbols x %s channel(s), payload %s symbols of %r, "
             "pilot period %s, sps=%s, pulse=%r, periodic=%s, on %s.",
@@ -740,7 +756,7 @@ class SingleCarrierFrame:
             self.payload_constellation,
             self.pilot_period,
             sps,
-            pulse if isinstance(pulse, Pulse) or pulse is None else "taps",
+            pulse_obj if pulse_obj is not None or pulse is None else "taps",
             periodic,
             device,
         )
@@ -749,7 +765,7 @@ class SingleCarrierFrame:
                 samples=self._periodic_samples(sps, pulse, device),
                 sampling_rate=symbol_rate * sps,
                 symbol_rate=symbol_rate,
-                pulse=pulse if isinstance(pulse, Pulse) else None,
+                pulse=pulse_obj,
                 frame=self,
             )
 
@@ -822,7 +838,7 @@ class SingleCarrierFrame:
             samples=samples,
             sampling_rate=symbol_rate * sps,
             symbol_rate=symbol_rate,
-            pulse=pulse if isinstance(pulse, Pulse) else None,
+            pulse=pulse_obj,
             frame=self,
         )
 
@@ -836,7 +852,12 @@ class SingleCarrierFrame:
         sections and the guard then form one symbol stream that is shaped
         as a whole.
         """
-        taps = pulse.taps(sps) if isinstance(pulse, Pulse) else pulse
+        taps: Any = pulse
+        if pulse is not None:
+            from ..filtering.pulses import Pulse
+
+            if isinstance(pulse, Pulse):
+                taps = pulse.taps(sps)
         body, xp, _ = dispatch(to_device(self.body_symbols, device))
 
         def dac_peak_gain(symbols: ArrayType) -> ArrayType:

@@ -11,17 +11,12 @@ The arithmetic lives in the private ``_demap`` module, below
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from ..backend import ArrayType
+from ..backend import ArrayType, dispatch
 from ..core._signal_input import SignalInput
 from ..core.signal import Signal
 from ..logger import logger
 from ._demap import _noise_variance
 from .constellation import Constellation
-
-if TYPE_CHECKING:
-    from .constellation import Constellation
 
 __all__ = ["compute_llr"]
 
@@ -91,7 +86,7 @@ def compute_llr(
     """
 
     inp = SignalInput(symbols, "compute_llr()")
-    x = inp.symbols()
+    x, _, _ = dispatch(inp.symbols())
     constellation = inp.constellation(constellation, required=True)
     noise_var = _noise_variance(
         noise_var, esn0_db, constellation, x.dtype.kind != "c", "compute_llr()"

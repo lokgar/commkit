@@ -12,18 +12,24 @@ pulse-shapes a symbol sequence to unit symbol power and :func:`expand`
 inserts zeros between samples.
 """
 
+from __future__ import annotations
+
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .. import filtering, mapping
 from .._circular import convolve_periodic
+from .._random import as_generator
 from ..backend import ArrayType, dispatch, to_device
 from ..logger import logger
+from ..mapping.constellation import Constellation
 from ..math import normalize
 from ._signal_input import require_device, require_integer_sps
 from .signal import Reference, Signal
+
+if TYPE_CHECKING:
+    from ..filtering.pulses import Pulse
 
 __all__ = ["expand", "generate", "shape_pulse"]
 
@@ -57,10 +63,17 @@ def expand(samples: ArrayType, *, factor: int) -> ArrayType:
     ndarray
         Expanded samples, ``(..., N * factor)``, same dtype and device.
     """
+    if (
+        isinstance(factor, bool)
+        or not isinstance(factor, int | np.integer)
+        or factor < 1
+    ):
+        raise ValueError(f"expand(): factor must be an integer >= 1, got {factor!r}.")
+    factor = int(factor)
     logger.debug("Inserting zeros (expansion factor=%s).", factor)
-    samples, xp, _ = dispatch(samples)
-    out = xp.zeros((*samples.shape[:-1], samples.shape[-1] * factor), samples.dtype)
-    out[..., ::factor] = samples
+    x, xp, _ = dispatch(samples)
+    out = xp.zeros((*x.shape[:-1], x.shape[-1] * factor), x.dtype)
+    out[..., ::factor] = x
     return out
 
 
@@ -68,7 +81,7 @@ def shape_pulse(
     symbols: ArrayType,
     *,
     sps: int,
-    pulse: filtering.Pulse | ArrayType | None = None,
+    pulse: Pulse | ArrayType | None = None,
     periodic: bool = False,
 ) -> ArrayType:
     """Pulse-shape a symbol sequence to unit symbol power.
@@ -102,7 +115,9 @@ def shape_pulse(
         return normalize(
             expand(symbols, factor=sps), mode="symbol_power", sps=sps, axis=-1
         )
-    taps = pulse.taps(sps) if isinstance(pulse, filtering.Pulse) else pulse
+    from ..filtering.pulses import Pulse
+
+    taps = pulse.taps(sps) if isinstance(pulse, Pulse) else pulse
     if periodic:
         return normalize(
             convolve_periodic(expand(symbols, factor=sps), taps),
@@ -110,13 +125,27 @@ def shape_pulse(
             sps=sps,
             axis=-1,
         )
-    symbols, xp, sp = dispatch(symbols)
+    x, xp, sp = dispatch(symbols)
     # Cast the float64 taps to the symbol precision so resample_poly does not
-    # promote complex64 symbols to complex128.
-    h = xp.asarray(taps).astype(symbols.real.dtype)
-    res = sp.signal.resample_poly(symbols, sps, 1, window=h, axis=-1)
-    if res.dtype != symbols.dtype:
-        res = res.astype(symbols.dtype)
+    # promote complex64 symbols to complex128; integer symbols promote to float32.
+    real_dtype = x.real.dtype if x.real.dtype.kind == "f" else np.dtype(np.float32)
+    h_raw = xp.asarray(taps)
+    h_dtype = (
+        np.result_type(real_dtype, np.complex64)
+        if xp.iscomplexobj(h_raw)
+        else real_dtype
+    )
+    h = h_raw.astype(h_dtype, copy=False)
+    out_dtype = (
+        np.result_type(real_dtype, np.complex64)
+        if (xp.iscomplexobj(x) or xp.iscomplexobj(h))
+        else real_dtype
+    )
+    res = sp.signal.resample_poly(
+        x.astype(out_dtype, copy=False), sps, 1, window=h, axis=-1
+    )
+    if res.dtype != out_dtype:
+        res = res.astype(out_dtype)
     return normalize(res, mode="symbol_power", sps=sps, axis=-1)
 
 
@@ -126,12 +155,12 @@ def shape_pulse(
 
 
 def generate(
-    constellation: "mapping.Constellation",
+    constellation: Constellation,
     *,
     num_symbols: int | None = None,
     symbol_rate: float,
     sps: int = 1,
-    pulse: "filtering.Pulse | ArrayType | None" = None,
+    pulse: Pulse | ArrayType | None = None,
     num_channels: int = 1,
     periodic: bool = False,
     code: Any = None,
@@ -256,7 +285,7 @@ def generate(
     >>> coded = generate(Constellation.psk(4), symbol_rate=32e9,
     ...                  code=LDPCCode.dvbs2("1/2"), num_blocks=20, rng=0)
     """
-    if not isinstance(constellation, mapping.Constellation):
+    if not isinstance(constellation, Constellation):
         raise TypeError(
             "generate(): constellation must be a Constellation, e.g. "
             f"Constellation.qam(16); got {type(constellation).__name__}."
@@ -277,7 +306,7 @@ def generate(
             raise ValueError(f"generate(): {name} must be >= 1, got {value}.")
     sps = require_integer_sps(sps, "generate()")
     device = require_device(device, "generate()")
-    gen = np.random.default_rng(rng)
+    gen = as_generator(rng)
 
     c = constellation
     k = c.bits_per_symbol
@@ -338,6 +367,12 @@ def generate(
         bits = bits.reshape(num_channels, num_symbols * k)
 
     samples = shape_pulse(symbols, sps=sps, pulse=pulse, periodic=periodic)
+    pulse_obj: Pulse | None = None
+    if pulse is not None:
+        from ..filtering.pulses import Pulse
+
+        if isinstance(pulse, Pulse):
+            pulse_obj = pulse
 
     logger.info(
         "Generated %r%s: %s symbols x %s channel(s), sps=%s, pulse=%r, "
@@ -347,7 +382,7 @@ def generate(
         num_symbols,
         num_channels,
         sps,
-        pulse if isinstance(pulse, filtering.Pulse) or pulse is None else "taps",
+        pulse_obj if pulse_obj is not None or pulse is None else "taps",
         periodic,
         device,
     )
@@ -356,7 +391,7 @@ def generate(
         sampling_rate=symbol_rate * sps,
         symbol_rate=symbol_rate,
         constellation=c,
-        pulse=pulse if isinstance(pulse, filtering.Pulse) else None,
+        pulse=pulse_obj,
         reference=Reference(
             symbols=symbols,
             bits=bits,

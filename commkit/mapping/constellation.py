@@ -312,18 +312,22 @@ class Constellation:
         ``"maxlog"`` or ``"exact"`` (log-sum-exp).  Returns ``float32``,
         ``(..., N * k)``, on the symbols' device.
         """
-        warn_if_double(symbols, "compute_llr() / Constellation.llr()", "float32")
-        if symbols.dtype.kind != "c":
+        x, xp, _ = dispatch(symbols)
+        nv = float(noise_var)
+        if not np.isfinite(nv) or nv <= 0.0:
+            raise ValueError(
+                f"Constellation.llr(): noise_var must be finite and > 0, got {noise_var!r}."
+            )
+        warn_if_double(x, "compute_llr() / Constellation.llr()", "float32")
+        if x.dtype.kind != "c":
             # Real noise of variance s2 has the likelihood of the in-phase
             # part of circular noise of variance 2 s2, which the kernels take.
-            noise_var = 2.0 * noise_var
+            nv = 2.0 * nv
         if self._axes is not None:
-            if dispatch(symbols)[1] is np:
-                return _llr_separable(symbols, self._axes, noise_var, method, self)
-            return _llr_separable_gpu(symbols, self._axes, noise_var, method, self)
-        return _llr(
-            symbols, self.points, self.bit_labels, self.pmf, noise_var, method, self
-        )
+            if xp is np:
+                return _llr_separable(x, self._axes, nv, method, self)
+            return _llr_separable_gpu(x, self._axes, nv, method, self)
+        return _llr(x, self.points, self.bit_labels, self.pmf, nv, method, self)
 
     def _nearest(self, symbols: ArrayType) -> ArrayType:
         """Index of the nearest point for each symbol.
@@ -334,18 +338,27 @@ class Constellation:
         x, xp, _ = dispatch(symbols)
         grid = self._square_grid
         if grid is None:
-            (points,) = _device_tables(
-                self, "points", xp, lambda: (self.points.astype(self._storage_dtype()),)
-            )
+            if x.dtype in (np.complex128, np.float64):
+                (points,) = _device_tables(
+                    self, "points_f64", xp, lambda: (self.points,)
+                )
+            else:
+                (points,) = _device_tables(
+                    self,
+                    "points",
+                    xp,
+                    lambda: (self.points.astype(self._storage_dtype()),),
+                )
             return _nearest_index(x, points)
         # Square lattice: the nearest point is found per axis, O(N) with no
         # (N, M) distance matrix.
         lev_min, step, side, lut = grid
-        dtype = x.real.dtype
+        dtype = x.real.dtype if x.real.dtype.kind == "f" else np.dtype(np.float64)
 
         def level(v: ArrayType) -> ArrayType:
             """Index of the nearest level per axis value, clipped to the lattice."""
-            g = xp.round((v - dtype.type(lev_min)) / dtype.type(step))
+            vf = v.astype(dtype, copy=False)
+            g = xp.round((vf - dtype.type(lev_min)) / dtype.type(step))
             return xp.clip(g, 0, side - 1).astype(xp.int64)
 
         (lut_dev,) = _device_tables(self, "grid", xp, lambda: (lut,))

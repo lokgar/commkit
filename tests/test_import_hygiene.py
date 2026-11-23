@@ -36,11 +36,13 @@ def test_import_configures_nothing_global():
 
 
 def test_import_does_not_load_matplotlib_or_cupy():
-    """``import commkit`` loads neither Matplotlib nor CuPy (no GPU access)."""
+    """``import commkit`` loads neither Matplotlib, CuPy, Numba nor filtering."""
     result = _run(
-        "import sys, commkit\nprint('matplotlib' in sys.modules, 'cupy' in sys.modules)"
+        "import sys, commkit\n"
+        "print('matplotlib' in sys.modules, 'cupy' in sys.modules,"
+        " 'numba' in sys.modules, 'commkit.filtering' in sys.modules)"
     )
-    assert result == "False False"
+    assert result == "False False False False"
 
 
 def test_import_does_not_load_coding():

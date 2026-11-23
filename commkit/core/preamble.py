@@ -6,17 +6,21 @@ body (see :class:`~commkit.core.SingleCarrierFrame`) and found again by
 take a distinct root per channel.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from .._sequences import barker_sequence, zadoff_chu_sequence, zc_mimo_root
 from ..backend import ArrayType, to_device
-from ..filtering.pulses import Pulse
 from . import generation
 from ._signal_input import require_device, require_integer_sps
 from .signal import Signal
+
+if TYPE_CHECKING:
+    from ..filtering.pulses import Pulse
 
 __all__ = ["Preamble"]
 
@@ -98,9 +102,10 @@ class Preamble:
         else:
             symbols = zadoff_chu_sequence(self.num_symbols, root=self.root)
 
-        # Consistent internal dtype; sequences stay on the CPU (no hidden
-        # device placement).
-        object.__setattr__(self, "_symbols", symbols.astype("complex64"))
+        # Consistent internal dtype; sequences stay on the CPU and read-only.
+        arr = symbols.astype("complex64")
+        arr.setflags(write=False)
+        object.__setattr__(self, "_symbols", arr)
 
     # -------------------------------------------------------------------------
     # Properties
@@ -153,13 +158,19 @@ class Preamble:
         sps = require_integer_sps(sps, "Preamble.to_signal()")
         device = require_device(device, "Preamble.to_signal()")
         symbols = to_device(self.symbols, device)
+        pulse_obj: Pulse | None = None
+        if pulse is not None:
+            from ..filtering.pulses import Pulse
+
+            if isinstance(pulse, Pulse):
+                pulse_obj = pulse
         return Signal(
             samples=generation.shape_pulse(
                 symbols, sps=sps, pulse=pulse, periodic=periodic
             ),
             sampling_rate=symbol_rate * sps,
             symbol_rate=symbol_rate,
-            pulse=pulse if isinstance(pulse, Pulse) else None,
+            pulse=pulse_obj,
         )
 
 

@@ -62,8 +62,9 @@ def validate_array(
     """
     # Coerce lists/tuples and scalars to NumPy; arrays from other frameworks
     # (JAX, PyTorch, ...) are rejected rather than silently copied.
-    if not (isinstance(v, np.ndarray) or _is_cupy_array(v)):
+    if not (isinstance(v, np.ndarray | np.generic) or _is_cupy_array(v)):
         _reject_foreign_array(v)
+    if not (isinstance(v, np.ndarray) or _is_cupy_array(v)):
         try:
             v = np.asarray(v)
         except Exception as err:

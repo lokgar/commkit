@@ -196,6 +196,8 @@ def to_device(data: Any, device: str) -> ArrayType:
     ValueError
         On an unknown device name.
     """
+    if not isinstance(device, str):
+        raise ValueError(f"Unknown device: {device!r}")
     logger.debug("Moving data to %s.", device.upper())
     device = device.lower()
     if device == "cpu":
@@ -205,12 +207,16 @@ def to_device(data: Any, device: str) -> ArrayType:
             return data.get()
         if isinstance(data, np.ndarray):
             return data
+        if not isinstance(data, np.generic):
+            _reject_foreign_array(data)
         return np.asarray(data)
 
     elif device == "gpu":
         cp = _cupy()
         if isinstance(data, cp.ndarray):
             return data
+        if not isinstance(data, np.ndarray | np.generic):
+            _reject_foreign_array(data)
         return cp.asarray(data)
 
     else:

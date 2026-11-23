@@ -97,6 +97,11 @@ class Reference:
                 raise ValueError("info_bits needs bits (the bits on the air).")
             return
         bits = self._checked(self.bits, "bits")
+        if symbols.shape[-1] > 0 and bits.shape[-1] % symbols.shape[-1] != 0:
+            raise ValueError(
+                f"bits length {bits.shape[-1]} is not a multiple of symbols "
+                f"length {symbols.shape[-1]}."
+            )
         object.__setattr__(self, "bits", bits)
         if self.info_bits is None:
             object.__setattr__(self, "info_bits", bits)
@@ -201,6 +206,8 @@ class Reference:
         ``info_bits`` keeps the blocks carried whole by the kept bits.  The
         Reference itself when it has no more symbols than that.
         """
+        if num_symbols < 0:
+            raise ValueError(f"num_symbols must be >= 0, got {num_symbols}.")
         if num_symbols >= self.symbols.shape[-1]:
             return self
         symbols = self.symbols[..., :num_symbols]
@@ -533,7 +540,7 @@ _DOMAIN_NAMES = {"DIG": "DIG (digital baseband)", "RF": "RF", "OPT": "OPT (optic
 def _validate_samples(v: Any) -> Any:
     """Coerce samples to a NumPy/CuPy array with time on the last axis."""
     arr = validate_array(v, name="samples")
-    if arr.ndim > 2:
+    if arr.ndim not in (1, 2):
         raise ValueError(
             f"Samples array has {arr.ndim} dimensions. "
             "Only 1D (SISO) or 2D (MIMO/Dual-Pol) arrays are supported."
@@ -556,9 +563,13 @@ def _number(
     low: float | None = None,
     low_open: bool = False,
 ) -> Any:
-    if isinstance(value, bool) or not isinstance(value, int | float | np.number):
+    if isinstance(value, bool) or not isinstance(
+        value, int | float | np.integer | np.floating
+    ):
         raise ValueError(f"{name} must be a number, got {value!r}.")
     value = kind(value)
+    if not np.isfinite(value):
+        raise ValueError(f"{name} must be finite, got {value!r}.")
     if low is not None and (value <= low if low_open else value < low):
         bound = ">" if low_open else ">="
         raise ValueError(f"{name} must be {bound} {low}, got {value}.")

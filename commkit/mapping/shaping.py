@@ -105,8 +105,15 @@ def maxwell_boltzmann(constellation: Constellation, *, nu: float) -> np.ndarray:
         pmf, ``(M,)``, float64, aligned with ``constellation.points``
         and summing to 1.
     """
-    if nu < 0:
-        raise ValueError(f"nu must be >= 0, got {nu}.")
+    from .constellation import Constellation
+
+    if not isinstance(constellation, Constellation):
+        raise TypeError(
+            f"maxwell_boltzmann(): constellation must be a Constellation, got "
+            f"{type(constellation).__name__}."
+        )
+    if not np.isfinite(nu) or nu < 0:
+        raise ValueError(f"nu must be finite and >= 0, got {nu}.")
     return _mb_pmf(_grid_energies(constellation.points), float(nu)).copy()
 
 
@@ -121,13 +128,21 @@ def optimal_nu(constellation: Constellation, *, entropy: float) -> float:
     constellation : Constellation
         Points to shape; any existing pmf is ignored.
     entropy : float
-        Target entropy in bits per symbol, in ``(0, log2(M)]``.
+        Target entropy in bits per symbol, in ``(log2(m_min), log2(M)]``,
+        where ``m_min`` is the number of points on the minimum-energy shell.
 
     Returns
     -------
     float
         ``nu >= 0``; ``0.0`` when ``entropy = log2(M)``.
     """
+    from .constellation import Constellation
+
+    if not isinstance(constellation, Constellation):
+        raise TypeError(
+            f"optimal_nu(): constellation must be a Constellation, got "
+            f"{type(constellation).__name__}."
+        )
     energies = _grid_energies(constellation.points)
     if np.ptp(energies) < 1e-9:
         raise ValueError(
@@ -173,9 +188,14 @@ def _entropy_bits(pmf: np.ndarray) -> float:
 def _nu_for_entropy(energies: np.ndarray, entropy: float) -> float:
     from scipy.optimize import brentq
 
-    max_h = np.log2(energies.size)
-    if not 0 < entropy <= max_h:
-        raise ValueError(f"entropy must be in (0, {max_h:g}] bits, got {entropy}.")
+    min_e = float(energies.min())
+    m_min = int(np.count_nonzero(np.isclose(energies, min_e, rtol=1e-9, atol=1e-12)))
+    min_h = float(np.log2(m_min))
+    max_h = float(np.log2(energies.size))
+    if not (np.isfinite(entropy) and min_h < entropy <= max_h):
+        raise ValueError(
+            f"entropy must be in ({min_h:g}, {max_h:g}] bits, got {entropy}."
+        )
     if np.isclose(entropy, max_h, atol=1e-8):
         return 0.0
 
