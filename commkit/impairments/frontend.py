@@ -210,9 +210,9 @@ def apply_sampling_clock_offset(samples: S, *, offset_ppm: float) -> S:
     --------
     >>> rx = apply_sampling_clock_offset(tx, offset_ppm=20.0)
     """
-    if not offset_ppm > -1e6:
+    if not (np.isfinite(offset_ppm) and offset_ppm > -1e6):
         raise ValueError(
-            f"apply_sampling_clock_offset(): offset_ppm must be above -1e6, got {offset_ppm!r}."
+            f"apply_sampling_clock_offset(): offset_ppm must be finite and above -1e6, got {offset_ppm!r}."
         )
     inp = SignalInput(samples, "apply_sampling_clock_offset()")
     x, xp, _ = dispatch(inp.samples)
@@ -284,15 +284,19 @@ def apply_quantization(
     --------
     >>> y = apply_quantization(x, num_bits=8, full_scale=0.8, enob=6.0, rng=1)
     """
-    if isinstance(num_bits, bool) or int(num_bits) != num_bits or num_bits < 1:
+    if (
+        isinstance(num_bits, bool)
+        or not isinstance(num_bits, int | np.integer)
+        or num_bits < 1
+    ):
         raise ValueError(
             f"apply_quantization(): num_bits must be a positive integer, got {num_bits!r}."
         )
-    if not full_scale > 0:
+    if not (np.isfinite(full_scale) and full_scale > 0):
         raise ValueError(
-            f"apply_quantization(): full_scale must be positive, got {full_scale!r}."
+            f"apply_quantization(): full_scale must be finite and positive, got {full_scale!r}."
         )
-    if enob is not None and not (0 < enob <= num_bits):
+    if enob is not None and not (np.isfinite(enob) and 0 < enob <= num_bits):
         raise ValueError(
             f"apply_quantization(): enob must be in (0, num_bits={num_bits}], got {enob!r}."
         )
@@ -378,9 +382,9 @@ def apply_sampling_jitter(
     --------
     >>> y = apply_sampling_jitter(x, jitter=100e-15, rng=1)
     """
-    if not jitter >= 0:
+    if not (np.isfinite(jitter) and jitter >= 0):
         raise ValueError(
-            f"apply_sampling_jitter(): jitter must be non-negative, got {jitter!r}."
+            f"apply_sampling_jitter(): jitter must be finite and non-negative, got {jitter!r}."
         )
     inp = SignalInput(samples, "apply_sampling_jitter()")
     fs = inp.sampling_rate(sampling_rate)
@@ -397,7 +401,7 @@ def apply_sampling_jitter(
     n = x.shape[-1]
     d = (jitter * fs) * standard_normal(as_generator(rng), (n,), dtype=real, xp=xp)
     whole = xp.floor(d)
-    base = xp.arange(n) + whole.astype(xp.int64)
+    base = xp.arange(n, dtype=xp.int64) + whole.astype(xp.int64)
     y = interpolate_at(x, base, (d - whole).astype(real, copy=False))
     return inp.wrap(restore_1d(was_1d, y))
 

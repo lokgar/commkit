@@ -61,14 +61,24 @@ def moving_average(
         On an unknown ``mode``, or with ``mode="valid"`` and fewer than
         ``window`` samples along ``axis``.
     """
+    if mode not in ("same", "valid"):
+        raise ValueError(f"Unknown mode: {mode!r}. Use 'same' or 'valid'.")
+    if (
+        isinstance(window, bool)
+        or not isinstance(window, int | np.integer)
+        or window < 1
+    ):
+        raise ValueError(
+            f"moving_average(): window must be an integer >= 1, got {window!r}."
+        )
     x, xp, sp = dispatch(x)
-    window = max(1, int(window))
-    if window <= 1:
+    window = int(window)
+    if window == 1:
         return x
 
     if mode == "same":
         return sp.ndimage.uniform_filter1d(x, window, axis=axis, mode="nearest")
-    elif mode == "valid":
+    else:
         axis = axis % x.ndim
         n = x.shape[axis]
         if n < window:
@@ -81,7 +91,10 @@ def moving_average(
             # about 128 samples the overlap-add convolution is faster.
             shape = [1] * x.ndim
             shape[axis] = window
-            kernel = xp.full(shape, 1.0 / window, dtype=x.real.dtype)
+            real_dtype = (
+                x.real.dtype if x.real.dtype.kind == "f" else np.dtype(np.float64)
+            )
+            kernel = xp.full(shape, 1.0 / window, dtype=real_dtype)
             return sp.signal.oaconvolve(x, kernel, mode="valid", axes=axis)
         # The running sum of the "same" filter, every channel at once; the
         # mean of x[k : k + window] is its output at k + window // 2.
@@ -89,8 +102,6 @@ def moving_average(
         keep = [slice(None)] * x.ndim
         keep[axis] = slice(window // 2, window // 2 + n - window + 1)
         return full[tuple(keep)]
-    else:
-        raise ValueError(f"Unknown mode: {mode!r}. Use 'same' or 'valid'.")
 
 
 def savgol_smooth(

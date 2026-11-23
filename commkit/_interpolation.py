@@ -70,12 +70,14 @@ def interpolate_piecewise(x: ArrayType, knots: np.ndarray, sub: int) -> ArrayTyp
     interval, ``sub · (K - 1)`` per channel.  Returns ``(C, sub · (K - 1))``."""
     x, xp, _ = dispatch(x)
     knots = np.ascontiguousarray(knots, dtype=np.float64)
+    n_out = sub * (knots.shape[1] - 1)
+    if n_out == 0 or x.shape[0] == 0:
+        return xp.empty((x.shape[0], n_out), dtype=x.dtype)
     if xp is np:
-        out = np.empty((x.shape[0], sub * (knots.shape[1] - 1)), dtype=x.dtype)
-        if out.size:
-            kernels = _numba()
-            re, im, write_imag = _parts(out)
-            kernels.interp_piecewise(x, knots, sub, HALF_WIDTH, re, im, write_imag)
+        out = np.empty((x.shape[0], n_out), dtype=x.dtype)
+        kernels = _numba()
+        re, im, write_imag = _parts(out)
+        kernels.interp_piecewise(x, knots, sub, HALF_WIDTH, re, im, write_imag)
         return out
     launch = get_kernel("interpolate", half=HALF_WIDTH)
     return launch(xp.ascontiguousarray(x), knots=xp.asarray(knots), sub=sub)

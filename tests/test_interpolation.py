@@ -100,3 +100,11 @@ def test_cuda_kernel_matches_the_numba_kernel(xp, dtype, shared):
     gpu = to_numpy(interp.interpolate_piecewise(xp.asarray(x), knots, n_out))
     tol = 1e-8 if dtype == "complex128" else 1e-5
     np.testing.assert_allclose(gpu, cpu, rtol=0, atol=tol)
+
+
+def test_negative_subulp_instant_does_not_produce_nan(xp, xpt):
+    """Instants like -1e-17 where p - floor(p) rounds to 1.0 must match p=0."""
+    x = xp.ones((1, 8), dtype=xp.complex64)
+    out = interp.interpolate_piecewise(x, np.array([[-1e-17, 1.0]]), sub=2)
+    assert bool(xp.isfinite(out).all())
+    xpt.assert_allclose(out[:, 0], xp.asarray([1.0 + 0.0j], dtype=xp.complex64))

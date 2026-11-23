@@ -380,7 +380,7 @@ def _offset_ppm(trajectory: np.ndarray) -> np.ndarray:
     idx = np.arange(k // 4, k, dtype=np.float64)
     idx -= idx.mean()
     slope = (t - t.mean(axis=-1, keepdims=True)) @ idx / (idx @ idx)
-    return slope * 1e6
+    return np.asarray(slope * 1e6, dtype=np.float64)
 
 
 def _gardner_estimate(
@@ -526,10 +526,10 @@ def correct_sampling_clock_offset(
         )
     function_name = "correct_sampling_clock_offset()"
     inp = SignalInput(samples, function_name)
-    sps_int = _resolve_even_sps(inp, sps)
     x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
     if isinstance(how, Gardner):
+        sps_int = _resolve_even_sps(inp, sps)
         pos, _, _ = _track(to_device(x, "cpu"), sps_int, how)
         logger.info(
             "Sampling clock recovered (Gardner, %s detector): %d symbols.",
@@ -538,11 +538,17 @@ def correct_sampling_clock_offset(
         )
         y = _resample_on_strobes(x, pos, sps_int)
     else:
+        sps_int = inp.integer_sps(sps)
         ppm = np.atleast_1d(_to_host(how.value, np.float64))
         if ppm.size not in (1, x.shape[0]):
             raise ValueError(
                 f"{function_name}: the estimate has {ppm.size} values for "
                 f"{x.shape[0]} channels."
+            )
+        if not np.all(np.isfinite(ppm) & (ppm > -1e6)):
+            raise ValueError(
+                f"{function_name}: sampling-clock offset must be finite and above "
+                f"-1e6 ppm, got {ppm!r}."
             )
         ppm = np.broadcast_to(ppm, (x.shape[0],))
         logger.info(

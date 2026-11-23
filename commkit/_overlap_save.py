@@ -53,6 +53,11 @@ def ols_apply(
     """
     _, xp, _ = dispatch(samples)
     num_ch, N = samples.shape
+    if N == 0:
+        out_dtype = (
+            samples.dtype if real else xp.result_type(samples.dtype, xp.complex64)
+        )
+        return xp.empty((num_ch, 0), dtype=out_dtype)
     discard = N_fft // 4 if guard is None else guard  # symmetric guard
     B = N_fft - 2 * discard  # hop
     num_blocks = (N + B - 1) // B

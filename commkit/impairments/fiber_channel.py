@@ -211,6 +211,8 @@ def apply_polarization_mixing(
                 "an array theta gives every angle."
             )
         sampling_rate = inp.sampling_rate(sampling_rate)
+    elif inp.signal is not None and sampling_rate is not None:
+        inp.sampling_rate(sampling_rate)
 
     x, xp, _ = dispatch(inp.samples)
 
@@ -418,7 +420,7 @@ def apply_fiber_propagation(
     The field obeys (CommKit's engineering sign convention, the complex
     conjugate of the textbook form)
 
-    ``dA/dz = -α/2 A - j β₂/2 ∂²A/∂t² + β₃/6 ∂³A/∂t³ - j γ |A|² A``,
+    ``dA/dz = -α/2 A + j β₂/2 ∂²A/∂t² + β₃/6 ∂³A/∂t³ - j γ |A|² A``,
 
     so a spectrum is multiplied by ``exp(-j β₂ ω² L / 2)``, as in
     :func:`apply_chromatic_dispersion`, and the Kerr phase is

@@ -66,17 +66,32 @@ def convolve_periodic(
     """
     x, xp, _ = dispatch(samples)
     n = x.shape[-1]
-    kernel = circular_kernel(taps, n, center)
-    real = not (xp.iscomplexobj(x) or np.iscomplexobj(kernel))
-    # Kernel at the sample precision, so complex64 data is not promoted.
-    precision = np.dtype(x.real.dtype)
-    if np.iscomplexobj(kernel):
-        precision = np.result_type(precision, np.complex64)
-    kernel = kernel.astype(precision, copy=False)
+    h_raw = xp.asarray(taps)
+    real = not (xp.iscomplexobj(x) or xp.iscomplexobj(h_raw))
+    real_dtype = x.real.dtype if x.real.dtype.kind == "f" else np.dtype(np.float32)
+    out_dtype = real_dtype if real else np.result_type(real_dtype, np.complex64)
+    if n == 0:
+        return xp.empty(x.shape, dtype=out_dtype)
+    # Fold taps on the data's device (avoids a record-length H2D copy on GPU).
+    precision = (
+        np.result_type(real_dtype, np.complex64)
+        if xp.iscomplexobj(h_raw)
+        else real_dtype
+    )
+    h = h_raw.astype(precision, copy=False).ravel()
+    c = (h.size - 1) // 2 if center is None else center
+    kernel = xp.zeros(n, dtype=precision)
+    if h.size <= n:
+        kernel[: h.size] = h
+        if c:
+            kernel = xp.roll(kernel, -c)
+    else:
+        idx = (xp.arange(h.size) - c) % n
+        xp.add.at(kernel, idx, h)
     if real:
-        h_f = _fft.rfft(xp.asarray(kernel))
+        h_f = _fft.rfft(kernel)
         out = _fft.irfft(_fft.rfft(x, axis=-1) * h_f, n=n, axis=-1)
     else:
-        h_f = _fft.fft(xp.asarray(kernel))
+        h_f = _fft.fft(kernel)
         out = _fft.ifft(_fft.fft(x, axis=-1) * h_f, axis=-1)
-    return out.astype(x.dtype, copy=False)
+    return out.astype(out_dtype, copy=False)

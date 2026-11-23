@@ -203,7 +203,9 @@ def decimate(
 
     logger.debug("Decimating by factor %s (method: %s).", factor, method)
     arr, _, sp = dispatch(inp.samples)
-    if method == "decimate":
+    if factor == 1:
+        out = arr.copy()
+    elif method == "decimate":
         out = sp.signal.decimate(
             arr, factor, ftype=ftype, axis=-1, zero_phase=zero_phase
         )

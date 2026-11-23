@@ -107,6 +107,11 @@ def cross_correlate(
     TPL = _fft.fft(template, n_fft, axis=-1)
     corr_circ = _fft.ifft(SIG * xp.conj(TPL), axis=-1)
 
+    if mode not in ("full", "same", "valid", "positive_lags"):
+        raise ValueError(
+            f"cross_correlate(): mode must be 'full', 'same', 'valid' or "
+            f"'positive_lags', got {mode!r}."
+        )
     if mode == "positive_lags":
         corr = corr_circ[..., :N]  # zero-copy view; lags 0 ... N-1
     else:
@@ -183,6 +188,15 @@ def peak_offset(
         raise ValueError(
             f"method must be 'parabolic' or 'log-parabolic', got {method!r}."
         )
+    if (
+        isinstance(dft_upsample, bool)
+        or not isinstance(dft_upsample, int | np.integer)
+        or dft_upsample < 1
+    ):
+        raise ValueError(
+            f"peak_offset(): dft_upsample must be an integer >= 1, got {dft_upsample!r}."
+        )
+    dft_upsample = int(dft_upsample)
     fit = method
     correlation, xp, _ = dispatch(correlation)
     peak_indices = xp.asarray(peak_indices)
@@ -191,10 +205,19 @@ def peak_offset(
     if correlation.ndim == 1:
         correlation = correlation[None, :]  # (1, N)
     if peak_indices.ndim == 0:
-        peak_indices = peak_indices[None]  # (1,)
+        peak_indices = xp.broadcast_to(peak_indices, (correlation.shape[0],))
 
     N = correlation.shape[-1]
     C = correlation.shape[0]
+    if N < 3:
+        raise ValueError(
+            f"peak_offset(): correlation needs at least 3 samples, got {N}."
+        )
+    if peak_indices.shape != (C,):
+        raise ValueError(
+            f"peak_offset(): peak_indices shape {peak_indices.shape} does not "
+            f"match {C} channel(s)."
+        )
     ch_idx = xp.arange(C)
 
     k = peak_indices.astype(int)
@@ -490,7 +513,16 @@ def estimate_timing(
     offset = 0
     if search_range is not None:
         start, end = search_range
+        if start < 0 or end <= start:
+            raise ValueError(
+                f"estimate_timing(): search_range must satisfy 0 <= start < end, "
+                f"got {search_range!r}."
+            )
         x = x[:, start:end]
+        if x.shape[-1] == 0:
+            raise ValueError(
+                f"estimate_timing(): search_range {search_range!r} selects no samples."
+            )
         offset = int(start)
 
     corr, corr_mag = _timing_correlation(x, ref, xp)
@@ -562,6 +594,8 @@ def _timing_template(
             template.to_signal(sps=sps_int, symbol_rate=1.0, pulse=pulse).samples
         )
     else:
+        if sig is not None and sps is not None:
+            inp.integer_sps(sps)
         ref = xp.asarray(template)
     if ref.ndim == 1:
         ref = ref[None, :]
@@ -762,9 +796,9 @@ def correct_timing(
             x = xp.roll(x, -shift, axis=-1)
         elif mode == "zero" and shift:
             result = xp.zeros_like(x)
-            if shift > 0:
+            if 0 < shift < N:
                 result[..., : N - shift] = x[..., shift:]
-            else:
+            elif -N < shift < 0:
                 result[..., -shift:] = x[..., : N + shift]
             x = result
         elif mode == "slice":

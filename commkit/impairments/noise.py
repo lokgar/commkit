@@ -148,8 +148,14 @@ def apply_awgn(
     num_channels = 1 if x.ndim == 1 else x.shape[0]
 
     if noise_var is not None:
+        if inp.signal is not None and sps is not None:
+            inp.sps(sps)
         logger.info("Adding AWGN (noise variance given).")
         var = xp.asarray(noise_var, dtype=xp.float64)
+        if not bool(xp.all(xp.isfinite(var) & (var >= 0))):
+            raise ValueError(
+                f"apply_awgn(): noise_var must be finite and >= 0, got {noise_var!r}."
+            )
         if var.ndim != 0:
             if var.shape != (num_channels,):
                 raise ValueError(
@@ -160,6 +166,8 @@ def apply_awgn(
         return inp.wrap(x + _noise(x, xp, var, rng))
 
     if snr_db is not None:
+        if inp.signal is not None and sps is not None:
+            inp.sps(sps)
         logger.info("Adding AWGN (SNR target: %.2f dB).", snr_db)
         power = xp.mean(xp.abs(x) ** 2, axis=-1, keepdims=True)
         if not per_channel:
@@ -451,15 +459,16 @@ def apply_coherent_detection(
         leak = 0.0 if cmrr_db is None else 0.5 * 10 ** (-cmrr_db / 20)
     else:
         leak = 0.5
-    inv_snr = (
+    shot_thermal = (
         2.0
         * (ELEMENTARY_CHARGE * shot_current * fs + thermal_noise_density**2 * fs / 2)
         / (gain * gain * r * r * p_c * p_lo)
     )
+    inv_snr = shot_thermal
     rin_var = 0.0
     if leak and lo_rin_db_hz is not None:
         rin_var = 10 ** (lo_rin_db_hz / 10) * fs / 2
-        inv_snr = inv_snr + 2.0 * leak * leak * (p_lo / p_c) * rin_var
+        inv_snr = shot_thermal + 2.0 * leak * leak * (p_lo / p_c) * rin_var
     if logger.isEnabledFor(logging.INFO):
         sig = inp.signal
         snr_db = -10 * np.log10(inv_snr)
@@ -478,7 +487,6 @@ def apply_coherent_detection(
                 np.array2string(snr_db, precision=2),
             )
     gen = as_generator(rng)
-    shot_thermal = inv_snr - (2.0 * leak * leak * (p_lo / p_c) * rin_var)
     y = x + _noise(x, xp, xp.asarray(host_power * shot_thermal)[:, None], gen)
     if leak:
         # Common-mode leak on both quadratures, in the units of x.

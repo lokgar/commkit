@@ -26,6 +26,9 @@ def interp(x, c, p, half):
     n = x.shape[1]
     i = int(np.floor(p))
     mu = p - i
+    if mu >= 1.0:
+        i += 1
+        mu = 0.0
     if mu == 0.0:
         if 0 <= i < n:
             return float(x[c, i].real), float(x[c, i].imag)

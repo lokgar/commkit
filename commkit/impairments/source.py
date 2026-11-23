@@ -8,6 +8,7 @@ intensity noise, and :func:`apply_frequency_offset` the carrier frequency
 offset between transmitter and receiver oscillators.
 """
 
+import logging
 import math
 from types import ModuleType
 
@@ -16,7 +17,7 @@ import numpy as np
 from .. import _fft
 from .._array import as_2d, restore_1d
 from .._random import RNG, as_generator, standard_normal
-from ..backend import ArrayType, _module_for, dispatch
+from ..backend import ArrayType, _module_for, dispatch, to_device
 from ..core._signal_input import S, SignalInput, require_device
 from ..logger import logger
 from ..math import _derotate
@@ -63,6 +64,16 @@ def _phase_trajectory(
     closes on itself, and the step from the last sample back to the first is
     an ordinary increment.
     """
+    if not np.isfinite(linewidth) or linewidth < 0.0:
+        raise ValueError(f"linewidth must be finite and >= 0, got {linewidth!r}.")
+    if not np.isfinite(flicker) or flicker < 0.0:
+        raise ValueError(f"flicker must be finite and >= 0, got {flicker!r}.")
+    if flicker_f_min is not None and (
+        not np.isfinite(flicker_f_min) or flicker_f_min <= 0.0
+    ):
+        raise ValueError(
+            f"flicker_f_min must be finite and > 0, got {flicker_f_min!r}."
+        )
     num_samples = shape[-1]
     phi = xp.zeros(shape, dtype=xp.float64)
 
@@ -258,7 +269,8 @@ def apply_phase_noise(
     Returns
     -------
     ndarray or Signal
-        The rotated samples, same shape, dtype and device as the input.
+        The rotated samples, same shape, dtype and device as the input
+        (complex for real input).
 
     Examples
     --------
@@ -349,14 +361,18 @@ def apply_frequency_offset(
     x, xp, _ = dispatch(inp.samples)
     x, was_1d = as_2d(x, name="samples")
     C, N = x.shape
-    offsets = np.asarray(offset, dtype=np.float64).reshape(-1)
+    offsets = xp.asarray(offset, dtype=xp.float64).reshape(-1)
     if offsets.size not in (1, C):
         raise ValueError(
             f"apply_frequency_offset(): offset has {offsets.size} values for "
             f"{C} channel(s); give one, or one per channel."
         )
-    logger.info("Applying frequency offset: %s Hz.", offsets.tolist())
-    step = xp.asarray(offsets * (2.0 * np.pi / fs))[:, None]  # (1 or C, 1)
+    if logger.isEnabledFor(logging.INFO):
+        logger.info(
+            "Applying frequency offset: %s Hz.",
+            to_device(offsets, "cpu").tolist(),
+        )
+    step = (offsets * (2.0 * np.pi / fs))[:, None]  # (1 or C, 1)
     result = _derotate(x, -step * xp.arange(N, dtype=xp.float64))
     return inp.wrap(restore_1d(was_1d, result))
 

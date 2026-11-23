@@ -320,11 +320,13 @@ def add_pilot_tone(
             )
 
     # Per-channel signal power and the tone amplitude that realizes the PSR.
+    # A real cosine has E[cos^2] = 1/2, so real input takes sqrt(2) amplitude.
     p_signal = xp.mean(xp.abs(x) ** 2, axis=-1, keepdims=True)  # (C, 1) float
     psr_lin = (10.0 ** (xp.asarray(psr_req, dtype=xp.float64) / 10.0)).reshape(
         C, 1
     )  # (C, 1)
-    amp = xp.sqrt(p_signal * psr_lin)  # (C, 1)
+    is_complex = xp.iscomplexobj(x)
+    amp = xp.sqrt((1.0 if is_complex else 2.0) * p_signal * psr_lin)  # (C, 1)
 
     # Per-channel phase ramp (C, N) in float64, wrapped by _phasor before the
     # trigonometry in the samples' precision (long ramps keep their accuracy).
@@ -332,13 +334,17 @@ def add_pilot_tone(
     f_ch = xp.asarray(actual, dtype=xp.float64).reshape(C, 1)  # (C, 1)
     phase = 2.0 * np.pi * f_ch * n[None, :] / sampling_rate + phase_init  # (C, N)
     tone = _phasor(phase, np.result_type(x.dtype, np.complex64), xp)
-    tone = tone.astype(x.dtype, copy=False)  # (C, N); real input keeps the cosine
+    if not is_complex:
+        tone = tone.real
+    tone = tone.astype(x.dtype, copy=False)  # (C, N)
     out = x + amp.astype(x.dtype) * tone  # (C, N)
 
     if renormalize:
-        # Restore each channel to its original mean power.
+        # Restore each channel to its original mean power (leave zero channels zero).
         p_out = xp.mean(xp.abs(out) ** 2, axis=-1, keepdims=True)  # (C, 1)
-        out = out * xp.sqrt(p_signal / p_out).astype(x.dtype)
+        safe = xp.where(p_out > 0, p_out, 1.0)
+        scale = xp.where(p_out > 0, xp.sqrt(p_signal / safe), 1.0)
+        out = out * scale.astype(x.dtype)
 
     f_log = f"{actual[0]:.3g} Hz" if scalar_input else f"{actual} Hz"
     psr_log = f"{psr_req[0]:.1f} dB" if scalar_power else f"{psr_req} dB"

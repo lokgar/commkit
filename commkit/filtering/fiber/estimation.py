@@ -164,7 +164,7 @@ class FourthMomentScan:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class QuadraticPhaseFit:
     """Data-aided chromatic-dispersion estimation from known symbols.
 
@@ -519,7 +519,13 @@ def _quadratic_phase_pass(
     omega = 2.0 * np.pi * f[:-1] + d_omega / 2.0
     weight = np.abs(diff)
     # Neighbours across the FFT wrap (+fs/2 to -fs/2) are not neighbours.
-    keep = (np.arange(nfft - 1) != nfft // 2 - 1) & (weight > 0.05 * weight.max())
+    w_max = float(weight.max()) if weight.size else 0.0
+    keep = (np.arange(nfft - 1) != nfft // 2 - 1) & (weight > 0.05 * w_max)
+    if w_max == 0.0 or int(keep.sum()) < 2:
+        raise ValueError(
+            "QuadraticPhaseFit: signal or reference has no spectral power for "
+            "a phase fit."
+        )
     w = np.sqrt(weight[keep])
     design = np.stack([np.ones(int(keep.sum())), omega[keep]], axis=1)
     coef = np.linalg.lstsq(design * w[:, None], np.angle(diff[keep]) * w, rcond=None)[0]

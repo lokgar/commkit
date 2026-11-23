@@ -65,9 +65,14 @@ def fir_taps(
 
     Returns
     -------
-    ndarray
+    numpy.ndarray
         Host ``float64`` taps with 0 dB passband gain, ``(num_taps,)``.
     """
+    if btype not in ("low", "high", "band", "bandstop"):
+        raise ValueError(
+            f"fir_taps(): btype must be 'low', 'high', 'band' or 'bandstop', "
+            f"got {btype!r}."
+        )
     pass_zero = btype in ("low", "bandstop")
     logger.debug(
         "Designing FIR: btype=%s, cutoff=%s Hz, taps=%s.", btype, cutoff, num_taps
@@ -426,12 +431,14 @@ def fir_filter(
     inp = SignalInput(samples, "fir_filter()")
     x, xp, sp = dispatch(inp.samples)
     taps = xp.asarray(taps)
-    if taps.ndim != 1:
-        raise ValueError(f"taps must be 1-D, got shape {taps.shape}.")
+    if taps.ndim != 1 or taps.size == 0:
+        raise ValueError(f"taps must be non-empty 1-D, got shape {taps.shape}.")
     taps = _taps_like(taps, x, xp, "fir_filter()")
     L = taps.size
     center = 0 if causal else (L - 1) // 2
 
+    if x.size == 0:
+        return inp.wrap(x.copy())
     if periodic:
         logger.debug("fir_filter: circular, L=%s, causal=%s", L, causal)
         return inp.wrap(convolve_periodic(x, taps, center))
@@ -770,9 +777,10 @@ def iir_filter(
     inp = SignalInput(samples, "iir_filter()")
     x, xp, _ = dispatch(inp.samples)
     sos_np = _to_host(sos, np.float64)
-    if sos_np.ndim != 2 or sos_np.shape[1] != 6:
+    if sos_np.ndim != 2 or sos_np.shape[0] < 1 or sos_np.shape[1] != 6:
         raise ValueError(
-            f"iir_filter(): sos must have shape (n_sections, 6), got {sos_np.shape}."
+            f"iir_filter(): sos must have shape (n_sections, 6) with at least "
+            f"one section, got {sos_np.shape}."
         )
     if not np.allclose(sos_np[:, 3], 1.0):
         raise ValueError("iir_filter(): sos[:, 3] (each section's a0) must be 1.")

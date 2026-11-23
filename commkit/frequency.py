@@ -109,8 +109,29 @@ class MthPower:
     overlap: float = 0.5
 
     def __post_init__(self) -> None:
-        if self.power is not None and self.power < 1:
-            raise ValueError(f"power must be >= 1, got {self.power}.")
+        if self.power is not None and (
+            isinstance(self.power, bool)
+            or not isinstance(self.power, int | np.integer)
+            or self.power < 1
+        ):
+            raise ValueError(f"power must be an integer >= 1, got {self.power!r}.")
+        if self.nfft is not None and (
+            isinstance(self.nfft, bool)
+            or not isinstance(self.nfft, int | np.integer)
+            or self.nfft < 1
+        ):
+            raise ValueError(f"nfft must be an integer >= 1, got {self.nfft!r}.")
+        if self.search_range is not None:
+            if len(self.search_range) != 2:
+                raise ValueError(
+                    f"search_range must be a (low, high) pair, got {self.search_range!r}."
+                )
+            lo, hi = self.search_range
+            if not (np.isfinite(lo) and np.isfinite(hi) and lo < hi):
+                raise ValueError(
+                    f"search_range must satisfy low < high and be finite, "
+                    f"got {self.search_range!r}."
+                )
         if self.interpolation not in ("jacobsen", "parabolic"):
             raise ValueError(
                 f"interpolation must be 'jacobsen' or 'parabolic', got "
@@ -270,6 +291,12 @@ class SpectralPeak:
         if (self.target_frequency is None) != (self.search_band is None):
             raise ValueError(
                 "target_frequency and search_band must both be given or both omitted."
+            )
+        if self.search_band is not None and (
+            not np.isfinite(self.search_band) or self.search_band <= 0
+        ):
+            raise ValueError(
+                f"search_band must be finite and > 0, got {self.search_band!r}."
             )
         _check_blocks(self.block_size, self.overlap)
 
@@ -825,18 +852,25 @@ def correct_frequency_offset(
 
 
 def _correct_static(x: ArrayType, fs: float, offset: Any, xp: Any) -> ArrayType:
-    offset_arr = xp.asarray(offset, dtype=xp.float64)
-    per_channel = offset_arr.ndim >= 1 and offset_arr.size > 1
-    n = x.shape[-1]
+    x2, was_1d = as_2d(x, name="samples")
+    C, n = x2.shape
+    offset_arr = xp.asarray(offset, dtype=xp.float64).reshape(-1)
+    if offset_arr.size not in (1, C):
+        raise ValueError(
+            f"correct_frequency_offset(): offset has {offset_arr.size} values for "
+            f"{C} channel(s); give one, or one per channel."
+        )
+    if logger.isEnabledFor(logging.INFO):
+        logger.info(
+            "Removing frequency offset: %s Hz.",
+            to_device(offset_arr, "cpu").tolist(),
+        )
     # Phase step per sample, kept on the device (no sync for a device
-    # scalar): (C, 1) per channel, 0-d otherwise.
-    if per_channel:
-        step = offset_arr.reshape(-1)[: x.shape[0], None] * (2.0 * np.pi / fs)
-    else:
-        step = offset_arr.reshape(-1)[0] * (2.0 * np.pi / fs)
+    # scalar): (C, 1) per channel, (1, 1) otherwise.
+    step = offset_arr[:, None] * (2.0 * np.pi / fs)
     # float64 ramp, exact for any N; wrapped in float64, rotated in the
     # samples' precision.
-    return _derotate(x, step * xp.arange(n, dtype=xp.float64))
+    return restore_1d(was_1d, _derotate(x2, step * xp.arange(n, dtype=xp.float64)))
 
 
 def _correct_blockwise(
@@ -856,6 +890,11 @@ def _correct_blockwise(
     C, N = x2.shape
     df = xp.asarray(block_values, dtype=xp.float64)
     df = df[None, :] if df.ndim == 1 else df  # (C_interp, B); 1 row is shared
+    if df.shape[0] not in (1, C):
+        raise ValueError(
+            f"correct_frequency_offset(): block_values has {df.shape[0]} channel(s) "
+            f"for {C} input channel(s)."
+        )
     B = df.shape[-1]
     if B == 1:
         df_dense = xp.broadcast_to(df, (df.shape[0], N))
@@ -873,6 +912,10 @@ def _correct_blockwise(
         theta = xp.broadcast_to(theta, (C, N))
 
     corrected = _derotate(x2, theta)
+    if logger.isEnabledFor(logging.INFO):
+        logger.info(
+            "Removed blockwise frequency offset (%d channels, %d blocks).", C, B
+        )
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(
             "correct_frequency_offset (blockwise): C=%s, B=%s blocks, total phase "
@@ -882,8 +925,3 @@ def _correct_blockwise(
             float(theta[0, -1]),
         )
     return restore_1d(was_1d, corrected)
-
-
-# -----------------------------------------------------------------------------
-# SHARED TONE REFINEMENT (used by recovery and equalization)
-# -----------------------------------------------------------------------------

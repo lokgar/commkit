@@ -365,13 +365,18 @@ def dispersion_compensation_taps(
     ...     sampling_rate=64e9, bandwidth=35.2e9)
     >>> y = fir_filter(x, taps)
     """
-    if not sampling_rate > 0:
+    if not (np.isfinite(sampling_rate) and sampling_rate > 0):
         raise ValueError(
-            "dispersion_compensation_taps(): sampling_rate must be positive, "
-            f"got {sampling_rate!r}."
+            "dispersion_compensation_taps(): sampling_rate must be finite and "
+            f"positive, got {sampling_rate!r}."
+        )
+    if not (np.isfinite(center_wavelength_nm) and center_wavelength_nm > 0):
+        raise ValueError(
+            "dispersion_compensation_taps(): center_wavelength_nm must be "
+            f"finite and positive, got {center_wavelength_nm!r}."
         )
     band = sampling_rate if bandwidth is None else float(bandwidth)
-    if not 0 < band <= sampling_rate:
+    if not (np.isfinite(band) and 0 < band <= sampling_rate):
         raise ValueError(
             "dispersion_compensation_taps(): bandwidth must be in "
             f"(0, sampling_rate={sampling_rate!r}], got {bandwidth!r}."
@@ -385,7 +390,12 @@ def dispersion_compensation_taps(
     if num_taps is None:
         spread = spread_samples(b2l, sampling_rate=sampling_rate, bandwidth=band)
         num_taps = max(_MIN_TAPS, 2 * math.ceil((_TAPS_MARGIN * spread - 1) / 2) + 1)
-    elif int(num_taps) != num_taps or num_taps < 1:
+    elif (
+        isinstance(num_taps, bool)
+        or not np.isfinite(num_taps)
+        or int(num_taps) != num_taps
+        or num_taps < 1
+    ):
         raise ValueError(
             "dispersion_compensation_taps(): num_taps must be an integer >= 1, "
             f"got {num_taps!r}."
