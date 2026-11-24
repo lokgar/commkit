@@ -125,3 +125,47 @@ class TestSign:
         forward = _centroid(apply_dispersion(x, inverse=False, **kw)) - _centroid(x)
         inverse = _centroid(apply_dispersion(x, inverse=True, **kw)) - _centroid(x)
         assert inverse == pytest.approx(-forward, rel=1e-6)
+
+
+class TestRealInputOpticalTransforms:
+    """Optical linear transforms return complex output consistently on real input."""
+
+    def test_real_input_returns_complex_without_warning(self, xp: Any) -> None:
+        import warnings
+
+        from commkit.filtering import correct_chromatic_dispersion
+        from commkit.impairments import apply_pmd
+
+        rng = np.random.default_rng(7)
+        x1 = xp.asarray(rng.standard_normal(512).astype(np.float32))
+        x2 = xp.asarray(rng.standard_normal((2, 512)).astype(np.float32))
+        fs = 64e9
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            y_cd = apply_chromatic_dispersion(
+                x1,
+                dispersion_ps_nm_km=17.0,
+                fiber_length_km=10.0,
+                center_wavelength_nm=1550.0,
+                sampling_rate=fs,
+            )
+            y_cdc_wr = correct_chromatic_dispersion(
+                x1,
+                dispersion_ps_nm=170.0,
+                center_wavelength_nm=1550.0,
+                sampling_rate=fs,
+                method="whole_record",
+            )
+            y_cdc_fir = correct_chromatic_dispersion(
+                x1,
+                dispersion_ps_nm=170.0,
+                center_wavelength_nm=1550.0,
+                sampling_rate=fs,
+                method="fir",
+            )
+            y_pmd = apply_pmd(x2, dgd=5e-12, theta=0.3, sampling_rate=fs)
+
+        for y in (y_cd, y_cdc_wr, y_cdc_fir, y_pmd):
+            assert y.dtype == np.complex64
+            assert bool(xp.any(xp.abs(y.imag) > 1e-4))

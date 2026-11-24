@@ -176,6 +176,7 @@ def apply_dispersion(
     """
     samples, xp, _ = dispatch(samples)
     samples, was_1d = as_2d(samples, name="samples")
+    out_dtype = np.result_type(samples.dtype, np.complex64)
     h = transfer_function(
         samples.shape[-1],
         sampling_rate=sampling_rate,
@@ -185,9 +186,9 @@ def apply_dispersion(
         ),
         inverse=inverse,
         xp=xp,
-        dtype=np.result_type(samples.dtype, np.complex64),
+        dtype=out_dtype,
     )
     result = _fft.ifft(_fft.fft(samples, axis=-1) * h[None, :], axis=-1)
-    if result.dtype != samples.dtype:
-        result = result.astype(samples.dtype)
+    if result.dtype != out_dtype:
+        result = result.astype(out_dtype)
     return restore_1d(was_1d, result)

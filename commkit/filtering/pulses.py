@@ -13,7 +13,6 @@ import numpy as np
 import scipy
 
 from ..core._signal_input import require_integer_sps
-from ..logger import logger
 from ..math import normalize
 
 __all__ = [
@@ -40,6 +39,13 @@ def _symbol_grid(sps: float, span: float) -> np.ndarray:
     the sample grid of the signal (a symmetric pulse has its peak on a
     sample and its Nyquist zeros on the other symbols' samples).
     """
+    if (
+        isinstance(sps, bool)
+        or not isinstance(sps, int | float | np.integer | np.floating)
+        or not np.isfinite(sps)
+        or sps <= 0
+    ):
+        raise ValueError(f"sps must be finite and > 0, got {sps!r}.")
     num_taps = int(span * sps)
     num_taps += 1 - num_taps % 2
     return (np.arange(num_taps) - num_taps // 2) / sps
@@ -100,13 +106,6 @@ def _rect_taps(*, sps: int, duty_cycle: float, rise_time: float) -> np.ndarray:
         flat = np.ones(n_flat)
         h = np.concatenate([ramp_up, flat, ramp_dn])
 
-    logger.debug(
-        "Generating Rect taps: sps=%s, duty_cycle=%s, rise_time=%s, n_taps=%s",
-        sps,
-        duty_cycle,
-        rise_time,
-        len(h),
-    )
     return h
 
 
@@ -137,13 +136,6 @@ def _gaussian_taps(*, sps: float, fwhm: float, span: int) -> np.ndarray:
     # h(t) = exp(-(π t / α)²) with α = √(ln2 / 2) / BT has its half-maximum
     # at |t| = α √ln2 / π, so FWHM = √2 ln2 / (π BT)  ->  BT = √2 ln2 / (π fwhm).
     bt = np.sqrt(2) * np.log(2) / (np.pi * fwhm)
-    logger.debug(
-        "Generating Gaussian taps: sps=%s, span=%s, fwhm=%s (bt=%.4f)",
-        sps,
-        span,
-        fwhm,
-        bt,
-    )
     t = _symbol_grid(sps, span)
 
     # Gaussian function
@@ -190,13 +182,6 @@ def _smoothrect_taps(
     ValueError
         If ``sps`` is not an integer.
     """
-    logger.debug(
-        "Generating SmoothRect taps: sps=%s, span=%s, rise_time=%s, duty_cycle=%s",
-        sps,
-        span,
-        rise_time,
-        duty_cycle,
-    )
     sps = require_integer_sps(sps, "SmoothRect.taps()")
     t = _symbol_grid(sps, span)
 
@@ -238,7 +223,6 @@ def _rrc_taps(*, sps: float, rolloff: float, span: int) -> np.ndarray:
     ndarray
         Host ``float64`` taps of unit energy.
     """
-    logger.debug("Generating RRC taps: sps=%s, rolloff=%s, span=%s", sps, rolloff, span)
     # Ensure odd number of taps
     t = _symbol_grid(sps, span)
 
@@ -277,7 +261,6 @@ def _rc_taps(*, sps: float, rolloff: float, span: int) -> np.ndarray:
     ndarray
         Host ``float64`` taps of unit energy.
     """
-    logger.debug("Generating RC taps: sps=%s, rolloff=%s, span=%s", sps, rolloff, span)
     # Ensure odd number of taps
     t = _symbol_grid(sps, span)
 
@@ -316,7 +299,7 @@ class Pulse:
 
 
 def _check_span(span: int) -> None:
-    if not isinstance(span, int | np.integer) or span < 1:
+    if isinstance(span, bool) or not isinstance(span, int | np.integer) or span < 1:
         raise ValueError(f"span must be a positive integer, got {span!r}.")
 
 

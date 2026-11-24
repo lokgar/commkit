@@ -88,6 +88,8 @@ _DOCUMENTED: dict[str, str] = {
     + " (the differential phase across the band, fitted on the host)",
     "filtering/fiber/estimation.py::_clock_tone": _REPORT
     + " (the dispersion scan, searched for its peak on the host)",
+    "filtering/linear.py::_sosfilt": _RECURSION
+    + " (IIR above the 16-section GPU kernel limit)",
     "frequency.py::_mengali_morelli": _RECURSION + " (bootstrap over the lags)",
     "frequency.py::_pilot_slope": _HOST_VALUE + " (pilot symbols and indices)",
     "_cuda/filters.py::_iir_factory.<locals>.launch": _HOST_VALUE

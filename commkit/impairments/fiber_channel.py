@@ -103,7 +103,8 @@ def apply_pmd(
     Returns
     -------
     ndarray or Signal
-        The distorted field, same shape, dtype and device as the input.
+        The distorted field, same shape, precision and device as the input
+        (complex for real input).
 
     Raises
     ------
@@ -140,9 +141,9 @@ def apply_pmd(
     )
     result = _fft.ifft(out_F, axis=-1)
 
-    # Preserve input dtype (ifft may produce complex128 from complex64 input)
-    if result.dtype != x.dtype:
-        result = result.astype(x.dtype)
+    out_dtype = np.result_type(x.dtype, np.complex64)
+    if result.dtype != out_dtype:
+        result = result.astype(out_dtype)
 
     return inp.wrap(result)
 
@@ -298,7 +299,8 @@ def apply_chromatic_dispersion(
     Returns
     -------
     ndarray or Signal
-        The dispersed samples, same shape, dtype and device as the input.
+        The dispersed samples, same shape, precision and device as the input
+        (complex for real input).
 
     See Also
     --------

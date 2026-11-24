@@ -906,3 +906,40 @@ class TestSequences:
         assert [zc_mimo_root(k, 61, 63) for k in range(3)] == [61, 62, 1]
         with pytest.raises(ValueError, match="coprime"):
             zc_mimo_root(0, 2, 64)
+
+
+class TestDelayAndMimoEnergyEdgeCases:
+    """Real rfft path, empty input, delay shape checks and MIMO TX energy."""
+
+    @pytest.mark.parametrize("n", [100, 101])
+    def test_apply_delay_real_odd_and_even(self, xp, xpt, n):
+        t = np.arange(n, dtype=np.float64)
+        f = 3.0 / n
+        sig = xp.asarray(np.cos(2 * np.pi * f * t).astype(np.float32))
+        out = timing.apply_delay(sig, delay=0.35)
+        expected = np.cos(2 * np.pi * f * (t - 0.35)).astype(np.float32)
+        assert out.dtype == xp.float32
+        xpt.assert_allclose(out, xp.asarray(expected), atol=1e-5)
+
+    def test_apply_delay_empty_and_invalid_shape(self, xp):
+        empty = xp.zeros(0, dtype=xp.float32)
+        out = timing.apply_delay(empty, delay=0.25)
+        assert out.shape == (0,) and out.dtype == xp.float32
+
+        sig2 = xp.ones((2, 64), dtype=xp.complex64)
+        with pytest.raises(ValueError, match="delay"):
+            timing.apply_delay(sig2, delay=np.array([0.1, 0.2, 0.3]))
+        with pytest.raises(ValueError, match="delay"):
+            timing.apply_delay(sig2, delay=np.zeros((2, 2)))
+
+    def test_mimo_metric_uses_winning_tx_stream_energy(self, xp):
+        """When TX preambles have unequal energy, coherence uses the matched stream."""
+        zc0 = timing.zadoff_chu_sequence(63, root=1)
+        zc1 = timing.zadoff_chu_sequence(63, root=2) * 3.0  # 9x energy
+        template = xp.asarray(np.stack([zc0, zc1]).astype(np.complex64))
+        rx = xp.zeros((2, 256), dtype=xp.complex64)
+        # Swap streams: rx[0] receives zc1, rx[1] receives zc0
+        rx[0, 50 : 50 + 63] = template[1]
+        rx[1, 50 : 50 + 63] = template[0]
+        est = timing.estimate_timing(rx, template=template)
+        np.testing.assert_allclose(to_numpy(est.coherence), [1.0, 1.0], atol=1e-4)

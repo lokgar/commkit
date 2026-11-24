@@ -1320,3 +1320,44 @@ class TestIIRKernel:
         assert out.dtype == dtype
         rtol = 1e-6 if dtype in (np.float32, np.complex64) else 1e-9
         xpt.assert_allclose(out, xp.asarray(expected), rtol=rtol, atol=rtol)
+
+    @pytest.mark.parametrize("zero_phase", [False, True])
+    def test_more_than_16_sections_on_gpu_matches_cpu(
+        self, backend_device: str, xp: Any, xpt: Any, zero_phase: bool
+    ) -> None:
+        """Above the 16-section GPU kernel cap, iir_filter routes to CPU and matches."""
+        skip_unless_gpu(backend_device)
+        rng = np.random.default_rng(17)
+        x = (rng.standard_normal((2, 512)) + 1j * rng.standard_normal((2, 512))).astype(
+            np.complex64
+        )
+        # 20 second-order sections (40th-order Butterworth)
+        sos = filtering.butterworth_sos(sampling_rate=1.0, cutoff=0.1, order=40)
+        assert sos.shape[0] == 20
+        expected = filtering.iir_filter(x, sos=sos, zero_phase=zero_phase)
+        out = filtering.iir_filter(xp.asarray(x), sos=sos, zero_phase=zero_phase)
+        assert type(out) is xp.ndarray
+        assert out.dtype == np.complex64
+        xpt.assert_allclose(out, xp.asarray(expected), rtol=1e-5, atol=1e-5)
+
+
+def test_pulse_taps_silent_and_validates_sps(caplog: pytest.LogCaptureFixture) -> None:
+    """Pulse value objects do not log and reject non-positive / non-finite / bool sps."""
+    import logging
+
+    pulses = [
+        filtering.RRC(rolloff=0.25, span=8),
+        filtering.RC(rolloff=0.25, span=8),
+        filtering.Gaussian(fwhm=0.5, span=4),
+        filtering.Rect(),
+        filtering.SmoothRect(rise_time=0.2),
+    ]
+    with caplog.at_level(logging.DEBUG, logger="commkit"):
+        for p in pulses:
+            p.taps(4)
+    assert not [r for r in caplog.records if r.filename == "pulses.py"]
+
+    for p in pulses[:3]:
+        for bad in (0, -2, float("nan"), float("inf"), True):
+            with pytest.raises(ValueError, match="sps"):
+                p.taps(bad)  # type: ignore[arg-type]

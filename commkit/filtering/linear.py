@@ -17,7 +17,7 @@ from .. import _cuda, _fft
 from .._array import as_2d, restore_1d
 from .._circular import convolve_periodic
 from .._overlap_save import ols_apply
-from ..backend import ArrayType, _to_host, dispatch
+from ..backend import ArrayType, _to_host, dispatch, to_device
 from ..core._signal_input import S, SignalInput
 from ..logger import logger
 from ..math import _next_pow2, normalize
@@ -613,9 +613,11 @@ def _get_numba_sos() -> Any:
 
 # Samples per block and blocks per group of the GPU filter: enough threads
 # for long records, and short sequential carries (G steps per group, one
-# step per group across the record).
+# step per group across the record).  Sections above _GPU_IIR_MAX_SECTIONS
+# exceed the GPU kernel's static state size and run on the CPU Numba kernel.
 _IIR_BLOCK = 256
 _IIR_GROUP = 32
+_GPU_IIR_MAX_SECTIONS = 16
 _IIR_TRANSITIONS: dict[tuple[bytes, int, int], np.ndarray] = {}
 
 
@@ -651,17 +653,25 @@ def _sosfilt(sos: np.ndarray, x: ArrayType, zi: ArrayType, xp: Any) -> ArrayType
 
     ``sos`` is float64 on the host; ``zi`` is ``(C, S, 2)`` in float64 or
     complex128 on the device of ``x`` and is not modified.  The Numba kernel
-    on the CPU, the block-parallel ``iir`` kernel on the GPU, both in double
-    precision.  Returns ``(C, N)`` in the dtype of ``x``.
+    on the CPU, the block-parallel ``iir`` kernel on the GPU (up to 16
+    sections; larger cascades route to the CPU Numba kernel with one round
+    trip), both in double precision.  Returns ``(C, N)`` in the dtype of ``x``.
     """
     x = xp.ascontiguousarray(x)
     if xp is not np:
-        block = min(_IIR_BLOCK, max(1, x.shape[-1]))
-        group = max(1, min(_IIR_GROUP, -(-x.shape[-1] // block)))
-        transitions = _iir_transitions(sos, block, group)
-        return _cuda.get_kernel("iir")(
-            sos, x, xp.ascontiguousarray(zi), block, group, transitions
-        )
+        if sos.shape[0] <= _GPU_IIR_MAX_SECTIONS:
+            block = min(_IIR_BLOCK, max(1, x.shape[-1]))
+            group = max(1, min(_IIR_GROUP, -(-x.shape[-1] // block)))
+            transitions = _iir_transitions(sos, block, group)
+            return _cuda.get_kernel("iir")(
+                sos, x, xp.ascontiguousarray(zi), block, group, transitions
+            )
+        # GPU kernel caps sections at 16; dispatch to the general CPU kernel.
+        x_cpu = np.ascontiguousarray(to_device(x, "cpu"))
+        zi_cpu = np.ascontiguousarray(to_device(zi, "cpu"))
+        y_cpu = np.empty_like(x_cpu)
+        _get_numba_sos()(sos, x_cpu, zi_cpu, y_cpu)
+        return to_device(y_cpu, "gpu")
     y = np.empty_like(x)
     _get_numba_sos()(sos, x, zi.copy(), y)
     return y
@@ -691,7 +701,12 @@ def _zero_phase_padding(sos: np.ndarray, num_samples: int) -> int:
 
 
 def _sosfiltfilt(
-    sos: np.ndarray, x: ArrayType, state_dtype: type, xp: Any
+    sos: np.ndarray,
+    x: ArrayType,
+    state_dtype: type,
+    xp: Any,
+    *,
+    edge: int | None = None,
 ) -> ArrayType:
     """Zero-phase SOS filter of ``(C, N)`` data, as ``scipy.signal.sosfiltfilt``.
 
@@ -705,7 +720,8 @@ def _sosfiltfilt(
     ValueError
         If the record is not longer than the extension.
     """
-    edge = _zero_phase_padding(sos, x.shape[-1])
+    if edge is None:
+        edge = _zero_phase_padding(sos, x.shape[-1])
     # Odd extension in the data's precision (2·x[0] - x[k] with a Python 2).
     left = 2 * x[:, :1] - x[:, edge:0:-1]
     right = 2 * x[:, -1:] - x[:, -2 : -(edge + 2) : -1]
@@ -771,8 +787,9 @@ def iir_filter(
     filter is computed in it too.  On the CPU a Numba kernel filters each
     channel sample by sample (double input gives SciPy's result bit for
     bit).  On the GPU a CUDA kernel filters blocks of the record in parallel
-    and carries the state across them; it agrees with SciPy to about 1e-14
-    at ordinary cutoffs and 2e-10 at ``1e-5·f_s``.
+    and carries the state across them (up to 16 sections; larger cascades
+    route to the CPU Numba kernel with one host round trip); it agrees with
+    SciPy to about 1e-14 at ordinary cutoffs and 2e-10 at ``1e-5·f_s``.
     """
     inp = SignalInput(samples, "iir_filter()")
     x, xp, _ = dispatch(inp.samples)
@@ -797,11 +814,10 @@ def iir_filter(
     if x.dtype not in (np.float32, np.float64, np.complex64, np.complex128):
         x = x.astype(np.complex128 if complex_input else np.float64)
     state_dtype = np.complex128 if complex_input else np.float64
-    if zero_phase:
-        _zero_phase_padding(sos_np, x.shape[-1])
+    edge = _zero_phase_padding(sos_np, x.shape[-1]) if zero_phase else None
     x2, was_1d = as_2d(x, name="samples")
     if zero_phase:
-        y = _sosfiltfilt(sos_np, x2, state_dtype, xp)
+        y = _sosfiltfilt(sos_np, x2, state_dtype, xp, edge=edge)
     else:
         zi = xp.zeros((x2.shape[0], sos_np.shape[0], 2), dtype=state_dtype)
         y = _sosfilt(sos_np, x2, zi, xp)

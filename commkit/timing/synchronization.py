@@ -375,34 +375,41 @@ def apply_delay(samples: S, *, delay: float | ArrayType) -> S:
 
     C, N = x.shape
 
-    # Convert delay to array
-    if isinstance(delay, (int, float)):
-        delay_arr = xp.full(C, delay, dtype=xp.float64)
-    else:
-        delay_arr = xp.asarray(delay, dtype=xp.float64)
-        if delay_arr.ndim == 0:
-            delay_arr = delay_arr[None]
+    # Validate and broadcast delay to (C,).
+    delay_arr = xp.asarray(delay, dtype=xp.float64)
+    if delay_arr.ndim == 0:
+        delay_arr = xp.broadcast_to(delay_arr, (C,))
+    elif delay_arr.ndim != 1 or delay_arr.shape[0] not in (1, C):
+        raise ValueError(
+            f"apply_delay(): delay must be a scalar or have shape ({C},), "
+            f"got {delay_arr.shape}."
+        )
+    elif delay_arr.shape[0] == 1 and C > 1:
+        delay_arr = xp.broadcast_to(delay_arr, (C,))
 
-    # FFT
-    spec = _fft.fft(x, axis=-1)
+    if N == 0:
+        return inp.wrap(restore_1d(was_1d, x.copy()))
 
-    # Frequency axis: normalized frequencies in cycles/sample
-    freqs = xp.fft.fftfreq(N, d=1.0)
-
-    # spec · exp(-j 2π f delay): positive delay shifts the signal right.  The
-    # phase in float64, the rotation in the spectrum's precision.
-    spec_delayed = _derotate(spec, 2.0 * np.pi * freqs[None, :] * delay_arr[:, None])
-
-    # IFFT
-    result = _fft.ifft(spec_delayed, axis=-1)
-
-    # Dtype restoration: mirrors the impairments.py pattern.
     if not xp.iscomplexobj(x):
-        # Real input: fractional delay is a real-valued operation
-        result = result.real
-    elif result.dtype != x.dtype:
-        # Complex input: ifft may return complex128 from complex64 input
-        result = result.astype(x.dtype)
+        # Real input: half-spectrum rfft/irfft keeps the output real with half
+        # the FFT work and spectrum memory.
+        spec = _fft.rfft(x, axis=-1)
+        freqs = xp.fft.rfftfreq(N, d=1.0)
+        spec_delayed = _derotate(
+            spec, 2.0 * np.pi * freqs[None, :] * delay_arr[:, None]
+        )
+        result = _fft.irfft(spec_delayed, n=N, axis=-1)
+        if x.dtype.kind == "f" and result.dtype != x.dtype:
+            result = result.astype(x.dtype)
+    else:
+        spec = _fft.fft(x, axis=-1)
+        freqs = xp.fft.fftfreq(N, d=1.0)
+        spec_delayed = _derotate(
+            spec, 2.0 * np.pi * freqs[None, :] * delay_arr[:, None]
+        )
+        result = _fft.ifft(spec_delayed, axis=-1)
+        if result.dtype != x.dtype:
+            result = result.astype(x.dtype)
 
     return inp.wrap(restore_1d(was_1d, result))
 
@@ -525,9 +532,9 @@ def estimate_timing(
             )
         offset = int(start)
 
-    corr, corr_mag = _timing_correlation(x, ref, xp)
+    corr, corr_mag, best_tx = _timing_correlation(x, ref, xp)
     peak_indices = xp.argmax(corr_mag, axis=-1)  # (C,)
-    metrics, coherence = _timing_metrics(x, ref, corr_mag, peak_indices, xp)
+    metrics, coherence = _timing_metrics(x, ref, corr_mag, peak_indices, best_tx, xp)
     # Diagnostics from one batched D2H per array, not per channel.
     metrics_np = to_device(metrics, "cpu")
     _check_timing(metrics_np, to_device(coherence, "cpu"), threshold)
@@ -602,8 +609,9 @@ def _timing_template(
     return to_device(ref, "cpu" if xp is np else "gpu")
 
 
-def _timing_correlation(x: ArrayType, ref: ArrayType, xp: Any) -> tuple[Any, Any]:
-    """Correlation of ``(C, N)`` samples with the template, and its magnitude.
+def _timing_correlation(x: ArrayType, ref: ArrayType, xp: Any) -> tuple[Any, Any, Any]:
+    """Correlation of ``(C, N)`` samples with the template, its magnitude and
+    the winning TX stream index ``(C,)`` per RX channel.
 
     A multi-stream template correlates every stream with every channel, and
     each channel keeps the stream of its strongest peak: the lag stays an
@@ -615,7 +623,7 @@ def _timing_correlation(x: ArrayType, ref: ArrayType, xp: Any) -> tuple[Any, Any
     """
     if ref.shape[0] == 1:
         corr = cross_correlate(x, ref, mode="positive_lags")
-        return corr, xp.abs(corr)
+        return corr, xp.abs(corr), xp.zeros(x.shape[0], dtype=xp.int64)
     # One transform of the signal: corr_all[rx, tx, lag], (C_rx, C_tx, N_lag),
     # the positive lags of cross_correlate.
     N_lag, L = x.shape[-1], ref.shape[-1]
@@ -628,24 +636,30 @@ def _timing_correlation(x: ArrayType, ref: ArrayType, xp: Any) -> tuple[Any, Any
     # On-device gathers, no per-channel host sync: (C_rx, N_lag).
     pick = best_tx[:, None, None]
     corr = xp.take_along_axis(corr_all, pick, axis=1)[:, 0]
-    return corr, xp.take_along_axis(corr_all_mag, pick, axis=1)[:, 0]
+    return corr, xp.take_along_axis(corr_all_mag, pick, axis=1)[:, 0], best_tx
 
 
 def _timing_metrics(
-    x: ArrayType, ref: ArrayType, corr_mag: ArrayType, peaks: ArrayType, xp: Any
+    x: ArrayType,
+    ref: ArrayType,
+    corr_mag: ArrayType,
+    peaks: ArrayType,
+    best_tx: ArrayType,
+    xp: Any,
 ) -> tuple[Any, Any]:
     """Peak-to-average metric and coherence per channel, ``(C,)`` each.
 
     The metric is the peak's prominence over the correlation floor;
     magnitudes keep it insensitive to a CFO rotation and to pulse-shape
     mismatch.  The coherence, bounded to [0, 1] by Cauchy-Schwarz, divides
-    the peak by the energies of the template and of the signal in the
-    template-long window at the peak, so a matched template gives about 1
-    whatever the rest of the record holds.
+    the peak by the energies of the winning template stream and of the signal
+    in the template-long window at the peak, so a matched template gives
+    about 1 whatever the rest of the record holds.
     """
     C, N = x.shape
     L = ref.shape[-1]
-    e_ref = xp.full(C, xp.mean(xp.sum(xp.abs(ref) ** 2, axis=-1)))
+    e_streams = xp.sum(xp.abs(ref) ** 2, axis=-1)  # (C_tx,)
+    e_ref = e_streams[best_tx]  # (C_rx,)
     # The window at each peak by one gather on the device, cut at the record's
     # end: no host sync and no launch per channel.
     idx = peaks[:, None] + xp.arange(L)[None, :]  # (C, L)

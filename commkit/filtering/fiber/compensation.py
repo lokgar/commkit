@@ -158,7 +158,8 @@ def correct_chromatic_dispersion(
     Returns
     -------
     ndarray or Signal
-        Compensated samples, same shape, dtype and device as the input.
+        Compensated samples, same shape, precision and device as the input
+        (complex for real input).
         On a capture the first and last half spread (about
         ``(num_taps - 1) // 2`` samples) are wrong with either method, see
         Notes.
@@ -276,7 +277,9 @@ def correct_chromatic_dispersion(
         center_wavelength_nm,
         taps.size,
     )
-    x, _, _ = dispatch(inp.samples)
+    x, xp, _ = dispatch(inp.samples)
+    if not xp.iscomplexobj(x):
+        x = x.astype(np.result_type(x.dtype, np.complex64))
     return inp.wrap(fir_filter(x, taps))
 
 

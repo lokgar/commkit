@@ -502,18 +502,18 @@ def _mth_power(
     x_m = x**M
 
     X_m = _fft.fft(x_m, n=nfft, axis=-1)  # (R, nfft)
-    freqs_np = np.fft.fftfreq(nfft, d=1.0 / fs)  # reported on the host
     mag = xp.abs(X_m)
+    tone_lo = tone_hi = 0.0
     if method.search_range is not None:
         tone_lo = M * min(method.search_range)
         tone_hi = M * max(method.search_range)
-        if not np.any((freqs_np >= tone_lo) & (freqs_np <= tone_hi)):
+        freqs = xp.fft.fftfreq(nfft, d=1.0 / fs)
+        mask = (freqs >= tone_lo) & (freqs <= tone_hi)
+        if not bool(xp.any(mask)):
             raise ValueError(
                 f"search_range {method.search_range} Hz produces an empty search "
                 f"window in the M={M} scaled spectrum."
             )
-        freqs = xp.fft.fftfreq(nfft, d=1.0 / fs)
-        mask = (freqs >= tone_lo) & (freqs <= tone_hi)
         mag = xp.where(mask[None, :], mag, xp.zeros_like(mag))
 
     if shared_rows:
@@ -543,7 +543,7 @@ def _mth_power(
         return FrequencyOffsetEstimate(values, weights)
     # The diagnostic spectrum in ascending frequency, cut to the search range
     # (the mask zeroed every other bin), gathered on the device.
-    f_sorted = np.fft.fftshift(freqs_np)
+    f_sorted = np.fft.fftshift(np.fft.fftfreq(nfft, d=1.0 / fs))
     lo, hi = 0, nfft
     if method.search_range is not None:
         lo = int(np.searchsorted(f_sorted, tone_lo, side="left"))
@@ -769,13 +769,20 @@ def _estimate_frequency_offset(
     if isinstance(method, PilotSlope) or method.block_size is None:
         est = estimator(x, fs, method, constellation, True, was_1d)
     else:
-        starts, length = _block_starts(N, method.block_size, method.overlap)
-        B = len(starts)
-        # All blocks of all channels in one batched call: rows (C * B, L).
-        blocks = xp.stack([x[:, s : s + length] for s in starts], axis=1)
-        rows = estimator(
-            blocks.reshape(C * B, length), fs, method, constellation, False, False
-        )
+        if N < method.block_size:
+            B, length, step = 1, N, 1
+            blocks = x[:, None, :]
+        else:
+            step = max(1, round(method.block_size * (1.0 - method.overlap)))
+            length = method.block_size
+            B = (N - length) // step + 1
+            s0, s1 = x.strides
+            blocks = xp.lib.stride_tricks.as_strided(
+                x, shape=(C, B, length), strides=(s0, step * s1, s1)
+            )
+        # Zero-copy 2-D view for SISO; single batched call for all channels.
+        rows_in = blocks[0] if C == 1 else blocks.reshape(C * B, length)
+        rows = estimator(rows_in, fs, method, constellation, False, False)
         block_values = rows.value.reshape(C, B)
         block_weights = rows.weights.reshape(C, B)
         values, weights, block_values = restore_1d(
@@ -787,7 +794,7 @@ def _estimate_frequency_offset(
         est = BlockwiseFrequencyEstimate(
             value=values,
             weights=weights,
-            block_centers=np.array([s + length / 2.0 for s in starts]),
+            block_centers=np.arange(B, dtype=np.float64) * step + length / 2.0,
             block_values=block_values,
         )
 
@@ -908,6 +915,8 @@ def _correct_blockwise(
         n_clamped = xp.clip(n_grid, float(block_centers[0]), float(block_centers[-1]))
         df_dense = PchipInterpolator(centers, df, axis=-1)(n_clamped)  # (C_interp, N)
     theta = (2.0 * np.pi / fs) * xp.cumsum(df_dense, axis=-1)
+    if N > 0:
+        theta = theta - theta[:, :1]
     if theta.shape[0] == 1 and C > 1:
         theta = xp.broadcast_to(theta, (C, N))
 

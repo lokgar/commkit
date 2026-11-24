@@ -128,11 +128,17 @@ def filter_response(
         if not bool(xp.all(xp.isfinite(f))):
             raise ValueError("frequencies must be finite")
         f = f.astype(xp.float64, copy=False)
-    # Wrap before forming the phase: multiplying a large frequency by 2π
-    # first discards its fractional cycle, especially in single precision.
-    cycles = xp.remainder(f, scale) / scale
     dtype = xp.result_type(b.dtype, a.dtype if a is not None else b.dtype, xp.complex64)
-    z = _phasor(-2 * np.pi * cycles, dtype, xp)
+    z: ArrayType | None = None
+
+    def unit_circle() -> ArrayType:
+        # Wrap before forming the phase: multiplying a large frequency by 2π
+        # first discards its fractional cycle, especially in single precision.
+        nonlocal z
+        if z is None:
+            cycles = xp.remainder(f, scale) / scale
+            z = _phasor(-2 * np.pi * cycles, dtype, xp)
+        return z
 
     def evaluate(coeff: ArrayType) -> tuple[ArrayType, ArrayType]:
         coeff = coeff.astype(dtype, copy=False)
@@ -155,8 +161,9 @@ def filter_response(
                 value = _fft.fft(coeff, n=fft_size)[:nfft]
                 weighted = _fft.fft(weighted_coeff, n=fft_size)[:nfft]
         else:
-            value = xp.polyval(coeff[::-1], z)
-            weighted = xp.polyval(weighted_coeff[::-1], z)
+            zc = unit_circle()
+            value = xp.polyval(coeff[::-1], zc)
+            weighted = xp.polyval(weighted_coeff[::-1], zc)
         return value, weighted
 
     response = xp.ones(f.size, dtype=dtype)

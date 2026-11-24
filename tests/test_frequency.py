@@ -772,7 +772,8 @@ class TestCorrectFrequencyOffsetBlockwise:
     @pytest.mark.parametrize("rows", [1, 2], ids=["shared", "per-channel"])
     def test_phase_is_the_integrated_pchip_of_the_blocks(self, xp, xpt, rows):
         """The removed phase is ``2π/fs · cumsum`` of the PCHIP-interpolated
-        block values, held constant outside the block centers."""
+        block values, anchored at ``theta[0] = 0`` and held constant outside
+        the block centers."""
         from scipy.interpolate import PchipInterpolator
 
         N = 6000
@@ -786,8 +787,21 @@ class TestCorrectFrequencyOffsetBlockwise:
         centers = est.block_centers
         n = np.clip(np.arange(N, dtype=np.float64), centers[0], centers[-1])
         df = PchipInterpolator(centers, np.atleast_2d(est.block_values), axis=-1)(n)
-        theta = np.broadcast_to(2 * np.pi / self.FS * np.cumsum(df, axis=-1), (2, N))
+        theta = 2 * np.pi / self.FS * np.cumsum(df, axis=-1)
+        theta = np.broadcast_to(theta - theta[:, :1], (2, N))
         xpt.assert_allclose(out, xp.asarray(np.exp(-1j * theta)), atol=2e-6)
+
+    def test_constant_blockwise_matches_static_phase_origin(self, xp, xpt):
+        """A constant blockwise estimate matches static correction (theta[0] == 0)."""
+        N = 4096
+        fo_hz = 10_000.0
+        sig = _qam_signal(xp, 4, N, fo_hz=fo_hz).samples
+        est = _block_estimate(N, 512, 0.5, lambda b: np.full(b, fo_hz))
+        out_block = frequency.correct_frequency_offset(sig, est, sampling_rate=self.FS)
+        out_static = frequency.correct_frequency_offset(
+            sig, fo_hz, sampling_rate=self.FS
+        )
+        xpt.assert_allclose(out_block, out_static, atol=2e-5)
 
     def test_output_on_same_device(self, xp):
         """Output array is on the same backend as the input."""
