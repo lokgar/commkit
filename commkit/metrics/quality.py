@@ -118,9 +118,7 @@ def evm(
         ref_pwr = tx_pwr[..., 0]
 
     error_power = xp.mean(xp.abs(rx - tx) ** 2, axis=axis, dtype=xp.float64)
-    if blind:
-        error_power = error_power / xp.where(ref_pwr < 1e-20, 1.0, ref_pwr)
-    # Data-aided: the reference power is 1 after normalization.
+    error_power = error_power / xp.where(ref_pwr < 1e-20, 1.0, ref_pwr)
     evm_percent = xp.sqrt(error_power) * 100.0
     evm_percent = xp.where(ref_pwr < 1e-20, xp.inf, evm_percent)
     out = to_report_scalar(evm_percent)
@@ -190,9 +188,10 @@ def noise_variance(
     >>> noise_var = float(np.mean(noise_variance(y)))
     >>> llrs = compute_llr(y, noise_var=noise_var)
     """
-    noise_power, _, _ = _error_power(
+    noise_power, ref_pwr, xp = _error_power(
         symbols, reference, num_skip_symbols, "noise_variance()"
     )
+    noise_power = noise_power / xp.where(ref_pwr < 1e-20, 1.0, ref_pwr)
     out = to_report_scalar(noise_power)
     if isinstance(out, float):
         logger.info("Noise variance: %.3e", out)
@@ -243,8 +242,8 @@ def snr(
     noise_power, ref_pwr, xp = _error_power(
         symbols, reference, num_skip_symbols, "snr()"
     )
-    with np.errstate(divide="ignore"):
-        snr_db = linear_to_db(1.0 / noise_power, power=True)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        snr_db = linear_to_db(ref_pwr / noise_power, power=True)
     # No error: +inf even for a zero reference; error but no reference: -inf.
     zero_noise = noise_power < 1e-20
     snr_db = xp.where(zero_noise, xp.inf, snr_db)

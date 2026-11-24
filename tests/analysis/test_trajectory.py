@@ -110,3 +110,13 @@ class TestCarrierPhaseTrajectory:
             analysis.carrier_phase_trajectory(sig)
         with pytest.raises(ValueError, match="one sample per symbol"):
             analysis.carrier_phase_trajectory(sig.replace(sampling_rate=2 * R))
+
+    def test_carrier_phase_trajectory_validation(self, xp):
+        y = xp.ones((3, 16), dtype=xp.complex64)
+        with pytest.raises(ValueError, match="channel_pairing"):
+            analysis.carrier_phase_trajectory(y, y, channel_pairing="bad")
+        with pytest.raises(ValueError, match="2 channels"):
+            analysis.carrier_phase_trajectory(y, y, channel_pairing="swap")
+        empty = xp.zeros(0, dtype=xp.complex64)
+        with pytest.raises(ValueError, match="non-empty"):
+            analysis.carrier_phase_trajectory(empty, empty)

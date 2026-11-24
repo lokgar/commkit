@@ -53,3 +53,18 @@ class TestFrequencyDriftAnalysis:
         dr = to_numpy(drift)[edge:-edge]
         sl = slow[edge:-edge]
         assert float(np.std(dr - sl)) < 0.05
+
+    def test_frequency_drift_validation(self, xp: Any) -> None:
+        phi = xp.zeros(16, dtype=xp.float64)
+        with pytest.raises(ValueError, match="sampling_rate"):
+            analysis.frequency_drift(phi, sampling_rate=0.0)
+        with pytest.raises(ValueError, match="edge_trim"):
+            analysis.frequency_drift(phi, sampling_rate=R, edge_trim=-1)
+        with pytest.raises(ValueError, match="edge_trim"):
+            analysis.frequency_drift(
+                phi,
+                sampling_rate=R,
+                edge_trim=True,  # type: ignore[arg-type]
+            )
+        with pytest.raises(ValueError, match="at least 2 samples"):
+            analysis.frequency_drift(phi, sampling_rate=R, edge_trim=8)

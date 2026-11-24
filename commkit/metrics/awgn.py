@@ -29,6 +29,7 @@ QAM, PSK, cross and star constellations).
 
 import logging
 import math
+from functools import cache
 from typing import Any
 
 import numpy as np
@@ -278,11 +279,21 @@ def awgn_ber(constellation: Constellation, *, esn0_db: Any) -> float | np.ndarra
     return _out(ber, scalar, shape)
 
 
+@cache
+def _hermgauss(order: int) -> tuple[np.ndarray, np.ndarray]:
+    """Cached Gauss-Hermite nodes and weights normalized to sum to 1."""
+    t, w = np.polynomial.hermite.hermgauss(order)
+    t.setflags(write=False)
+    w = w / math.sqrt(math.pi)
+    w.setflags(write=False)
+    return t, w
+
+
 def _nodes(order: int, n0: float) -> tuple[np.ndarray, np.ndarray]:
     """Gauss-Hermite nodes for noise of variance ``N0/2`` and their weights
     (summing to 1)."""
-    t, w = np.polynomial.hermite.hermgauss(order)
-    return math.sqrt(n0) * t, w / math.sqrt(math.pi)
+    t, w = _hermgauss(order)
+    return math.sqrt(n0) * t, w
 
 
 def _axis_terms(levels: np.ndarray, n0: float) -> np.ndarray:

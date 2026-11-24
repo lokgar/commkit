@@ -73,3 +73,22 @@ class TestAllanDeviation:
         assert len(out.taus) == len(out.adev)
         with pytest.raises(AttributeError):
             out.adev = None  # type: ignore[misc]
+
+    def test_validation(self, xp: Any) -> None:
+        y = xp.zeros(16, dtype=xp.float64)
+        with pytest.raises(ValueError, match="sampling_rate"):
+            analysis.allan_deviation(y, sampling_rate=0.0)
+        with pytest.raises(ValueError, match="num_taus"):
+            analysis.allan_deviation(y, sampling_rate=R, num_taus=0)
+        with pytest.raises(ValueError, match="num_taus"):
+            analysis.allan_deviation(
+                y,
+                sampling_rate=R,
+                num_taus=True,  # type: ignore[arg-type]
+            )
+        with pytest.raises(ValueError, match="at least 2 samples"):
+            analysis.allan_deviation(xp.zeros(1, dtype=xp.float64), sampling_rate=R)
+        with pytest.raises(ValueError, match="taus"):
+            analysis.allan_deviation(y, sampling_rate=R, taus=[])
+        with pytest.raises(ValueError, match="taus"):
+            analysis.allan_deviation(y, sampling_rate=R, taus=[-1.0])

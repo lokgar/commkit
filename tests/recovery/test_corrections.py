@@ -753,3 +753,52 @@ class TestInterpBlockPhases:
         out = _interp_block_phases(xp.asarray(phi), N, block_size, xp)
         assert out.dtype == xp.float64
         xpt.assert_allclose(out, xp.asarray(expected), rtol=0, atol=1e-14)
+
+
+class TestCorrectionValidation:
+    """Parameter validation on smooth_phase and resolve_phase_ambiguity."""
+
+    def test_smooth_phase_validation(self, xp):
+        phi = xp.zeros(16, dtype=xp.float64)
+        with pytest.raises(ValueError, match="not both"):
+            recovery.smooth_phase(
+                phi,
+                process_variance=1e-4,
+                measurement_variance=1e-2,
+                linewidth=1e5,
+                sampling_rate=1e9,
+            )
+        with pytest.raises(ValueError, match="variance"):
+            recovery.smooth_phase(phi, process_variance=0.0, measurement_variance=1e-2)
+        with pytest.raises(ValueError, match="variance"):
+            recovery.smooth_phase(phi, process_variance=1e-4, measurement_variance=-1.0)
+        with pytest.raises(ValueError, match="linewidth"):
+            recovery.smooth_phase(
+                phi, linewidth=-1.0, sampling_rate=1e9, measurement_variance=1e-2
+            )
+        with pytest.raises(ValueError, match="sampling_rate"):
+            recovery.smooth_phase(
+                phi, linewidth=1e5, sampling_rate=0.0, measurement_variance=1e-2
+            )
+        with pytest.raises(ValueError, match="non-empty"):
+            recovery.smooth_phase(
+                xp.zeros(0, dtype=xp.float64),
+                process_variance=1e-4,
+                measurement_variance=1e-2,
+            )
+
+    def test_resolve_phase_ambiguity_validation(self, xp):
+        sym = xp.ones(16, dtype=xp.complex64)
+        with pytest.raises(ValueError, match="symmetry"):
+            recovery.resolve_phase_ambiguity(sym, sym, symmetry=0)
+        with pytest.raises(ValueError, match="symmetry"):
+            recovery.resolve_phase_ambiguity(sym, sym, symmetry=True)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="num_skip_symbols"):
+            recovery.resolve_phase_ambiguity(sym, sym, symmetry=4, num_skip_symbols=-1)
+        with pytest.raises(ValueError, match="num_skip_symbols"):
+            recovery.resolve_phase_ambiguity(
+                sym,
+                sym,
+                symmetry=4,
+                num_skip_symbols=1.5,  # type: ignore[arg-type]
+            )

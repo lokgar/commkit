@@ -113,6 +113,10 @@ def correct_channel(
     else:
         channel_estimate = how
 
+    if not (np.isfinite(noise_var) and noise_var >= 0):
+        raise ValueError(
+            f"correct_channel(): noise_var must be finite and >= 0, got {noise_var!r}."
+        )
     logger.info(
         "correct_channel: %s, noise_var=%.2e",
         "MMSE" if noise_var > 0 else "ZF",
@@ -130,11 +134,21 @@ def correct_channel(
     siso_channel = channel_estimate.ndim == 1
 
     x, was_1d = as_2d(x, name="samples")
-    if was_1d and siso_channel:
-        channel_estimate = channel_estimate[None, None, :]
-
     num_ch, N = x.shape
-    L = channel_estimate.shape[-1] if channel_estimate.ndim > 0 else 1
+    if siso_channel:
+        if channel_estimate.size == 0:
+            raise ValueError("correct_channel(): channel taps must be non-empty.")
+        if was_1d:
+            channel_estimate = channel_estimate[None, None, :]
+    elif channel_estimate.ndim != 3 or channel_estimate.shape[:2] != (num_ch, num_ch):
+        raise ValueError(
+            f"correct_channel(): channel taps must have shape (L,) or "
+            f"({num_ch}, {num_ch}, L), got {channel_estimate.shape}."
+        )
+    elif channel_estimate.shape[-1] == 0:
+        raise ValueError("correct_channel(): channel taps must be non-empty.")
+
+    L = channel_estimate.shape[-1]
     center = 0 if center_tap is None else operator.index(center_tap)
     if not 0 <= center < L:
         raise ValueError(

@@ -161,12 +161,31 @@ def frequency_drift(
     matters only for band-limited content near Nyquist (see the Notes of
     :func:`fm_noise_psd`; broadband white FM is not affected).
     """
+    fs = float(sampling_rate)
+    if not (np.isfinite(fs) and fs > 0.0):
+        raise ValueError(
+            f"frequency_drift(): sampling_rate must be finite and > 0, got {sampling_rate!r}."
+        )
+    if (
+        isinstance(edge_trim, bool)
+        or not isinstance(edge_trim, int | np.integer)
+        or int(edge_trim) < 0
+    ):
+        raise ValueError(
+            f"frequency_drift(): edge_trim must be an integer >= 0, got {edge_trim!r}."
+        )
+    edge_trim = int(edge_trim)
     d, xp, _ = dispatch(drift_phase)
     d2, was_1d = as_2d(d, name="drift_phase")
     if edge_trim > 0:
         d2 = d2[:, edge_trim:-edge_trim]
+    if d2.shape[-1] < 2:
+        raise ValueError(
+            f"frequency_drift(): need at least 2 samples after edge_trim={edge_trim}, "
+            f"got {d2.shape[-1]}."
+        )
 
-    dt = 1.0 / float(sampling_rate)
+    dt = 1.0 / fs
     df = xp.diff(d2.astype(xp.float64), axis=-1) / (2.0 * np.pi * dt)
 
     # One D2H transfer for all three summaries instead of three syncs.

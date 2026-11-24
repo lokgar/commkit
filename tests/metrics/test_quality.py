@@ -196,3 +196,26 @@ class TestSignalToNoiseRatio:
         res = metrics.snr(rx, tx_mixed)
         assert res[0] == float("inf")
         assert res[1] == float("-inf")
+
+    def test_ref_power_within_unit_tolerance_is_unbiased(self, xp: Any) -> None:
+        """When |mean(|tx|^2) - 1| <= 1e-3, evm, snr and noise_variance all divide by ref_pwr."""
+        # Scale unit-power QPSK by sqrt(1.0008) so _unit_reference keeps tx unnormalized.
+        scale = np.sqrt(1.0008)
+        rng = np.random.default_rng(11)
+        tx = xp.asarray(
+            (Constellation.qam(4).points[rng.integers(0, 4, 2000)] * scale).astype(
+                np.complex64
+            )
+        )
+        # Deterministic zero-correlation noise of exact power 0.01 * scale^2 -> exact SNR = 20 dB.
+        sign = xp.where(xp.arange(2000) % 2 == 0, 1.0, -1.0).astype(np.float32)
+        noise = (0.1 * sign) * tx
+        rx = tx + noise
+        e = metrics.evm(rx, tx)
+        s = metrics.snr(rx, tx)
+        nv = metrics.noise_variance(rx, tx)
+        assert e == pytest.approx(10.0, rel=1e-5)
+        assert s == pytest.approx(20.0, abs=1e-4)
+        assert nv == pytest.approx(0.01, rel=1e-5)
+        assert nv == pytest.approx(10.0 ** (-s / 10.0), rel=1e-9)
+        assert (e / 100.0) ** 2 == pytest.approx(nv, rel=1e-9)

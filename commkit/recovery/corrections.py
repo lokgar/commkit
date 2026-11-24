@@ -151,16 +151,33 @@ def smooth_phase(
             raise ValueError(
                 "Provide process_variance, or both linewidth and sampling_rate."
             )
-        process_variance = 2.0 * np.pi * float(linewidth) / float(sampling_rate)
+        lw, fs = float(linewidth), float(sampling_rate)
+        if not (np.isfinite(lw) and lw > 0.0):
+            raise ValueError(
+                f"smooth_phase(): linewidth must be finite and > 0, got {linewidth!r}."
+            )
+        if not (np.isfinite(fs) and fs > 0.0):
+            raise ValueError(
+                f"smooth_phase(): sampling_rate must be finite and > 0, got {sampling_rate!r}."
+            )
+        process_variance = 2.0 * np.pi * lw / fs
+    elif linewidth is not None or sampling_rate is not None:
+        raise ValueError(
+            "smooth_phase(): provide process_variance or linewidth/sampling_rate, not both."
+        )
     if measurement_variance is None:
         raise ValueError("Provide measurement_variance.")
     q, r = float(process_variance), float(measurement_variance)
-    if q <= 0.0 or r <= 0.0:
-        raise ValueError(f"process/measurement variance must be > 0, got q={q}, r={r}.")
+    if not (np.isfinite(q) and q > 0.0 and np.isfinite(r) and r > 0.0):
+        raise ValueError(
+            f"process/measurement variance must be finite and > 0, got q={q}, r={r}."
+        )
 
     phase, xp, _ = dispatch(phase)
     phase, was_1d = as_2d(phase, name="phase")
     C, N = phase.shape
+    if N == 0:
+        raise ValueError("smooth_phase(): phase must be non-empty.")
     phi = phase.astype(xp.float64)
 
     # Detrend per channel so the DC-divergent random-walk PSD does not distort
@@ -729,6 +746,24 @@ def _resolve_phase_ambiguity_array(
     num_skip_symbols: int = 0,
 ) -> ArrayType:
     """Array-only rotational-ambiguity resolution."""
+    if symmetry is not None and (
+        isinstance(symmetry, bool)
+        or not isinstance(symmetry, int | np.integer)
+        or int(symmetry) < 1
+    ):
+        raise ValueError(
+            f"resolve_phase_ambiguity(): symmetry must be an integer >= 1, got {symmetry!r}."
+        )
+    if (
+        isinstance(num_skip_symbols, bool)
+        or not isinstance(num_skip_symbols, int | np.integer)
+        or int(num_skip_symbols) < 0
+    ):
+        raise ValueError(
+            f"resolve_phase_ambiguity(): num_skip_symbols must be an integer >= 0, "
+            f"got {num_skip_symbols!r}."
+        )
+    num_skip_symbols = int(num_skip_symbols)
     symbols, xp, _ = dispatch(symbols)
     symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
@@ -743,6 +778,8 @@ def _resolve_phase_ambiguity_array(
 
     if symmetry is None:
         symmetry = int(constellation.rotational_symmetry)
+    else:
+        symmetry = int(symmetry)
 
     step = 2.0 * np.pi / symmetry
 

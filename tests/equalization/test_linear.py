@@ -438,3 +438,15 @@ class TestEstimateChannel:
         )
         with pytest.raises(ValueError, match="center_tap"):
             equalization.correct_channel(x, est, center_tap=0)
+
+    def test_correct_channel_validation(self, xp):
+        x = xp.ones(64, dtype=xp.complex64)
+        h = xp.asarray([1.0 + 0j], dtype=xp.complex64)
+        with pytest.raises(ValueError, match="noise_var"):
+            equalization.correct_channel(x, h, noise_var=-0.1)
+        with pytest.raises(ValueError, match="noise_var"):
+            equalization.correct_channel(x, h, noise_var=float("nan"))
+        with pytest.raises(ValueError, match="non-empty"):
+            equalization.correct_channel(x, xp.zeros(0, dtype=xp.complex64))
+        with pytest.raises(ValueError, match="shape"):
+            equalization.correct_channel(x, xp.ones((2, 3), dtype=xp.complex64))

@@ -79,17 +79,28 @@ def carrier_phase_trajectory(
       explicit noise estimate.
     """
     name = "carrier_phase_trajectory()"
+    if channel_pairing not in ("auto", "identity", "swap"):
+        raise ValueError(
+            f"{name}: channel_pairing must be 'auto', 'identity' or 'swap', "
+            f"got {channel_pairing!r}."
+        )
     inp = SignalInput(symbols, name)
     y, xp, _ = dispatch(inp.symbols())
     reference = inp.reference_symbols(reference, required=True)
 
     y2, was_1d = as_2d(y, name="symbols")
     c = y2.shape[0]
+    if channel_pairing == "swap" and c > 2:
+        raise ValueError(
+            f"{name}: channel_pairing='swap' is only defined for 2 channels, got {c}."
+        )
     d2 = broadcast_channels(
         to_device(reference, "cpu" if xp is np else "gpu"), c, xp, name="reference"
     )
 
     n = min(y2.shape[-1], d2.shape[-1])
+    if n == 0:
+        raise ValueError(f"{name}: symbols and reference must be non-empty.")
     y2, d2 = y2[:, :n], d2[:, :n]
 
     if c > 1 and channel_pairing == "auto":

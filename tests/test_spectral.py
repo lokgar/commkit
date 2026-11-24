@@ -488,3 +488,8 @@ class TestGridFrequency:
         spec[0] = 0
         peak = int(xp.argmax(spec))
         assert (peak - n if peak > n // 2 else peak) * fs / n == pytest.approx(expected)
+
+
+def test_welch_psd_empty_raises(xp: Any) -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        spectral.welch_psd(xp.zeros(0, dtype=xp.complex64), sampling_rate=1e6)

@@ -82,10 +82,26 @@ def allan_deviation(
       scalloped ADEV with nulls at ``τ = k·T_m``; those dips are not a lower
       noise floor.
     """
+    fs = float(sampling_rate)
+    if not (np.isfinite(fs) and fs > 0.0):
+        raise ValueError(
+            f"allan_deviation(): sampling_rate must be finite and > 0, got {sampling_rate!r}."
+        )
+    if (
+        isinstance(num_taus, bool)
+        or not isinstance(num_taus, int | np.integer)
+        or int(num_taus) < 1
+    ):
+        raise ValueError(
+            f"allan_deviation(): num_taus must be an integer >= 1, got {num_taus!r}."
+        )
+    num_taus = int(num_taus)
     df_arr, xp, _ = dispatch(df)
     y2, was_1d = as_2d(df_arr, name="df")
     c, n = y2.shape
-    tau0 = 1.0 / float(sampling_rate)
+    if n < 2:
+        raise ValueError(f"allan_deviation(): df needs at least 2 samples, got {n}.")
+    tau0 = 1.0 / fs
 
     # Cumulative phase (time error) x_i = Σ y · τ0, in one float64 buffer.
     x = xp.empty((c, n + 1), dtype=xp.float64)
@@ -98,6 +114,15 @@ def allan_deviation(
         ms = np.unique(np.round(np.geomspace(1, m_max, num_taus)).astype(int))
     else:
         taus_cpu = _to_host(taus, np.float64)
+        if (
+            taus_cpu.ndim != 1
+            or taus_cpu.size == 0
+            or not np.all(np.isfinite(taus_cpu) & (taus_cpu > 0.0))
+        ):
+            raise ValueError(
+                "allan_deviation(): taus must be a non-empty 1-D array of finite "
+                "values > 0."
+            )
         ms = np.unique(np.maximum(1, np.round(taus_cpu / tau0).astype(int)))
         ms = ms[ms <= max(1, (x.shape[-1] - 1) // 2)]
 

@@ -541,7 +541,7 @@ def _welch(
 
     f = xp.fft.rfftfreq(nfft, 1 / fs) if onesided else xp.fft.fftfreq(nfft, 1 / fs)
     if n == 0:
-        return f, xp.empty(x.shape, dtype=real)
+        raise ValueError("welch_psd(): samples must be non-empty.")
     win = xp.asarray(win, dtype=np.float64)
     if scaling == "density":
         scale = 1.0 / (fs * float(xp.sum(win * win)))
