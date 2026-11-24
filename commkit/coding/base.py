@@ -184,6 +184,8 @@ class _Codec:
     # Sequential on the host (distribution matchers): GPU input round-trips,
     # and generate() encodes before moving the payload.
     host: bool = False
+    # Custom recursive method validator/resolver for composite codes.
+    resolve_method: Callable[[Any, Any, str], Any] | None = None
 
 
 #: Codec per code class, filled by each code module as ``_CODECS[cls] = ...``.
@@ -202,6 +204,8 @@ def _codec(code: Any, function_name: str) -> _Codec:
 
 def _resolve_method(code: Any, method: Any, function_name: str) -> Any:
     codec = _codec(code, function_name)
+    if codec.resolve_method is not None:
+        return codec.resolve_method(code, method, function_name)
     if method is None:
         return codec.default_method(code)
     if not isinstance(method, codec.methods):

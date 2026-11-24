@@ -556,6 +556,22 @@ def _decode_repeat(code: _Repeat, llrs: ArrayType, method: Any) -> _Decoded:
     )
 
 
+def _resolve_concatenated(
+    code: Concatenated, method: Any, function_name: str
+) -> StageDecoders:
+    if method is None:
+        method = StageDecoders()
+    elif not isinstance(method, StageDecoders):
+        raise TypeError(
+            f"{function_name}: method {type(method).__name__} does not decode "
+            "Concatenated; use one of StageDecoders."
+        )
+    return StageDecoders(
+        inner=_resolve_method(code.inner, method.inner, function_name),
+        outer=_resolve_method(code.outer, method.outer, function_name),
+    )
+
+
 _CODECS[StaircaseCode] = _Codec(
     encode=_encode_staircase,
     decode=_decode_staircase,
@@ -570,6 +586,7 @@ _CODECS[Concatenated] = _Codec(
     methods=(StageDecoders,),
     # valid is the outer decoder's.
     checked=lambda code, method: _checked(code.outer, method.outer),
+    resolve_method=_resolve_concatenated,
 )
 _CODECS[_Repeat] = _Codec(
     encode=_encode_repeat,
@@ -577,4 +594,5 @@ _CODECS[_Repeat] = _Codec(
     default_method=lambda code: _resolve_method(code.code, None, "decode()"),
     methods=(object,),
     checked=lambda code, method: _checked(code.code, method),
+    resolve_method=lambda code, method, name: _resolve_method(code.code, method, name),
 )

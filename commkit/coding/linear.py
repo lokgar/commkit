@@ -432,7 +432,16 @@ def _decode_ml(
                 method.soft, best_metric, best, m0, m1,
             )  # fmt: skip
     else:
-        best, m0, m1 = _ml_gemm(llrs, g, k, words_chunk, method.soft)
+        best, m0_opt, m1_opt = _ml_gemm(llrs, g, k, words_chunk, method.soft)
+        return _Decoded(
+            unpack_bits(best, k),
+            # Max-log: half the metric is the log-likelihood up to a constant.
+            0.5 * (m0_opt - m1_opt)
+            if method.soft and m0_opt is not None and m1_opt is not None
+            else None,
+            xp.ones(rows, dtype=bool),
+            xp.ones(rows, dtype=np.int32),
+        )
     return _Decoded(
         unpack_bits(best, k),
         # Max-log: half the metric is the log-likelihood up to a constant.
@@ -444,18 +453,18 @@ def _decode_ml(
 
 def _ml_gemm(
     llrs: ArrayType, g: ArrayType, k: int, words_chunk: int, soft: bool
-) -> tuple[ArrayType, ArrayType, ArrayType]:
+) -> tuple[ArrayType, ArrayType | None, ArrayType | None]:
     """GPU maximum-likelihood search: correlations by GEMM, chunked over rows
     and codewords; best codeword index and per-bit maxima ``(m0, m1)``
-    (left at ``-inf`` without ``soft``)."""
+    (``None`` without ``soft``)."""
     _, xp, _ = dispatch(llrs)
     rows, n = llrs.shape
     num_words = 1 << k
     rows_chunk = max(1, _ML_CHUNK // words_chunk)
     best = xp.empty(rows, dtype=xp.int64)
-    m0 = xp.full((rows, n), -np.inf, dtype=xp.float32)
-    m1 = xp.full((rows, n), -np.inf, dtype=xp.float32)
-    reduce = _bit_max_kernel()
+    m0 = xp.full((rows, n), -np.inf, dtype=xp.float32) if soft else None
+    m1 = xp.full((rows, n), -np.inf, dtype=xp.float32) if soft else None
+    reduce = _bit_max_kernel() if soft else None
     for r0 in range(0, rows, rows_chunk):
         x = llrs[r0 : r0 + rows_chunk]
         best_metric = xp.full(x.shape[0], -np.inf, dtype=xp.float32)
@@ -471,6 +480,7 @@ def _ml_gemm(
             best_index = xp.where(better, arg + w0, best_index)
             if not soft:
                 continue
+            assert m0 is not None and m1 is not None and reduce is not None
             # Reduced over the codewords by broadcasting, without the
             # (rows, codewords, n) array: 4x faster than building it.
             for bit, out in ((0, m0), (1, m1)):

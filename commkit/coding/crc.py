@@ -88,7 +88,11 @@ class CRC(_Code):
             raise ValueError(f"info_bits must be an integer >= 1, got {k!r}.")
         for name in ("polynomial", "init", "xor_out"):
             value = getattr(self, name)
-            if not isinstance(value, int) or not 0 <= value < (1 << r):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 0 <= value < (1 << r)
+            ):
                 raise ValueError(f"{name} must be an integer in [0, 2^{r}).")
         if self.reflect_in and k % 8:
             raise ValueError("reflect_in needs info_bits that is a multiple of 8.")

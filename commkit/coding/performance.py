@@ -23,7 +23,14 @@ from .._array import freeze_host, host_array
 from ..backend import _module_for, _to_host, require_device, to_device
 from ..logger import logger
 from ..mapping import Constellation
-from .base import _checked, _decode_blocks, _encode_blocks, _resolve_method, _Value
+from .base import (
+    _checked,
+    _codec,
+    _decode_blocks,
+    _encode_blocks,
+    _resolve_method,
+    _Value,
+)
 
 __all__ = ["ErrorRateCurve", "error_rate_curve"]
 
@@ -278,6 +285,7 @@ def error_rate_curve(
             raise ValueError(f"{name}: {arg} must be >= 1, got {value}.")
     device = require_device(device, name)
     xp = _module_for(device)
+    host_encode = _codec(code, name).host
     gen = _random.as_generator(rng)
     k, n, m = int(code.k), int(code.n), constellation.bits_per_symbol
     es = constellation.power()
@@ -303,8 +311,13 @@ def error_rate_curve(
         noise_var = n0 if constellation.is_complex else n0 / 2
         while counts[0, i] < max_blocks and counts[2, i] < min_block_errors:
             b = int(min(batch, max_blocks - counts[0, i]))
-            info = to_device(gen.integers(0, 2, (b, k), dtype=np.int8), device)
-            bits = _encode_blocks(code, info).reshape(-1)
+            info_host = gen.integers(0, 2, (b, k), dtype=np.int8)
+            if host_encode:
+                bits = to_device(_encode_blocks(code, info_host), device).reshape(-1)
+                info = to_device(info_host, device)
+            else:
+                info = to_device(info_host, device)
+                bits = _encode_blocks(code, info).reshape(-1)
             filler = -bits.size % m
             if filler:
                 extra = to_device(gen.integers(0, 2, filler, dtype=np.int8), device)

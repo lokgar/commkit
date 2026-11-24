@@ -127,7 +127,12 @@ class ConvolutionalCode(_Code):
             raise ValueError(
                 f"constraint_length must be an integer in [2, 16], got {k!r}."
             )
-        gens = tuple(int(g) for g in self.generators)
+        raw_gens = list(self.generators)
+        if any(
+            isinstance(g, bool) or not isinstance(g, int | np.integer) for g in raw_gens
+        ):
+            raise ValueError("generators must be integers.")
+        gens = tuple(int(g) for g in raw_gens)
         if len(gens) < 2 or any(not 0 < g < (1 << k) for g in gens):
             raise ValueError(
                 f"need two or more generators of at most {k} bits, nonzero."

@@ -36,7 +36,7 @@ from .. import _cuda
 from .._array import freeze_host, host_array
 from ..backend import ArrayType, _device_tables, dispatch
 from ..logger import logger
-from ._gf2 import inverse, matmul_mod2, rank, row_reduce
+from ._gf2 import inverse, matmul_mod2, row_reduce
 from ._ldpc_tables import DVBS2, PON_BASE
 from .base import _CODECS, _Code, _Codec, _Decoded, _numba
 
@@ -169,6 +169,10 @@ class LDPCCode(_Code):
 
         if not scipy.sparse.issparse(parity_check):
             parity_check = host_array(parity_check)
+        if getattr(parity_check, "ndim", None) != 2:
+            raise ValueError(
+                f"parity_check must be 2-D, got {getattr(parity_check, 'ndim', None)}-D."
+            )
         h = scipy.sparse.coo_array(parity_check)
         h.sum_duplicates()
         h.eliminate_zeros()
@@ -199,9 +203,15 @@ class LDPCCode(_Code):
             Logs a warning on 4-cycles, as :meth:`from_parity_check`.
         """
         b = host_array(base)
+        if (
+            isinstance(lifting, bool)
+            or not isinstance(lifting, int | np.integer)
+            or int(lifting) < 1
+        ):
+            raise ValueError(f"lifting must be an integer >= 1, got {lifting!r}.")
         z = int(lifting)
-        if b.ndim != 2 or z < 1:
-            raise ValueError("base must be a matrix and lifting >= 1.")
+        if b.ndim != 2 or b.size == 0 or b.dtype.kind not in "iu":
+            raise ValueError("base must be a non-empty 2-D integer matrix.")
         if b.min() < -1:
             raise ValueError("base entries must be shifts >= 0 or -1.")
         bi, bj = np.nonzero(b >= 0)
@@ -461,8 +471,11 @@ def _build_encoder(code: LDPCCode) -> _Encoder:
     if m <= _MAX_INVERSE:
         hp = np.zeros((m, m), dtype=np.int8)
         hp[p_rows, p_cols] = 1
-        if rank(hp) == m:
+        try:
             inv_t = inverse(hp).T.astype(np.float32)
+        except ValueError:
+            pass
+        else:
             return _Encoder(
                 "inverse", np.arange(k), np.arange(k, n), (*info_csr, inv_t)
             )

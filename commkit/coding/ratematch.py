@@ -208,4 +208,7 @@ for _cls, _enc, _dec, _info in (
         methods=(object,),
         checked=lambda code, method: _checked(code.code, method),
         info_positions=_info,
+        resolve_method=lambda code, method, name: _resolve_method(
+            code.code, method, name
+        ),
     )

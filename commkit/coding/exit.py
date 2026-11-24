@@ -72,7 +72,7 @@ from ..backend import (
 )
 from ..logger import logger
 from ..mapping import Constellation
-from .base import _decode_blocks, _encode_blocks, _resolve_method, _Value
+from .base import _codec, _decode_blocks, _encode_blocks, _resolve_method, _Value
 from .ldpc import LDPCCode
 
 __all__ = [
@@ -377,7 +377,8 @@ def decoder_exit_curve(
     """
     method = _resolve_method(code, method, "decoder_exit_curve()")
     _check_points(num_points, "decoder_exit_curve()")
-    xp = _module_for(require_device(device, "decoder_exit_curve()"))
+    device = require_device(device, "decoder_exit_curve()")
+    xp = _module_for(device)
     blocks = (
         max(1, math.ceil(_DEFAULT_BITS / code.n)) if num_blocks is None else num_blocks
     )
@@ -387,7 +388,10 @@ def decoder_exit_curve(
         )
     gen = _random.as_generator(rng)
     info = gen.integers(0, 2, (blocks, code.k), dtype=np.int8)
-    bits = _encode_blocks(code, to_device(info, device))
+    if _codec(code, "decoder_exit_curve()").host:
+        bits = to_device(_encode_blocks(code, info), device)
+    else:
+        bits = _encode_blocks(code, to_device(info, device))
     sign = (1 - 2 * bits).astype(np.float32)
     grid = np.linspace(0.0, 1.0, num_points)
     label = f"{method!r} on {code!r}"

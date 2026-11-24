@@ -196,8 +196,15 @@ class PolarCode(_Code):
         -------
         PolarCode
         """
-        if n not in (32, 64, 128, 256, 512, 1024):
+        if (
+            isinstance(n, bool)
+            or not isinstance(n, int | np.integer)
+            or int(n) not in (32, 64, 128, 256, 512, 1024)
+        ):
             raise ValueError(f"n must be a power of two from 32 to 1024, got {n!r}.")
+        if isinstance(k, bool) or not isinstance(k, int | np.integer) or int(k) < 1:
+            raise ValueError(f"k must be an integer >= 1, got {k!r}.")
+        n, k = int(n), int(k)
         check = None if crc is None else CRC.nr(crc, info_bits=k)
         size = k + (0 if check is None else check.degree)
         if not 1 <= size < n:

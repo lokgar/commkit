@@ -304,6 +304,7 @@ class PAS(_Code):
                 f"{(m - 1) / m:.4f}: its parity cannot all be signs."
             )
         _info_positions(self.code, "PAS()")
+        _ = self.matcher
 
     @property
     def n(self) -> int:
@@ -432,4 +433,5 @@ _CODECS[PAS] = _Codec(
     methods=(object,),
     checked=lambda code, method: True,  # the matcher's composition check
     host=True,
+    resolve_method=lambda code, method, name: _resolve_method(code.code, method, name),
 )

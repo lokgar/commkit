@@ -136,6 +136,19 @@ class ReedSolomonCode(_Algebraic):
     first_root: int = 0
 
     def __post_init__(self) -> None:
+        for name in ("symbols", "info_symbols", "m", "first_root"):
+            v = getattr(self, name)
+            if isinstance(v, bool) or not isinstance(v, int | np.integer):
+                raise ValueError(f"{name} must be an integer, got {v!r}.")
+            object.__setattr__(self, name, int(v))
+        if self.primitive is not None:
+            if isinstance(self.primitive, bool) or not isinstance(
+                self.primitive, int | np.integer
+            ):
+                raise ValueError(
+                    f"primitive must be an integer, got {self.primitive!r}."
+                )
+            object.__setattr__(self, "primitive", int(self.primitive))
         n, k, m = self.symbols, self.info_symbols, self.m
         prim = PRIMITIVE.get(m) if self.primitive is None else self.primitive
         if prim is None:
@@ -145,6 +158,7 @@ class ReedSolomonCode(_Algebraic):
             raise ValueError(
                 f"need 1 <= k < n <= 2^m - 1 with n - k even, got n={n}, k={k}, m={m}."
             )
+        _ = self.field
 
     @property
     def n(self) -> int:
@@ -278,12 +292,23 @@ class BCHCode(_Algebraic):
     primitive: int | None = None
 
     def __post_init__(self) -> None:
+        for name in ("m", "t"):
+            v = getattr(self, name)
+            if isinstance(v, bool) or not isinstance(v, int | np.integer):
+                raise ValueError(f"{name} must be an integer, got {v!r}.")
+            object.__setattr__(self, name, int(v))
+        for name in ("length", "primitive"):
+            v = getattr(self, name)
+            if v is not None:
+                if isinstance(v, bool) or not isinstance(v, int | np.integer):
+                    raise ValueError(f"{name} must be an integer, got {v!r}.")
+                object.__setattr__(self, name, int(v))
         prim = PRIMITIVE.get(self.m) if self.primitive is None else self.primitive
         if prim is None:
             raise ValueError(f"no default primitive polynomial for m = {self.m}.")
         object.__setattr__(self, "primitive", prim)
         full = (1 << self.m) - 1
-        if not isinstance(self.t, int) or self.t < 1:
+        if self.t < 1:
             raise ValueError(f"t must be an integer >= 1, got {self.t!r}.")
         if self.length is None:
             object.__setattr__(self, "length", full)

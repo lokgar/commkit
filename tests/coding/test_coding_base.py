@@ -337,3 +337,60 @@ class TestCodeValue:
         assert backend._DEVICE_TABLES[b].keys() == tables.keys()
         for key, value in tables.items():
             assert backend._DEVICE_TABLES[b][key] is value
+
+
+class TestUpfrontValidation:
+    """Composite codes validate wrapped decoder methods upfront (even on empty
+    input), and code constructors reject bool/float integer arguments."""
+
+    def test_composite_codes_reject_bad_inner_method_on_empty(self, xp: Any) -> None:
+        from commkit.coding import PAS, StageDecoders
+        from commkit.coding.product import _Repeat
+
+        empty = xp.zeros(0, dtype=xp.float32)
+        pas = PAS(
+            LinearBlockCode.hamming(4, extended=True),
+            Constellation.pam(4).shaped(nu=0.2),
+        )
+        concat = Concatenated(H74, H16)
+        rep = _Repeat(H74, 2)
+        for code, bad in (
+            (pas, "garbage"),
+            (Punctured(H74, [6]), "garbage"),
+            (Shortened(H74, 1), "garbage"),
+            (rep, "garbage"),
+            (concat, StageDecoders(inner="garbage")),
+            (concat, StageDecoders(outer="garbage")),
+            (concat, "garbage"),
+        ):
+            with pytest.raises(TypeError, match="does not decode"):
+                decode(empty, code=code, method=bad)
+
+    def test_strict_int_and_construction_validation(self) -> None:
+        with pytest.raises(ValueError, match="integer"):
+            ReedSolomonCode(True, 1, m=3)
+        with pytest.raises(ValueError, match="integer"):
+            ReedSolomonCode(7.0, 5, m=3)  # type: ignore[arg-type]
+        with pytest.raises(ValueError):
+            # Non-primitive polynomial must fail on construction via self.field.
+            ReedSolomonCode(7, 5, m=3, primitive=0b1111)
+        with pytest.raises(ValueError, match="integer"):
+            BCHCode(4, True)
+        with pytest.raises(ValueError, match="integer"):
+            BCHCode(4.0, 1)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="n must be"):
+            PolarCode.nr(k=16, n=32.0)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="k must be"):
+            PolarCode.nr(k=True, n=32)
+        with pytest.raises(ValueError, match="2-D"):
+            LDPCCode.from_parity_check(np.array([1, 0, 1]))
+        with pytest.raises(ValueError, match="lifting"):
+            LDPCCode.quasi_cyclic(np.array([[0, 1], [1, 0]]), lifting=True)
+        with pytest.raises(ValueError, match="integer"):
+            LDPCCode.quasi_cyclic(np.array([[0.5, 1.0], [1.0, 0.0]]), lifting=4)
+        with pytest.raises(ValueError, match="polynomial"):
+            CRC(True, 8, 16)
+        with pytest.raises(ValueError, match="generators"):
+            ConvolutionalCode((0o5, True), 3, 10)
+        with pytest.raises(ValueError, match="generators"):
+            ConvolutionalCode((5.5, 7), 3, 10)  # type: ignore[arg-type]
