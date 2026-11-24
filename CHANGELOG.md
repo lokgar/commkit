@@ -4,6 +4,36 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.10.2] - 2026-11-24
+
+Follow-up polish and fixes from the alignment review: unified value-object host copying and equality semantics, persistent BPS anchor state across sequential equalizer resumes, upfront composite-code validation, GPU IIR support beyond 16 sections, consistent real-input optical transforms, zero-copy frequency-offset framing, unbiased quality metrics, and stricter contract/theme/transfer audits. No public signatures changed.
+
+### Fixed
+
+- **Core, backend and value objects**:
+  - Routed `freeze_host` and validation-time host reads across value objects (`Constellation`, `EqualizerPilots`, `LinearBlockCode`, `LDPCCode`, `PolarCode`, `Interleaver`, `Punctured`, `ExitCurve`, `ErrorRateCurve`) through `_array.host_array`, consolidating device-to-host copies to one documented audit site.
+  - Added `eq=False` to array-holding estimate and result dataclasses (`EqualizerPilots`, `ChannelEstimate`, `PolarizationEstimate`, `PolarizationTonesEstimate`, `CarrierPhaseEstimate` and subclasses, `DecodeResult`, `FrameStructure`, `FilterResponse`, `ChromaticDispersionEstimate` and subclasses, `FrequencyOffsetEstimate` and subclasses, `IQImbalanceEstimate`, `Spectrogram`, `SamplingClockOffsetEstimate`, `TimingEstimate`) so `==` no longer raises NumPy's ambiguous truth-value `ValueError`; `ExitCurve`, `ExitChart` and `ErrorRateCurve` now inherit `_Value` for value equality and hashing.
+  - Unified invalid-type checks in `Signal`, `Reference` and `SingleCarrierFrame` to raise `TypeError` (matching `SignalInput` and `generate`), moved `require_device` into `commkit.backend` (removing `coding/exit.py::_check_device`), and aligned `commkit.__all__` with all public top-level submodules.
+- **Equalization and carrier recovery**:
+  - Persisted the data-aided BPS anchor buffer (`bps_da_buf`, `bps_da_sum`, `bps_da_ptr`) in `EqualizerState` across `resume` in sequential equalizers so `n_train > resume` no longer resets the anchor window.
+  - Unified `_resolve_pll_gains` to return plain `float` tuples in both branches (avoiding duplicate Numba specializations), allowed `constellation=None` in fully trained `block_lms` runs without CPR (matching `lms`), and vectorized `Tikhonov` smoothing across channels (`axis=-1`).
+- **Channel coding**:
+  - Added recursive upfront method validation on composite codes (`PAS`, `Concatenated`, `Punctured`, `Shortened`, `_Repeat`) so invalid inner decoder methods fail immediately on empty inputs and before Monte Carlo batches in `error_rate_curve` and `decoder_exit_curve`.
+  - Avoided GPU upload/download round trips for host-side codes (`CCDM`, `PAS`, `TurboCode`) in `error_rate_curve` and `decoder_exit_curve`, eliminated double GF(2) row reduction in `LDPCCode._build_encoder`, and skipped unused soft-output buffers and kernel compilation when `MaximumLikelihood(soft=False)`.
+  - Tightened strict integer (rejecting `bool`/`float`) and construction-time validation in `ReedSolomonCode`, `BCHCode`, `PolarCode.nr`, `LDPCCode.quasi_cyclic`, `LDPCCode.from_parity_check`, `CRC`, `ConvolutionalCode` and `PAS`.
+- **Front-end DSP, filtering, metrics and analysis**:
+  - Routed `iir_filter` with more than 16 second-order sections on the GPU to the CPU Numba kernel instead of raising `ValueError`, avoided double `_zero_phase_padding` in zero-phase IIR filtering, deferred unit-circle phasor evaluation in `filter_response`, and removed `DEBUG` logging from `Pulse.taps()` helpers while validating `sps`.
+  - Made real-input behaviour consistent across optical linear transforms: `apply_chromatic_dispersion`, `correct_chromatic_dispersion` (`"whole_record"` and `"fir"`) and `apply_pmd` now return complex output without `ComplexWarning` (matching `apply_fiber_propagation`).
+  - Switched block framing in `estimate_frequency_offset` to zero-copy `as_strided`, deferred unused host frequency arrays in `_mth_power`, and anchored blockwise frequency-offset correction at `theta[0] = 0` (matching static correction).
+  - Used `rfft`/`irfft` for real inputs and validated `delay` shapes in `apply_delay`, and used the winning transmit stream's energy in MIMO `estimate_timing` coherence.
+  - Cached Gauss-Hermite nodes in `metrics.awgn` and divided by `ref_pwr` across data-aided `evm`, `snr` and `noise_variance` so all three stay unbiased and mutually consistent when `|pwr - 1| <= 1e-3`.
+  - Closed remaining parameter-validation gaps in `smooth_phase`, `resolve_phase_ambiguity`, `correct_channel`, `carrier_phase_trajectory`, `frequency_drift`, `allan_deviation` and `welch_psd` (empty input).
+
+### Development
+
+- Broadened `tests/test_api_contracts.py` with `conflict=` checks for `correct_polarization`, `apply_polarization_mixing`, `correct_carrier_phase` and `estimate_timing`, and `call=` builders for `dsh_phase`, `estimate_linewidth`, `carrier_phase_trajectory`, `estimate_channel`, `estimate_polarization` and `estimate_iq_imbalance`.
+- Tightened `tests/plotting/test_plot_theme.py` to catch dict-literal style kwargs, reversed format strings, `ms=` and leading-dot floats, expanded `TestDeviceReduction` across all sample-rate plots, and replaced `tests/plugins/transfer_trace.py`'s blanket `plotting/` exemption with a plot-sized D2H ceiling (`_PLOT_MAX = 300_000`) and peak-size reporting.
+
 ## [3.10.1] - 2026-11-23
 
 Bug fixes and alignment cleanups across the library from a full audit: stricter precision and host-sync hygiene, staircase and EXIT-chart correctness fixes, SI tick formatting, lazy `filtering` import, and tightened input validation. No public signatures changed.
@@ -708,7 +738,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.10.1...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.10.2...HEAD
+[3.10.2]: https://github.com/lokgar/commkit/compare/v3.10.1...v3.10.2
 [3.10.1]: https://github.com/lokgar/commkit/compare/v3.10.0...v3.10.1
 [3.10.0]: https://github.com/lokgar/commkit/compare/v3.9.0...v3.10.0
 [3.9.0]: https://github.com/lokgar/commkit/compare/v3.8.0...v3.9.0
