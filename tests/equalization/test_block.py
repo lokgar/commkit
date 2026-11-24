@@ -659,3 +659,21 @@ class TestBlockLMSCUDAGraphAndPerformance:
                 atol=1e-8,
                 err_msg=attr,
             )
+
+
+def test_block_lms_fully_trained_allows_none_constellation(xp, xpt):
+    """Fully trained block_lms without CPR needs no decision constellation."""
+    rng = np.random.default_rng(7)
+    const = Constellation.qam(16)
+    syms = const.points[rng.integers(0, 16, 512)].astype(np.complex64)
+    x = xp.asarray(syms)
+    t = xp.asarray(syms)
+    r_none = block_lms(x, t, sps=1, num_taps=7, block_size=64, constellation=None)
+    r_with = block_lms(x, t, sps=1, num_taps=7, block_size=64, constellation=const)
+    xpt.assert_array_equal(to_numpy(r_none.y_hat), to_numpy(r_with.y_hat))
+    xpt.assert_array_equal(to_numpy(r_none.weights), to_numpy(r_with.weights))
+    # With CPR or partial training, constellation=None still raises.
+    with pytest.raises(ValueError, match="constellation"):
+        block_lms(x, t[:256], sps=1, num_taps=7, block_size=64, constellation=None)
+    with pytest.raises(ValueError, match="constellation"):
+        block_lms(x, t, sps=1, num_taps=7, block_size=64, constellation=None, cpr=BPS())

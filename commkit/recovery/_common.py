@@ -24,7 +24,7 @@ def _numba() -> ModuleType:
 
 def _resolve_pll_gains(
     bandwidth: float, mu: float | None, beta: float | None
-) -> tuple[Any, Any]:
+) -> tuple[float, float]:
     """Resolve decision-directed PLL PI gains from a raw/bandwidth parameterization.
 
     Shared by the inline equalizer PLL (``lms``/``rls`` with ``cpr=PLL(...)``)
@@ -43,7 +43,7 @@ def _resolve_pll_gains(
 
     Returns
     -------
-    mu, beta : float, or float32 from the bandwidth
+    mu, beta : float
     """
     if mu is not None:
         return float(mu), float(beta if beta is not None else 0.0)
@@ -51,7 +51,7 @@ def _resolve_pll_gains(
         raise ValueError(
             "integral_gain requires proportional_gain (or use normalized_bandwidth)."
         )
-    return np.float32(4.0 * bandwidth), np.float32(4.0 * bandwidth**2)
+    return float(4.0 * bandwidth), float(4.0 * bandwidth**2)
 
 
 @dataclass(frozen=True)

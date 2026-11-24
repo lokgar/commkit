@@ -390,6 +390,9 @@ def cpr_loop(
     bps_dist_buf,
     bps_running_sum,
     bps_dist_ptr,
+    bps_da_buf,
+    bps_da_sum,
+    bps_da_ptr,
     y_out,
     e_out,
     phase_out,
@@ -406,9 +409,10 @@ def cpr_loop(
     optional cycle-slip repair.
 
     The PLL state (pll_phi, pll_freq), the cycle-slip buffers
-    (cs_*) and the BPS window (bps_prev4,
-    bps_dist_buf, bps_running_sum, bps_dist_ptr) are updated in
-    place for continuation; phase_out (N_sym, C) gets the phase.
+    (cs_*), the BPS window (bps_prev4, bps_dist_buf, bps_running_sum,
+    bps_dist_ptr) and its data-aided anchor window (bps_da_buf, bps_da_sum,
+    bps_da_ptr) are updated in place for continuation; phase_out (N_sym, C)
+    gets the phase.
     """
     C = W.shape[0]
     num_taps = W.shape[2]
@@ -435,8 +439,6 @@ def cpr_loop(
     e_clean = np.empty(C, dtype=np.complex64)
     e_eq = np.empty(C, dtype=np.complex64)
     phi_hat_bps = np.zeros(C, dtype=np.float64)
-    da_buf = np.zeros((C, bps_block_size), dtype=np.complex128)
-    da_sum = np.zeros(C, dtype=np.complex128)
     d2_new = np.empty(B, dtype=np.float32)
     for idx in range(n_sym):
         sample_idx = idx * stride
@@ -500,20 +502,21 @@ def cpr_loop(
         # the anchor, so the S-fold unwrap continues from its branch
         # once decisions take over.
         if cpr_mode == 2 and idx < n_train:
-            da_slot = idx % bps_block_size
+            da_slot = bps_da_ptr[0] % np.int64(bps_block_size)
             for i in range(C):
                 p_da = np.complex128(y_raw[i]) * np.conj(
                     np.complex128(training[i, idx])
                 )
-                da_sum[i] = da_sum[i] + p_da - da_buf[i, da_slot]
-                da_buf[i, da_slot] = p_da
+                bps_da_sum[i] = bps_da_sum[i] + p_da - bps_da_buf[i, da_slot]
+                bps_da_buf[i, da_slot] = p_da
+            bps_da_ptr[0] = bps_da_ptr[0] + np.int64(1)
             da_tot = np.complex128(0.0)
             if bps_joint_channels:
                 for i in range(C):
-                    da_tot = da_tot + da_sum[i]
+                    da_tot = da_tot + bps_da_sum[i]
             for i in range(C):
                 if not bps_joint_channels:
-                    da_tot = da_sum[i]
+                    da_tot = bps_da_sum[i]
                 ang = np.arctan2(da_tot.imag, da_tot.real)
                 prev = bps_prev4[i] / np.float64(symmetry)
                 ang = ang + two_pi * np.round((prev - ang) / two_pi)

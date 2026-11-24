@@ -638,19 +638,28 @@ def block_lms(
     training = run.training
     mu = min(0.5 / block_size, 8e-3) / sps if step_size is None else step_size
 
-    require_value(
-        constellation, "constellation", "block_lms()", purpose=" for its decisions"
-    )
-    constellation_np = np.ascontiguousarray(constellation.points, dtype=np.complex64)
-    sq_side, sq_lev_min, sq_d_grid = slicer_params(constellation)
+    n_train = min(int(training.shape[-1]), n_sym) if training is not None else 0
+
+    if constellation is None and n_train >= n_sym and cpr is None:
+        constellation_np = np.zeros(1, dtype=np.complex64)
+        sq_side, sq_lev_min, sq_d_grid = 0, np.float32(0.0), np.float32(1.0)
+    else:
+        constellation = require_value(
+            constellation,
+            "constellation",
+            "block_lms()",
+            purpose=" for its decisions" if n_train < n_sym else " for inline BPS",
+        )
+        constellation_np = np.ascontiguousarray(
+            constellation.points, dtype=np.complex64
+        )
+        sq_side, sq_lev_min, sq_d_grid = slicer_params(constellation)
     slicer = _Slicer(
         constellation=xp.asarray(constellation_np),
         side=sq_side,
         lev_min=float(sq_lev_min),
         d_grid=float(sq_d_grid),
     )
-
-    n_train = min(int(training.shape[-1]), n_sym) if training is not None else 0
 
     bps = None
     if cpr is not None:

@@ -282,6 +282,9 @@ class _CarrierArrays:
     bps_dist_buf: np.ndarray  # (C, K, B) float32, BPS window metrics
     bps_running_sum: np.ndarray  # (C, B) float64
     bps_dist_ptr: np.ndarray  # (1,) int64, window write position
+    bps_da_buf: np.ndarray  # (C, K) complex128, data-aided BPS anchor window
+    bps_da_sum: np.ndarray  # (C,) complex128, data-aided BPS anchor sum
+    bps_da_ptr: np.ndarray  # (1,) int64, anchor write position
 
     def args(self) -> tuple[np.ndarray, ...]:
         """The kernels' in-place CPR arguments, in their order."""
@@ -296,6 +299,9 @@ class _CarrierArrays:
             self.bps_dist_buf,
             self.bps_running_sum,
             self.bps_dist_ptr,
+            self.bps_da_buf,
+            self.bps_da_sum,
+            self.bps_da_ptr,
         )
 
     def copy(self) -> _CarrierArrays:
@@ -308,10 +314,10 @@ class _InlineCpr:
     """Kernel arguments of the inline CPR, resolved from a ``PLL``/``BPS``."""
 
     kind: str  # "pll" or "bps"
-    pll_mu: Any
-    pll_beta: Any
+    pll_mu: float
+    pll_beta: float
     phase_init: float
-    angles: np.ndarray  # (B,) float32 BPS candidates over [0, 2π/symmetry)
+    angles: np.ndarray  # (B,) float64 BPS candidates over [0, 2π/symmetry)
     phases_neg: np.ndarray  # (B,) complex64, exp(-j*angle)
     window: int  # BPS averaging window
     joint: bool
@@ -351,6 +357,9 @@ class _InlineCpr:
             bps_dist_buf=np.zeros((num_ch, self.window, len(self.angles)), np.float32),
             bps_running_sum=np.zeros((num_ch, len(self.angles)), dtype=np.float64),
             bps_dist_ptr=np.zeros(1, dtype=np.int64),
+            bps_da_buf=np.zeros((num_ch, self.window), dtype=np.complex128),
+            bps_da_sum=np.zeros(num_ch, dtype=np.complex128),
+            bps_da_ptr=np.zeros(1, dtype=np.int64),
         )
 
 

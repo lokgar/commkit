@@ -1,7 +1,6 @@
 """Decision-directed PLL carrier-phase recovery: :class:`PLL`."""
 
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 
@@ -85,7 +84,7 @@ class PLL:
         _resolve_pll_gains(bt, self.proportional_gain, self.integral_gain)
 
     @property
-    def gains(self) -> tuple[Any, Any]:
+    def gains(self) -> tuple[float, float]:
         """The loop gains ``(μ, β)``: proportional and integral."""
         return _resolve_pll_gains(
             self.normalized_bandwidth, self.proportional_gain, self.integral_gain

@@ -188,6 +188,15 @@ class TestDDPLL:
         ):
             recovery.PLL(integral_gain=1e-3)
 
+    def test_gains_are_plain_floats_in_both_modes(self):
+        """Both normalized_bandwidth and explicit gains return Python floats."""
+        for pll in (
+            recovery.PLL(normalized_bandwidth=1e-3),
+            recovery.PLL(proportional_gain=1e-2, integral_gain=1e-4),
+        ):
+            mu, beta = pll.gains
+            assert type(mu) is float and type(beta) is float
+
 
 class TestSignalInputPll:
     """Signal-awareness for recover_carrier_phase_pll."""

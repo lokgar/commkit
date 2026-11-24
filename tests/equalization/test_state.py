@@ -253,3 +253,33 @@ class TestResultSignal:
         np.testing.assert_array_equal(r2.signal.samples, r2.y_hat[ov:])
         np.testing.assert_array_equal(r2.signal.reference.symbols, tail)
         assert r1.signal.samples.shape[-1] == 600
+
+
+@pytest.mark.parametrize("eq_name", ["lms", "rls"])
+@pytest.mark.parametrize("joint", [False, True])
+def test_bps_anchor_persists_across_resume(eq_name, joint):
+    """Training that spans a chunk boundary (and the internal resume split)
+    matches an uninterrupted run bit for bit with inline BPS."""
+    sps = 2
+    n_sym = 200
+    n1 = 100
+    x, s = _signal(2, n_sym, sps)
+    kw = dict(
+        sps=sps,
+        num_taps=7,
+        constellation=C16,
+        cpr=BPS(test_phases=32, block_size=16, joint_channels=joint),
+    )
+    fn = getattr(E, eq_name)
+    r1 = fn(x[:, : n1 * sps], s[:, :n1], **kw)
+    ov = r1.state.overlap
+    k = r1.y_hat.shape[-1] - ov
+    r2 = fn(x[:, n1 * sps :], s[:, k:], **kw, state=r1.state)
+    full = fn(x, s, **kw, state=_cold_like(r1.state))
+
+    np.testing.assert_array_equal(_stitch(r1.y_hat, r2.y_hat, ov), to_numpy(full.y_hat))
+    np.testing.assert_array_equal(
+        _stitch(r1.phase_trajectory, r2.phase_trajectory, ov),
+        to_numpy(full.phase_trajectory),
+    )
+    np.testing.assert_array_equal(to_numpy(r2.weights), to_numpy(full.weights))

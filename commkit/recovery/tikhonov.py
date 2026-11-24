@@ -26,12 +26,12 @@ from .viterbi_viterbi import _warn_small_qam_block
 __all__ = ["Tikhonov"]
 
 
-def _sskf_smoother_1d(
+def _sskf_smoother(
     phi_obs: ArrayType,
     sigma_p2: float,
     sigma_v2: float,
-    sp,
-    xp,
+    sp: Any,
+    xp: Any,
 ) -> ArrayType:
     """Approximate the RTS smoother by a steady-state Kalman gain and ``filtfilt``.
 
@@ -47,7 +47,7 @@ def _sskf_smoother_1d(
     Parameters
     ----------
     phi_obs : ndarray
-        Noisy block phases in radians, float64, ``(B,)``.
+        Noisy block phases in radians, float64, ``(R, B)``.
     sigma_p2, sigma_v2 : float
         Process and observation noise variances per block.
     sp : module
@@ -58,13 +58,15 @@ def _sskf_smoother_1d(
     Returns
     -------
     ndarray
-        Smoothed phases, float64, ``(B,)``, on the device of ``phi_obs``.
+        Smoothed phases, float64, ``(R, B)``, on the device of ``phi_obs``.
     """
     # filtfilt requires at least padlen * 2 + 1 samples; padlen = 3 * max(len(b), len(a)) = 6
-    if len(phi_obs) < 7:
+    if phi_obs.shape[-1] < 7:
         phi_np = to_device(phi_obs, "cpu")
         rts = _numba().rts_smoother
-        return xp.asarray(rts(phi_np, float(sigma_p2), float(sigma_v2)))
+        return xp.asarray(
+            np.stack([rts(row, float(sigma_p2), float(sigma_v2)) for row in phi_np])
+        )
 
     # Steady-state prediction error covariance from discrete Riccati equation:
     #   p² - σ_p²·p - σ_p²·σ_v² = 0  ->  p = (σ_p² + √(σ_p⁴ + 4σ_p²σ_v²)) / 2
@@ -77,7 +79,7 @@ def _sskf_smoother_1d(
     # steady state.
     b = [K_ss]
     a = [1.0, -(1.0 - K_ss)]
-    return sp.signal.filtfilt(b, a, phi_obs)
+    return sp.signal.filtfilt(b, a, phi_obs, axis=-1)
 
 
 @dataclass(frozen=True)
@@ -218,9 +220,7 @@ def _tikhonov(
             np.stack([rts(row, float(sigma_p2), float(sigma_v2)) for row in phi_u_np])
         )
     else:
-        phi_smooth = xp.stack(
-            [_sskf_smoother_1d(row, sigma_p2, sigma_v2, sp, xp) for row in phi_u]
-        )
+        phi_smooth = _sskf_smoother(phi_u, sigma_p2, sigma_v2, sp, xp)
     phi_smooth = _repair_slips(phi_smooth, method.cycle_slip, M, block_size)
     phi_full = _interp_block_phases(phi_smooth, N, block_size, xp)
     if joint:
