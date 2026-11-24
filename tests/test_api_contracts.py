@@ -43,10 +43,11 @@ import numpy as np
 import pytest
 
 import commkit
+from commkit.analysis import DshIncrement
 from commkit.backend import to_device
 from commkit.coding import DecodeResult, Interleaver, LinearBlockCode
 from commkit.core import Signal
-from commkit.equalization import EqualizerResult
+from commkit.equalization import EqualizerResult, PolarizationTones
 from commkit.filtering import ClockToneScan
 from commkit.frequency import MthPower
 from commkit.impairments import Fiber, Lowdin
@@ -260,9 +261,30 @@ ROWS: list[Row] = [
     Row("commkit.analysis.fm_noise.dsh_fm_noise_psd", MULTI),
     Row("commkit.analysis.fm_noise.fm_noise_psd", MULTI),
     Row("commkit.analysis.interferometry.dsh_beat", DESIGN),
-    Row("commkit.analysis.interferometry.dsh_phase", MULTI),
-    Row("commkit.analysis.linewidth.estimate_linewidth", MULTI, data=2),
-    Row("commkit.analysis.trajectory.carrier_phase_trajectory", TRAJECTORY, data=2),
+    Row(
+        "commkit.analysis.interferometry.dsh_phase",
+        MULTI,
+        call=lambda c, x: _a(x, sampling_rate=FS, f_shift=0.0),
+        conflict=FS_CONFLICT,
+    ),
+    Row(
+        "commkit.analysis.linewidth.estimate_linewidth",
+        MULTI,
+        data=2,
+        call=lambda c, x: _a(
+            x,
+            DshIncrement(delay=16 / FS, f_shift=0.0, lags=(1, 2, 4)),
+            sampling_rate=FS,
+        ),
+        conflict=FS_CONFLICT,
+    ),
+    Row(
+        "commkit.analysis.trajectory.carrier_phase_trajectory",
+        TRAJECTORY,
+        data=2,
+        call=lambda c, x: _a(x, _ref(c, x)),
+        symbols=True,
+    ),
     # --- backend / logging / io --------------------------------------------
     Row("commkit.backend.dispatch", INFRA),
     Row("commkit.backend.get_array_module", INFRA),
@@ -414,7 +436,12 @@ ROWS: list[Row] = [
         conflict=SPS_CONFLICT,
     ),
     Row("commkit.equalization.linear.ChannelEstimate", VALUE),
-    Row("commkit.equalization.linear.estimate_channel", MULTI, data=2),
+    Row(
+        "commkit.equalization.linear.estimate_channel",
+        MULTI,
+        data=2,
+        call=lambda c, x: _a(x, x, nfft=128),
+    ),
     Row(
         "commkit.equalization.linear.correct_channel",
         TRANSFORM,
@@ -427,12 +454,18 @@ ROWS: list[Row] = [
         TRANSFORM,
         data=2,
         call=lambda c, x: _a(x, np.eye(2)),
+        conflict=FS_CONFLICT,
         dims=(2,),
     ),
     Row(
         "commkit.equalization.polarization.estimate_polarization",
         MULTI,
         data=2,
+        call=lambda c, x: _a(
+            x, PolarizationTones(tone_frequencies=(1e8, 2e8)), sampling_rate=FS
+        ),
+        conflict=FS_CONFLICT,
+        dims=(2,),
     ),
     Row("commkit.equalization.polarization.PolarizationEstimate", VALUE),
     Row("commkit.equalization.polarization.PolarizationTonesEstimate", VALUE),
@@ -577,6 +610,7 @@ ROWS: list[Row] = [
         "commkit.impairments.fiber_channel.apply_polarization_mixing",
         TRANSFORM,
         call=lambda c, x: _a(x, theta=0.3),
+        conflict=FS_CONFLICT,
         dims=(2,),
     ),
     Row(
@@ -616,7 +650,12 @@ ROWS: list[Row] = [
         data=2,
         call=lambda c, x: _a(x, Lowdin()),
     ),
-    Row("commkit.impairments.frontend.estimate_iq_imbalance", MULTI, data=2),
+    Row(
+        "commkit.impairments.frontend.estimate_iq_imbalance",
+        MULTI,
+        data=1,
+        call=lambda c, x: _a(x),
+    ),
     # Optical Signals only, like extract_payload: tested in test_noise.py.
     Row("commkit.impairments.noise.apply_ase", DESIGN),
     Row(
@@ -803,6 +842,7 @@ ROWS: list[Row] = [
         TRANSFORM,
         data=2,
         call=lambda c, x: _a(x, 0.1),
+        conflict=("sampling_rate", 3 * RS),
         symbols=True,
     ),
     Row(
@@ -900,6 +940,7 @@ ROWS: list[Row] = [
         "commkit.timing.synchronization.estimate_timing",
         ESTIMATE,
         call=lambda c, x: _a(x, template=c.wave2[0, :64], threshold=1.0),
+        conflict=SPS_CONFLICT,
     ),
     Row(
         "commkit.timing.synchronization.apply_delay",

@@ -15,7 +15,8 @@ A transfer is charged to the innermost commkit frame outside ``backend`` (so a
 :func:`~commkit.backend.to_device` call is charged to its caller); one with no
 commkit frame on the stack (the tests' own) is ignored.  The terminal summary
 lists every site with its lines, ``!`` marking a site that is neither in
-``_DOCUMENTED`` nor in ``plotting``; such a site fails the run.  The documented
+``_DOCUMENTED`` nor a plot-sized (``<= _PLOT_MAX`` elements) D2H copy in
+``plotting/``; such a site fails the run.  The documented
 kinds are those of AGENTS.md: the sequential recursions' round trip, the
 equalizers' continuation state (host copies), the reporting layer (metrics,
 analysis summaries, plotting), explicit device moves and the transmitted
@@ -37,6 +38,9 @@ import numpy as np
 import pytest
 
 _MIN = 512
+# Plot-sized ceiling for D2H copies inside plotting/: covers 500x500 density
+# and eye images (250 000 elements) while catching accidental full-record pulls.
+_PLOT_MAX = 300_000
 _TOOL = sys.monitoring.PROFILER_ID + 1  # 3: free for third-party tools
 
 _RECURSION = "sequential recursion on the CPU (Numba): one round trip"
@@ -110,6 +114,7 @@ _DOCUMENTED: dict[str, str] = {
 }
 
 _HITS: collections.Counter[tuple[str, str]] = collections.Counter()
+_MAX_SIZE: collections.defaultdict[tuple[str, str], int] = collections.defaultdict(int)
 _LINES: collections.defaultdict[tuple[str, str], set[int]] = collections.defaultdict(
     set
 )
@@ -135,8 +140,12 @@ def _relative(path: str) -> str | None:
     return path[len(_PKG) :] if path.startswith(_PKG) else None
 
 
-def _documented(site: str) -> bool:
-    return site in _DOCUMENTED or site.startswith("plotting/")
+def _documented(kind: str, site: str) -> bool:
+    if site in _DOCUMENTED:
+        return True
+    if site.startswith("plotting/"):
+        return kind == "D2H" and _MAX_SIZE[(kind, site)] <= _PLOT_MAX
+    return False
 
 
 def _site() -> tuple[str, int] | None:
@@ -185,8 +194,11 @@ def _install() -> None:
         if kind and size >= _MIN:
             found = _site()
             if found:
-                _HITS[(kind, found[0])] += 1
-                _LINES[(kind, found[0])].add(found[1])
+                key = (kind, found[0])
+                _HITS[key] += 1
+                if size > _MAX_SIZE[key]:
+                    _MAX_SIZE[key] = size
+                _LINES[key].add(found[1])
         return None
 
     sys.monitoring.use_tool_id(_TOOL, "commkit-transfer-trace")
@@ -199,7 +211,7 @@ def pytest_configure(config: Any) -> None:
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    if any(not _documented(site) for _, site in _HITS):
+    if any(not _documented(kind, site) for kind, site in _HITS):
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
@@ -208,9 +220,12 @@ def pytest_terminal_summary(terminalreporter: Any) -> None:
     if not _HITS:
         terminalreporter.write_line("none")
     for (kind, site), count in sorted(_HITS.items(), key=lambda kv: kv[0][1]):
-        mark = " " if _documented(site) else "!"
+        mark = " " if _documented(kind, site) else "!"
         lines = ",".join(map(str, sorted(_LINES[(kind, site)])))
-        terminalreporter.write_line(f"{mark} {count:6d}  {kind} {site} (line {lines})")
+        peak = _MAX_SIZE[(kind, site)]
+        terminalreporter.write_line(
+            f"{mark} {count:6d}  {kind} {site} (line {lines}, max {peak})"
+        )
     unseen = sorted(set(_DOCUMENTED) - {site for _, site in _HITS})
     if unseen:
         terminalreporter.write_line("documented but not reached:")

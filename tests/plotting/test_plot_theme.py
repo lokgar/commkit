@@ -165,8 +165,18 @@ class TestDeviceReduction:
 
         from commkit import plotting
         from commkit.analysis import FrequencyDrift
-        from commkit.frequency import MengaliMorelliEstimate, MthPowerEstimate
-        from commkit.recovery import PilotTone, PilotToneEstimate
+        from commkit.equalization import EqualizerResult
+        from commkit.frequency import (
+            BlockwiseFrequencyEstimate,
+            MengaliMorelliEstimate,
+            MthPowerEstimate,
+        )
+        from commkit.recovery import (
+            PilotTone,
+            PilotToneEstimate,
+            PilotTonesEstimate,
+        )
+        from commkit.timing import TimingEstimate
 
         n = TestDeviceReduction.N
         rng = np.random.default_rng(0)
@@ -176,11 +186,9 @@ class TestDeviceReduction:
                 np.complex64
             )
         )
-        from commkit.frequency import (
-            BlockwiseFrequencyEstimate,
-        )
-        from commkit.timing import TimingEstimate
-
+        real_wave = xp.asarray(rng.standard_normal(n).astype(np.float32))
+        llrs = xp.asarray(rng.standard_normal(n).astype(np.float32))
+        bits = xp.asarray(rng.integers(0, 2, n).astype(np.int8))
         value = xp.asarray([1.0, 2.0])
         return {
             "trajectory": lambda: plotting.plot_carrier_phase_trajectory(phase),
@@ -234,7 +242,40 @@ class TestDeviceReduction:
                 method=PilotTone(frequency=1e6, bandwidth=1e5),
                 sampling_rate=1e9,
             ),
+            "pilot tones": lambda: plotting.plot_pilot_tones_phase_estimate(
+                PilotTonesEstimate(
+                    value=phase[0],
+                    tone_frequencies=np.array([1e6, 2e6]),
+                    tone_snr_db=np.array([20.0, 20.0]),
+                    differential_phase=phase,
+                    reference_tone=0,
+                    used_tones=(0, 1),
+                )
+            ),
+            "waveform": lambda: plotting.plot_time_domain(samples, sampling_rate=1e9),
+            "psd": lambda: plotting.plot_psd(samples, sampling_rate=1e9, nperseg=1024),
+            "llr distribution": lambda: plotting.plot_llr_distribution(llrs, bits),
+            "equalizer": lambda: plotting.plot_equalizer_result(
+                EqualizerResult(
+                    y_hat=samples,
+                    weights=xp.zeros((2, 2, 11), dtype=xp.complex64),
+                    error=samples,
+                    phase_trajectory=phase,
+                )
+            ),
+            "constellation": lambda: plotting.plot_constellation(samples[0]),
+            "eye": lambda: plotting.plot_eye_diagram(real_wave, sps=8),
+            "spectrogram": lambda: plotting.plot_spectrogram(
+                samples[0], sampling_rate=1e9, nperseg=256
+            ),
         }
+
+    # Image plots transfer a fixed-size 2-D grid (e.g. 500x500), independent of N.
+    _IMAGE_LIMITS: dict[str, int] = {
+        "constellation": 300 * 300,
+        "eye": 500 * 500,
+        "spectrogram": 256 * 2500,
+    }
 
     @pytest.mark.gpu_only
     @pytest.mark.parametrize(
@@ -248,12 +289,19 @@ class TestDeviceReduction:
             "autocorrelation",
             "timing",
             "pilot tone",
+            "pilot tones",
+            "waveform",
+            "psd",
+            "llr distribution",
+            "equalizer",
+            "constellation",
+            "eye",
+            "spectrogram",
         ],
     )  # fmt: skip
     def test_moves_only_the_drawn_points(self, xp: Any, case: str) -> None:
-        """Every device-to-host copy is at most the 4000 points of a trace
-        and its remainder, for each of the two channels (2 x 2^18 points
-        before)."""
+        """Every device-to-host copy is plot-sized (reduced trace or image),
+        well below the 2 x 2^18 sample record."""
         from commkit import backend
 
         sizes: list[int] = []
@@ -264,17 +312,28 @@ class TestDeviceReduction:
                 sizes.append(int(data.size))
             return real(data, device)
 
+        import commkit.plotting.coding as coding_plot
+        import commkit.plotting.constellation as const_plot
+        import commkit.plotting.equalizer as eq_plot
+        import commkit.plotting.eye as eye_plot
         import commkit.plotting.recovery as recovery
+        import commkit.plotting.spectral as spec_plot
 
-        # backend._to_host, the plots' host copy, calls backend.to_device;
-        # the recovery plots also call it directly.
+        # backend._to_host calls backend.to_device; modules that import
+        # to_device directly need patching too.
         with (
             patch.object(backend, "to_device", counting),
             patch.object(recovery, "to_device", counting),
+            patch.object(coding_plot, "to_device", counting),
+            patch.object(const_plot, "to_device", counting),
+            patch.object(eq_plot, "to_device", counting),
+            patch.object(eye_plot, "to_device", counting),
+            patch.object(spec_plot, "to_device", counting),
         ):
             self._cases(xp)[case]()
         plt.close("all")
-        assert sizes and max(sizes) <= 2 * (4000 + 2000), sizes
+        limit = self._IMAGE_LIMITS.get(case, 2 * (4000 + 2000))
+        assert sizes and max(sizes) <= limit, (case, max(sizes), limit)
 
 
 # -----------------------------------------------------------------------------
@@ -369,24 +428,35 @@ def test_marker_and_line_sizes_scale_with_the_theme() -> None:
         assert theme._line_width(0.5) == pytest.approx(1.5)
 
 
+_FORBIDDEN_STYLE_PATTERNS = [
+    # color keywords or dict entries with a literal other than "C<n>" or "gray"
+    r"""\b(?:color|colors|c|ecolor|edgecolors?|facecolors?|mfc|mec)\s*=\s*["'](?!C\d["']|gray["'])""",
+    r"""["'](?:color|colors|c|ecolor|edgecolors?|facecolors?|mfc|mec)["']\s*:\s*["'](?!C\d["']|gray["'])""",
+    r"""["']#[0-9a-fA-F]{3,8}["']""",  # hex anywhere
+    # format strings with a color letter in either order ("r--", "--r", "o-k")
+    r"""["'][rgbcmykw](?:--|-\.|-|:|o|\.|v|\^|s|x|\+|\*)+["']""",
+    r"""["'](?:--|-\.|-|:|o|\.|v|\^|s|x|\+|\*)+[rgbcmykw]["']""",
+    # font / marker / cap sizes (keyword or dict entry, including .5 floats and ms)
+    r"""\b(?:fontsize|labelsize|titlesize|capsize|markersize|ms)\s*=\s*(?:\d|\.\d)""",
+    r"""["'](?:fontsize|labelsize|titlesize|capsize|markersize|ms)["']\s*:\s*(?:\d|\.\d)""",
+    # line widths other than 0 / 0.0 (no edge)
+    r"""\b(?:linewidths?|lw)\s*=\s*(?!0(?:\.0*)?\b)(?:\d|\.\d)""",
+    r"""["'](?:linewidths?|lw)["']\s*:\s*(?!0(?:\.0*)?\b)(?:\d|\.\d)""",
+    r"""\bs\s*=\s*(?:\d|\.\d)""",  # scatter areas
+    r"""["']s["']\s*:\s*(?:\d|\.\d)""",
+    r"""\bcmap\s*=\s*["']""",
+    r"""["']cmap["']\s*:\s*["']""",
+    r"""\bfigsize\s*=\s*\(\s*(?:\d|\.\d)""",
+    r"""["']figsize["']\s*:\s*\(\s*(?:\d|\.\d)""",
+]
+
+
 def test_plot_sources_take_style_from_rcparams() -> None:
     """No plot module names a color (other than cycle colors and gray), a
     font size, a fixed line width or marker size, or a color map."""
     import re
     from pathlib import Path
 
-    forbidden = [
-        # color keywords with a literal other than "C<n>" or "gray"
-        r"""\b(?:color|colors|c|ecolor|edgecolors?|facecolors?|mfc|mec)\s*=\s*["'](?!C\d["']|gray["'])""",
-        r"""["']#[0-9a-fA-F]{3,8}["']""",  # hex anywhere
-        r"""["'][rgbcmykw](?:--|-\.|-|:|o|\.|v|\^|s|x|\+)["']""",  # "r--" formats
-        r"""\b(?:fontsize|labelsize|titlesize|capsize|markersize)\s*=\s*\d""",
-        r"""\b(?:linewidths?|lw)\s*=\s*(?!0\b)\d""",  # 0 (no edge) is allowed
-        r"""\bs\s*=\s*\d""",  # scatter areas
-        r"""\bcmap\s*=\s*["']""",
-        r"""["']cmap["']\s*:\s*["']""",
-        r"""\bfigsize\s*=\s*\(\s*\d""",
-    ]
     root = Path(theme.__file__).parent
     offenders = []
     for path in sorted(root.glob("*.py")):
@@ -394,10 +464,37 @@ def test_plot_sources_take_style_from_rcparams() -> None:
             continue
         for number, line in enumerate(path.read_text().splitlines(), 1):
             code = line.split("#", 1)[0] if not re.search(r"""["']#""", line) else line
-            for pattern in forbidden:
+            for pattern in _FORBIDDEN_STYLE_PATTERNS:
                 if re.search(pattern, code):
                     offenders.append(f"{path.name}:{number}: {line.strip()}")
     assert not offenders, "\n".join(offenders)
+
+
+def test_style_scan_catches_tricky_forms() -> None:
+    """The source scan catches dict literals, reversed formats, ms= and .5 floats."""
+    import re
+
+    bad_lines = [
+        'kw = {"color": "red"}',
+        'kw = {"lw": .5}',
+        'kw = {"ms": 4}',
+        'kw = {"fontsize": 10}',
+        'ax.plot(x, y, "--r")',
+        'ax.plot(x, y, "o-k")',
+        "ax.plot(x, y, ms=6)",
+        "ax.plot(x, y, lw=.5)",
+        "ax.scatter(x, y, s=.5)",
+    ]
+    for line in bad_lines:
+        assert any(re.search(p, line) for p in _FORBIDDEN_STYLE_PATTERNS), line
+
+    good_lines = [
+        'kw = {"color": "C0", "lw": 0}',
+        'kw = {"color": "gray", "linewidth": 0.0}',
+        'ax.plot(x, y, "--", color="C1", linewidth=_line_width(0.8))',
+    ]
+    for line in good_lines:
+        assert not any(re.search(p, line) for p in _FORBIDDEN_STYLE_PATTERNS), line
 
 
 def test_accent_follows_the_background_and_stands_apart() -> None:
