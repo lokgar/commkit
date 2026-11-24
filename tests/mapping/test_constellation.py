@@ -63,9 +63,11 @@ class TestFactories:
     def test_factories_are_cached(self) -> None:
         assert Constellation.qam(16) is Constellation.qam(16)
 
-    @pytest.mark.parametrize("order", [1, 6, 2.0])
-    def test_invalid_order_raises(self, order) -> None:
-        with pytest.raises(ValueError):
+    @pytest.mark.parametrize(
+        ("order", "error"), [(1, ValueError), (6, ValueError), (2.0, TypeError)]
+    )
+    def test_invalid_order_raises(self, order, error) -> None:
+        with pytest.raises(error):
             Constellation.qam(order)
 
     def test_repr(self) -> None:

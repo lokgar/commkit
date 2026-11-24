@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 from .. import spectral
+from .._array import require_finite
 from .._constants import SPEED_OF_LIGHT
 from ..backend import ArrayType, _to_host, dispatch, to_device
 from ..core._signal_input import SignalInput
@@ -235,6 +236,7 @@ def plot_spectrogram(
     ylim: tuple[float, float] | None = None,
     title: str | None = "Spectrogram",
     cmap: str | None = None,
+    max_rows: int = 1000,
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
@@ -279,6 +281,13 @@ def plot_spectrogram(
         Title of the figure; ``None`` for none.
     cmap : str, optional
         Colormap; ``None`` uses the theme's ``image.cmap``.
+    max_rows : int, default 1000
+        Time rows drawn.  A longer spectrogram is averaged over groups of
+        ``k = ceil(rows / max_rows)`` consecutive segments on the data's
+        device, in power for the dB modes (every ``k``-th segment for
+        ``"angle"`` and ``"phase"``), so the image moved to the host has at
+        most ``max_rows`` rows whatever the record length.  ``<= 0`` draws
+        every segment.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     **kwargs : Any
@@ -296,8 +305,10 @@ def plot_spectrogram(
             f"plot_spectrogram(): relative and dynamic_range_db need a dB mode "
             f"('psd', 'magnitude', 'complex'), got mode={mode!r}"
         )
-    if dynamic_range_db is not None and not dynamic_range_db > 0:
-        raise ValueError("plot_spectrogram(): dynamic_range_db must be positive")
+    if dynamic_range_db is not None:
+        require_finite(
+            dynamic_range_db, "plot_spectrogram(): dynamic_range_db", low=0.0
+        )
     inp = SignalInput(samples, "plot_spectrogram()")
     x = inp.samples
     sampling_rate = inp.sampling_rate(sampling_rate)
@@ -366,14 +377,30 @@ def plot_spectrogram(
         t_plot = t[t_start:t_end]
         Sxx_slice = Sxx[f_start:f_end, t_start:t_end]
 
-        # Convert values based on mode (e.g. dB scale for PSD/magnitude)
+        # Power for the dB modes; angles stay as they are.
         if mode == "psd":
-            Sxx_plot = 10 * xp.log10(Sxx_slice + 1e-20)
+            values = Sxx_slice
         elif mode in ("complex", "magnitude"):
-            Sxx_plot = 10 * xp.log10(xp.abs(Sxx_slice) ** 2 + 1e-20)
+            values = xp.abs(Sxx_slice) ** 2
         else:
-            # Angle, phase, etc., plot linearly
-            Sxx_plot = Sxx_slice
+            values = Sxx_slice
+        rows = values.shape[1]
+        if max_rows > 0 and rows > max_rows:
+            # Groups of k segments on the device, so the image crossing to the
+            # host is at most max_rows tall: power is averaged (the last group
+            # may be partial), an angle has no mean, so every k-th is kept.
+            k = -(-rows // max_rows)
+            groups = -(-rows // k)
+            dt0 = float(t_plot[1] - t_plot[0])
+            if in_db:
+                padded = xp.full((values.shape[0], groups * k), xp.nan, values.dtype)
+                padded[:, :rows] = values
+                values = xp.nanmean(padded.reshape(values.shape[0], groups, k), axis=-1)
+            else:
+                values = values[:, ::k]
+            offset = (k - 1) / 2 if in_db else 0.0
+            t_plot = t_plot[0] + (np.arange(groups) * k + offset) * dt0
+        Sxx_plot = 10 * xp.log10(values + 1e-20) if in_db else values
         # Time on the y-axis: (len(t_plot), len(f_plot)).
         image = _to_host(Sxx_plot.T)
         limits: dict[str, float] = {}

@@ -24,10 +24,8 @@ from commkit.plotting.analysis import (
     plot_allan_deviation,
     plot_carrier_phase_characterization,
     plot_carrier_phase_decomposition,
-    plot_dsh_beat_psd,
     plot_frequency_drift,
-    plot_frequency_noise_psd,
-    plot_increment_variance,
+    plot_linewidth_estimate,
 )
 from tests.common.conversions import to_numpy
 from tests.common.signals import make_dsh_beat, make_wiener_phase
@@ -61,9 +59,7 @@ class TestPlotAnalysis:
         reduced to its envelope: sample instants within the record, the
         extremes kept, at most 1.5 ``max_points`` points."""
         drift = analysis.frequency_drift(_phase(xp, channels), sampling_rate=R)
-        fig, ax = plot_frequency_drift(
-            drift, sampling_rate=R, reference_amplitude=6e3, max_points=1000
-        )
+        fig, ax = plot_frequency_drift(drift, reference_amplitude=6e3, max_points=1000)
         traces = [ln for ln in ax.lines if len(ln.get_xdata()) > 2]
         assert len(traces) == channels
         df = np.atleast_2d(to_device(drift.df, "cpu"))[0]
@@ -104,14 +100,14 @@ class TestPlotAnalysis:
         est = analysis.estimate_linewidth(
             _phase(xp), BetaSeparation(f_min=1e6, f_max=1e8), sampling_rate=R
         )
-        fig, ax = plot_frequency_noise_psd(est)
+        fig, ax = plot_linewidth_estimate(est)
         labels = [ln.get_label() for ln in ax.lines]
         assert r"$\beta$-separation line" in labels
         assert len(ax.collections) >= 1  # the β-area fill
         floor = [ln for ln in ax.lines if "White-FM" in ln.get_label()][0]
         assert floor.get_ydata()[0] == pytest.approx(est.linewidth_floor / np.pi)
-        _, ax = plot_frequency_noise_psd(est, label="first", annotations=False)
-        _, ax = plot_frequency_noise_psd(
+        _, ax = plot_linewidth_estimate(est, label="first", annotations=False)
+        _, ax = plot_linewidth_estimate(
             est, ax=ax, label="second", annotations=False, legend=True
         )
         labels = [line.get_label() for line in ax.lines]
@@ -123,7 +119,7 @@ class TestPlotAnalysis:
         """DshFmFit: the floor guide sits at the estimate itself."""
         z, m = _beat(xp)
         est = analysis.estimate_linewidth(z, DshFmFit(delay=m / FS), sampling_rate=FS)
-        fig, ax = plot_frequency_noise_psd(est, title="DSH")
+        fig, ax = plot_linewidth_estimate(est, title="DSH")
         floor = [ln for ln in ax.lines if "White-FM" in ln.get_label()][0]
         assert floor.get_ydata()[0] == pytest.approx(est.value / np.pi)
         # The plateau span covers fit bins where the model is within 10 %
@@ -149,11 +145,11 @@ class TestPlotAnalysis:
             est = analysis.estimate_linewidth(
                 _phase(xp), IncrementSlope(), sampling_rate=R
             )
-        fig, ax = plot_increment_variance(est)
+        fig, ax = plot_linewidth_estimate(est)
         np.testing.assert_allclose(ax.lines[0].get_ydata(), est.increment_var[0])
         assert len(ax.lines) == 3  # points, fit, intercept
-        _, ax = plot_increment_variance(est, label="first", annotations=False)
-        _, ax = plot_increment_variance(
+        _, ax = plot_linewidth_estimate(est, label="first", annotations=False)
+        _, ax = plot_linewidth_estimate(
             est, ax=ax, label="second", annotations=False, legend=True
         )
         assert [line.get_label() for line in ax.lines] == ["first", "second"]
@@ -163,7 +159,7 @@ class TestPlotAnalysis:
         est = analysis.estimate_linewidth(
             _phase(xp), IncrementSubtract(), sampling_rate=R
         )
-        fig, ax = plot_increment_variance(est)
+        fig, ax = plot_linewidth_estimate(est)
         assert len(ax.lines) == 1
 
     @pytest.mark.allow_warnings
@@ -172,26 +168,24 @@ class TestPlotAnalysis:
         z, m = _beat(xp)
         method = DshLorentzian(delay=m / FS, level_db=15.0)
         est = analysis.estimate_linewidth(z, method, sampling_rate=FS)
-        fig, ax = plot_dsh_beat_psd(est)
+        fig, ax = plot_linewidth_estimate(est)
         depths = [ln.get_ydata()[0] for ln in ax.lines[1:]]
         assert -15.0 in depths and -3.01 in depths
         # Zoomed on the line: twice the -15 dB width on each side.
         w = 2 * np.sqrt(10**1.5 - 1) * est.value
         assert ax.get_xlim() == pytest.approx((-2 * w, 2 * w))
         with patch("matplotlib.pyplot.show"):
-            assert plot_dsh_beat_psd(est, show=True) is None
+            assert plot_linewidth_estimate(est, show=True) is None
 
-    @pytest.mark.parametrize(
-        ("plot", "match"),
-        [
-            (plot_frequency_noise_psd, "BetaSeparation or DshFmFit"),
-            (plot_dsh_beat_psd, "DshLorentzian"),
-        ],
-    )
-    def test_wrong_estimate_raises(self, xp: Any, plot: Any, match: str) -> None:
+    def test_panel_follows_the_estimate(self, xp: Any) -> None:
+        """Each family draws its own panel, named by the default title; a
+        result that is not a linewidth estimate is a TypeError."""
         est = analysis.estimate_linewidth(_phase(xp), IncrementSlope(), sampling_rate=R)
-        with pytest.raises(ValueError, match=match):
-            plot(est)
+        _, ax = plot_linewidth_estimate(est)
+        assert ax.get_title() == "Phase-increment variance"
+        assert ax.get_xlabel() == "Increment Lag [s]"
+        with pytest.raises(TypeError, match="LinewidthEstimate"):
+            plot_linewidth_estimate(est.increment_var)  # type: ignore[arg-type]
 
     @pytest.mark.allow_warnings  # a short phase: the β-area is unresolved
     def test_carrier_phase_characterization(self, xp: Any) -> None:

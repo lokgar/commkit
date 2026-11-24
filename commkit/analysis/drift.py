@@ -10,7 +10,8 @@ from typing import Any
 
 import numpy as np
 
-from .._array import as_2d, restore_1d, to_report_scalar
+from .._array import as_2d, require_finite, require_int, restore_1d, to_report_scalar
+from .._value import _Record
 from ..backend import ArrayType, dispatch, to_device
 from ..filtering import butterworth_sos, iir_filter
 
@@ -18,8 +19,11 @@ __all__ = ["FrequencyDrift", "frequency_drift", "separate_drift_phase_noise"]
 
 
 @dataclass(frozen=True, eq=False)
-class FrequencyDrift:
-    """Residual frequency of a drift phase and its summary statistics (Hz).
+class FrequencyDrift(_Record):
+    """Residual frequency of a drift phase and its summary statistics (Hz),
+    from :func:`frequency_drift`.
+
+    The constructor takes the same fields.
 
     Attributes
     ----------
@@ -28,12 +32,15 @@ class FrequencyDrift:
     std, peak_to_peak, max_abs : float or numpy.ndarray
         Standard deviation, peak-to-peak and largest magnitude of ``df``:
         floats (SISO) or ``(C,)`` arrays (MIMO).
+    sampling_rate : float
+        Sampling rate of ``df`` in Hz.
     """
 
     df: Any
     std: float | np.ndarray
     peak_to_peak: float | np.ndarray
     max_abs: float | np.ndarray
+    sampling_rate: float
 
 
 def separate_drift_phase_noise(
@@ -153,6 +160,15 @@ def frequency_drift(
         ``df``, the per-sample residual frequency, and ``std``, ``pp`` and
         ``max_abs``: floats (SISO) or ``(C,)`` arrays (MIMO).
 
+    Raises
+    ------
+    ValueError
+        If ``sampling_rate`` is not finite and ``> 0``, ``edge_trim < 0``,
+        or fewer than 2 samples remain after trimming.
+    TypeError
+        If ``sampling_rate`` is not a real number or ``edge_trim`` not an
+        integer.
+
     Notes
     -----
     The first difference under-reads a spectral component at ``f`` by
@@ -161,20 +177,8 @@ def frequency_drift(
     matters only for band-limited content near Nyquist (see the Notes of
     :func:`fm_noise_psd`; broadband white FM is not affected).
     """
-    fs = float(sampling_rate)
-    if not (np.isfinite(fs) and fs > 0.0):
-        raise ValueError(
-            f"frequency_drift(): sampling_rate must be finite and > 0, got {sampling_rate!r}."
-        )
-    if (
-        isinstance(edge_trim, bool)
-        or not isinstance(edge_trim, int | np.integer)
-        or int(edge_trim) < 0
-    ):
-        raise ValueError(
-            f"frequency_drift(): edge_trim must be an integer >= 0, got {edge_trim!r}."
-        )
-    edge_trim = int(edge_trim)
+    fs = require_finite(sampling_rate, "frequency_drift(): sampling_rate", low=0.0)
+    edge_trim = require_int(edge_trim, "frequency_drift(): edge_trim", low=0)
     d, xp, _ = dispatch(drift_phase)
     d2, was_1d = as_2d(d, name="drift_phase")
     if edge_trim > 0:
@@ -208,4 +212,5 @@ def frequency_drift(
         std=to_report_scalar(std, was_1d=was_1d),
         peak_to_peak=to_report_scalar(pp, was_1d=was_1d),
         max_abs=to_report_scalar(max_abs, was_1d=was_1d),
+        sampling_rate=fs,
     )

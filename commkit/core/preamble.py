@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from .._array import require_int
 from .._sequences import barker_sequence, zadoff_chu_sequence, zc_mimo_root
 from ..backend import ArrayType, require_device, to_device
 from . import generation
@@ -78,9 +79,9 @@ class Preamble:
             raise ValueError(
                 f"sequence_type must be 'barker' or 'zc', got {self.sequence_type!r}."
             )
-        _check_int("num_symbols", self.num_symbols, 1)
-        _check_int("root", self.root, 1)
-        _check_int("num_channels", self.num_channels, 1)
+        require_int(self.num_symbols, "num_symbols", low=1)
+        require_int(self.root, "root", low=1)
+        require_int(self.num_channels, "num_channels", low=1)
 
         symbols: np.ndarray
         if self.sequence_type == "barker":
@@ -158,24 +159,11 @@ class Preamble:
         sps = require_integer_sps(sps, "Preamble.to_signal()")
         device = require_device(device, "Preamble.to_signal()")
         symbols = to_device(self.symbols, device)
-        pulse_obj: Pulse | None = None
-        if pulse is not None:
-            from ..filtering.pulses import Pulse
-
-            if isinstance(pulse, Pulse):
-                pulse_obj = pulse
         return Signal(
             samples=generation.shape_pulse(
                 symbols, sps=sps, pulse=pulse, periodic=periodic
             ),
             sampling_rate=symbol_rate * sps,
             symbol_rate=symbol_rate,
-            pulse=pulse_obj,
+            pulse=generation._pulse_object(pulse),
         )
-
-
-def _check_int(name: str, value: Any, low: int) -> None:
-    if isinstance(value, bool) or not isinstance(value, int | np.integer):
-        raise ValueError(f"{name} must be an integer, got {value!r}.")
-    if value < low:
-        raise ValueError(f"{name} must be >= {low}, got {value}.")

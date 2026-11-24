@@ -133,7 +133,7 @@ class TestRealInputOpticalTransforms:
     def test_real_input_returns_complex_without_warning(self, xp: Any) -> None:
         import warnings
 
-        from commkit.filtering import correct_chromatic_dispersion
+        from commkit.equalization import correct_chromatic_dispersion
         from commkit.impairments import apply_pmd
 
         rng = np.random.default_rng(7)

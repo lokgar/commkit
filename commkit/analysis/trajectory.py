@@ -52,14 +52,22 @@ def carrier_phase_trajectory(
         ``recovery.resolve_channel_permutation(metric="phase_increment")``,
         which picks the assignment with the lowest total variance of the
         phase-error increments, a score that a frequency offset does not
-        disturb.  ``"swap"`` forces the dual-pol swap, ``"identity"`` no
-        permutation.  Ignored for SISO.
+        disturb.  ``"swap"`` forces the dual-pol swap (2 channels only),
+        ``"identity"`` no permutation.  ``"auto"`` and ``"identity"`` are
+        the same for SISO.
 
     Returns
     -------
     ndarray
         Unwrapped carrier phase in radians (float64), the shape of the
         truncated input, on the device of ``symbols``.
+
+    Raises
+    ------
+    ValueError
+        If ``channel_pairing`` is unknown, or ``"swap"`` for other than 2
+        channels; without a reference for an array; if ``symbols`` or the
+        reference is empty; or for a Signal not at one sample per symbol.
 
     Notes
     -----
@@ -90,7 +98,7 @@ def carrier_phase_trajectory(
 
     y2, was_1d = as_2d(y, name="symbols")
     c = y2.shape[0]
-    if channel_pairing == "swap" and c > 2:
+    if channel_pairing == "swap" and c != 2:
         raise ValueError(
             f"{name}: channel_pairing='swap' is only defined for 2 channels, got {c}."
         )

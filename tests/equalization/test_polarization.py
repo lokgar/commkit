@@ -304,7 +304,7 @@ class TestDemultiplexPolarizationTonesDynamic:
         """A non-positive tracking bandwidth is rejected."""
         fs = 100.0
         s = self._streams(xp, N=4096)
-        with pytest.raises(ValueError, match=r"track_bandwidth must be positive"):
+        with pytest.raises(ValueError, match=r"track_bandwidth must be > 0"):
             _demux(
                 s, sampling_rate=fs, tone_frequencies=self.TONES, track_bandwidth=0.0
             )

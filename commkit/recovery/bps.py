@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 
+from .._array import require_int
 from ..backend import ArrayType, dispatch
 from ..logger import logger
 from ..mapping._lattice import slicer_params
@@ -62,10 +63,8 @@ class BPS:
     cycle_slip: CycleSlip | None = None
 
     def __post_init__(self) -> None:
-        if self.test_phases < 1:
-            raise ValueError(f"BPS: test_phases must be >= 1, got {self.test_phases}.")
-        if self.block_size < 1:
-            raise ValueError(f"BPS: block_size must be >= 1, got {self.block_size}.")
+        require_int(self.test_phases, "BPS: test_phases", low=1)
+        require_int(self.block_size, "BPS: block_size", low=1)
 
 
 def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> BlockPhaseEstimate:

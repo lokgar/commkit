@@ -60,7 +60,7 @@ class TestFrequencyDriftAnalysis:
             analysis.frequency_drift(phi, sampling_rate=0.0)
         with pytest.raises(ValueError, match="edge_trim"):
             analysis.frequency_drift(phi, sampling_rate=R, edge_trim=-1)
-        with pytest.raises(ValueError, match="edge_trim"):
+        with pytest.raises(TypeError, match="edge_trim"):
             analysis.frequency_drift(
                 phi,
                 sampling_rate=R,

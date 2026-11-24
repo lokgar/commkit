@@ -42,7 +42,7 @@ from typing import Any
 
 import numpy as np
 
-from ..._array import restore_1d
+from ..._array import require_finite, require_int, restore_1d
 from ..._dispersion import (
     apply_dispersion,
     beta2_length,
@@ -56,9 +56,9 @@ from ...core._signal_input import (
     S,
     SignalInput,
 )
+from ...filtering.linear import fir_filter
 from ...logger import logger
 from ...math import _next_pow2
-from ..linear import fir_filter
 from .estimation import (
     ChromaticDispersionEstimate,
     ClockToneScan,
@@ -368,16 +368,14 @@ def dispersion_compensation_taps(
     ...     sampling_rate=64e9, bandwidth=35.2e9)
     >>> y = fir_filter(x, taps)
     """
-    if not (np.isfinite(sampling_rate) and sampling_rate > 0):
-        raise ValueError(
-            "dispersion_compensation_taps(): sampling_rate must be finite and "
-            f"positive, got {sampling_rate!r}."
-        )
-    if not (np.isfinite(center_wavelength_nm) and center_wavelength_nm > 0):
-        raise ValueError(
-            "dispersion_compensation_taps(): center_wavelength_nm must be "
-            f"finite and positive, got {center_wavelength_nm!r}."
-        )
+    sampling_rate = require_finite(
+        sampling_rate, "dispersion_compensation_taps(): sampling_rate", low=0.0
+    )
+    center_wavelength_nm = require_finite(
+        center_wavelength_nm,
+        "dispersion_compensation_taps(): center_wavelength_nm",
+        low=0.0,
+    )
     band = sampling_rate if bandwidth is None else float(bandwidth)
     if not (np.isfinite(band) and 0 < band <= sampling_rate):
         raise ValueError(
@@ -393,15 +391,9 @@ def dispersion_compensation_taps(
     if num_taps is None:
         spread = spread_samples(b2l, sampling_rate=sampling_rate, bandwidth=band)
         num_taps = max(_MIN_TAPS, 2 * math.ceil((_TAPS_MARGIN * spread - 1) / 2) + 1)
-    elif (
-        isinstance(num_taps, bool)
-        or not np.isfinite(num_taps)
-        or int(num_taps) != num_taps
-        or num_taps < 1
-    ):
-        raise ValueError(
-            "dispersion_compensation_taps(): num_taps must be an integer >= 1, "
-            f"got {num_taps!r}."
+    else:
+        num_taps = require_int(
+            num_taps, "dispersion_compensation_taps(): num_taps", low=1
         )
     logger.debug(
         "Designing CD compensation: β₂L=%.3e s², bandwidth=%s Hz, taps=%s.",
@@ -541,10 +533,7 @@ def correct_fiber_propagation(
         raise ValueError(
             f"{name}: method must be 'blocks' or 'whole_record', got {method!r}."
         )
-    if not np.isfinite(nonlinear_scale):
-        raise ValueError(
-            f"{name}: nonlinear_scale must be finite, got {nonlinear_scale!r}."
-        )
+    require_finite(nonlinear_scale, f"{name}: nonlinear_scale")
     x, xp, _ = dispatch(inp.samples)
     field, was_1d, scale = to_watts(x, xp, launch_power_dbm, name)
     logger.info(

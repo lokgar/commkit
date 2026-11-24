@@ -11,8 +11,9 @@ from typing import Any, Literal
 import numpy as np
 
 from .. import _fft
-from .._array import broadcast_channels, freeze_host
+from .._array import broadcast_channels, freeze_host, require_finite
 from .._peaks import refine_tones
+from .._value import _Value
 from ..backend import ArrayType, dispatch, to_device
 from ..frequency import correct_frequency_offset
 from ..logger import logger
@@ -25,7 +26,7 @@ __all__ = ["PilotInterpolation", "PilotTone", "PilotTones"]
 
 
 @dataclass(frozen=True, eq=False)
-class PilotInterpolation:
+class PilotInterpolation(_Value):
     """Phase from known pilot symbols, interpolated between pilots.
 
     The phase at each pilot is ``∠(r_k·s_k*)``; the pilot phases are
@@ -421,8 +422,7 @@ class PilotTone:
     joint_channels: bool = False
 
     def __post_init__(self) -> None:
-        if not self.bandwidth > 0.0:
-            raise ValueError(f"bandwidth must be > 0, got {self.bandwidth}.")
+        require_finite(self.bandwidth, "bandwidth", low=0.0)
 
 
 def _pilot_tone(
@@ -482,7 +482,12 @@ def _pilot_tone(
         "[f_p=%.3g Hz, B=%.3g Hz, refine=%s, remove_foe=%s, C=%s]",
         (tone_frequency, bandwidth, method.refine, method.remove_frequency_offset, C),
     )
-    return PilotToneEstimate(value=theta, tone_frequencies=np.asarray(f_centers))
+    return PilotToneEstimate(
+        value=theta,
+        tone_frequencies=np.asarray(f_centers),
+        method=method,
+        sampling_rate=float(sampling_rate),
+    )
 
 
 def _lowpass_fft(z: ArrayType, sampling_rate: float, cutoff: float, xp) -> ArrayType:
@@ -556,8 +561,7 @@ class PilotTones:
         object.__setattr__(self, "frequencies", frequencies)
         if len(frequencies) < 1:
             raise ValueError("frequencies must contain at least one frequency.")
-        if not self.bandwidth > 0.0:
-            raise ValueError(f"bandwidth must be > 0, got {self.bandwidth}.")
+        require_finite(self.bandwidth, "bandwidth", low=0.0)
         if self.per_tone_channel is not None:
             channels = tuple(int(c) for c in self.per_tone_channel)
             object.__setattr__(self, "per_tone_channel", channels)
@@ -596,18 +600,11 @@ def _pilot_tones(
                     f"PilotTones: per_tone_channel[{k}]={ch} is out of range "
                     f"for {C} channel(s)."
                 )
-    if not (np.isfinite(differential_bandwidth) and differential_bandwidth > 0):
-        raise ValueError(
-            f"PilotTones: differential_bandwidth must be finite and > 0, got "
-            f"{differential_bandwidth!r}."
-        )
-    if method.search_band is not None and (
-        not np.isfinite(method.search_band) or method.search_band <= 0
-    ):
-        raise ValueError(
-            f"PilotTones: search_band must be finite and > 0, got "
-            f"{method.search_band!r}."
-        )
+    require_finite(
+        differential_bandwidth, "PilotTones: differential_bandwidth", low=0.0
+    )
+    if method.search_band is not None:
+        require_finite(method.search_band, "PilotTones: search_band", low=0.0)
 
     # 2) Extract each tone's scalar phasor stream z_k(n) and its (S_k, σ_k²).
     # One shared working-precision FFT of the record serves every tone's
@@ -728,6 +725,8 @@ def _pilot_tones(
     return PilotTonesEstimate(
         value=phi_full,
         tone_frequencies=np.stack([np.asarray(fc) for fc in f_centers], axis=-1),
+        method=method,
+        sampling_rate=float(sampling_rate),
         tone_snr_db=10.0 * np.log10(snr),
         differential_phase=xp.stack(delta),
         reference_tone=ref,

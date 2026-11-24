@@ -117,6 +117,9 @@ class TestCarrierPhaseTrajectory:
             analysis.carrier_phase_trajectory(y, y, channel_pairing="bad")
         with pytest.raises(ValueError, match="2 channels"):
             analysis.carrier_phase_trajectory(y, y, channel_pairing="swap")
+        # A single channel has nothing to swap: it raises, not acts as identity.
+        with pytest.raises(ValueError, match="2 channels"):
+            analysis.carrier_phase_trajectory(y[0], y[0], channel_pairing="swap")
         empty = xp.zeros(0, dtype=xp.complex64)
         with pytest.raises(ValueError, match="non-empty"):
             analysis.carrier_phase_trajectory(empty, empty)

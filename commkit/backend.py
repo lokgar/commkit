@@ -114,7 +114,11 @@ def require_device(device: str, function_name: str) -> str:
     Factories have no input data whose device they could follow, so they are
     the only functions that take ``device=``.
     """
-    if isinstance(device, str) and device.lower() in ("cpu", "gpu"):
+    if not isinstance(device, str):
+        raise TypeError(
+            f'{function_name} requires device to be "cpu" or "gpu"; got {device!r}.'
+        )
+    if device.lower() in ("cpu", "gpu"):
         return device.lower()
     raise ValueError(
         f'{function_name} requires device to be "cpu" or "gpu"; got {device!r}.'
@@ -206,11 +210,14 @@ def to_device(data: Any, device: str) -> ArrayType:
     ------
     ImportError
         If ``"gpu"`` is requested but CuPy is not available.
+    TypeError
+        If ``device`` is not a string, or ``data`` is a foreign array
+        (JAX, PyTorch).
     ValueError
         On an unknown device name.
     """
     if not isinstance(device, str):
-        raise ValueError(f"Unknown device: {device!r}")
+        raise TypeError(f'device must be "cpu" or "gpu", got {device!r}.')
     logger.debug("Moving data to %s.", device.upper())
     device = device.lower()
     if device == "cpu":

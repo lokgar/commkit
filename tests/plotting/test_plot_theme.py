@@ -155,14 +155,29 @@ class TestSIAxisUnits:
 
 
 class TestDeviceReduction:
-    """Plots of sample-rate traces reduce on the device: a long record moves
-    only the drawn points to the host."""
+    """Plots of sample-rate data reduce on the device: what crosses to the
+    host is bounded by the drawing, not by the record.
 
-    N = 1 << 18
+    Copies are traced at CuPy's level (``tests.common.transfers``), so every
+    path to the host is seen, not only calls of ``to_device``.  Each case is
+    drawn at two record lengths: the largest copy must stay within the
+    plot's bound at both, so a copy that grows with the record fails even if
+    the shorter record happens to fit.
+    """
+
+    LENGTHS = (1 << 16, 1 << 19)
+    #: Two channels of a 4000-point envelope and its remainder.
+    TRACE = 2 * (4000 + 2000)
+    #: Images: a 300x300 density grid, a 500x500 eye, a spectrogram of at
+    #: most 1000 rows (max_rows) of 256 bins (nperseg).
+    LIMITS: dict[str, int] = {
+        "constellation": 300 * 300,
+        "eye": 500 * 500,
+        "spectrogram": 1000 * 256,
+    }
 
     @staticmethod
-    def _cases(xp: Any) -> dict[str, Any]:
-
+    def _cases(xp: Any, n: int) -> dict[str, Any]:
         from commkit import plotting
         from commkit.analysis import FrequencyDrift
         from commkit.equalization import EqualizerResult
@@ -172,13 +187,13 @@ class TestDeviceReduction:
             MthPowerEstimate,
         )
         from commkit.recovery import (
+            BlockPhaseEstimate,
             PilotTone,
             PilotToneEstimate,
             PilotTonesEstimate,
         )
         from commkit.timing import TimingEstimate
 
-        n = TestDeviceReduction.N
         rng = np.random.default_rng(0)
         phase = xp.asarray(np.cumsum(rng.standard_normal((2, n)), axis=-1) * 1e-2)
         samples = xp.asarray(
@@ -190,43 +205,54 @@ class TestDeviceReduction:
         llrs = xp.asarray(rng.standard_normal(n).astype(np.float32))
         bits = xp.asarray(rng.integers(0, 2, n).astype(np.int8))
         value = xp.asarray([1.0, 2.0])
+        fs = 1e9
         return {
             "trajectory": lambda: plotting.plot_carrier_phase_trajectory(phase),
+            "block phase": lambda: plotting.plot_carrier_phase_estimate(
+                BlockPhaseEstimate(
+                    value=phase,
+                    block_centers=np.arange(64.0, n, n // 8),
+                    block_phase=phase[:, :: n // 8],
+                )
+            ),
             "decomposition": lambda: plotting.plot_carrier_phase_decomposition(
-                phase, phase * 0.5, symbol_rate=1e9
+                phase, phase * 0.5, symbol_rate=fs
             ),
             "drift": lambda: plotting.plot_frequency_drift(
-                FrequencyDrift(df=phase, std=0.0, peak_to_peak=0.0, max_abs=0.0),
-                sampling_rate=1e9,
+                FrequencyDrift(
+                    df=phase, std=0.0, peak_to_peak=0.0, max_abs=0.0, sampling_rate=fs
+                )
             ),
-            "spectrum": lambda: plotting.plot_frequency_offset_spectrum(
+            "spectrum": lambda: plotting.plot_frequency_offset_estimate(
                 MthPowerEstimate(
                     value=value,
                     weights=value,
+                    sampling_rate=fs,
                     power=4,
                     spectrum=xp.abs(phase),
                     spectrum_frequencies=np.arange(n) - n / 2.0,
                 )
             ),
-            "blockwise frequency": lambda: (
-                plotting.plot_frequency_offset_blockwise_result(
-                    BlockwiseFrequencyEstimate(
-                        value=value,
-                        weights=value,
-                        block_centers=np.array([2500.0, 7500.0]),
-                        block_values=xp.asarray([[1e6, 2e6], [1e6, 2e6]]),
-                    ),
+            "blockwise frequency": lambda: plotting.plot_frequency_offset_estimate(
+                BlockwiseFrequencyEstimate(
+                    value=value,
+                    weights=value,
+                    sampling_rate=fs,
+                    block_centers=np.array([2500.0, 7500.0]),
+                    block_values=xp.asarray([[1e6, 2e6], [1e6, 2e6]]),
                     num_samples=n,
-                    sampling_rate=1e9,
                 )
             ),
-            "autocorrelation": lambda: plotting.plot_mm_autocorrelation(
+            "autocorrelation": lambda: plotting.plot_frequency_offset_estimate(
                 MengaliMorelliEstimate(
-                    value=value, weights=value, power=4, autocorrelation=samples
-                ),
-                sampling_rate=1e9,
+                    value=value,
+                    weights=value,
+                    sampling_rate=fs,
+                    power=4,
+                    autocorrelation=samples,
+                )
             ),
-            "timing": lambda: plotting.plot_timing_correlation(
+            "timing": lambda: plotting.plot_timing_estimate(
                 TimingEstimate(
                     integer=xp.asarray([50, 900]),
                     fractional=xp.asarray([0.0, 0.0]),
@@ -236,24 +262,29 @@ class TestDeviceReduction:
                     search_start=10,
                 )
             ),
-            "pilot tone": lambda: plotting.plot_pilot_tone_phase_estimate(
-                PilotToneEstimate(value=phase, tone_frequencies=np.array([1e6, 1e6])),
+            "pilot tone": lambda: plotting.plot_carrier_phase_estimate(
+                PilotToneEstimate(
+                    value=phase,
+                    tone_frequencies=np.array([1e6, 1e6]),
+                    method=PilotTone(frequency=1e6, bandwidth=1e5),
+                    sampling_rate=fs,
+                ),
                 samples,
-                method=PilotTone(frequency=1e6, bandwidth=1e5),
-                sampling_rate=1e9,
             ),
-            "pilot tones": lambda: plotting.plot_pilot_tones_phase_estimate(
+            "pilot tones": lambda: plotting.plot_carrier_phase_estimate(
                 PilotTonesEstimate(
                     value=phase[0],
                     tone_frequencies=np.array([1e6, 2e6]),
+                    method=None,
+                    sampling_rate=fs,
                     tone_snr_db=np.array([20.0, 20.0]),
                     differential_phase=phase,
                     reference_tone=0,
                     used_tones=(0, 1),
                 )
             ),
-            "waveform": lambda: plotting.plot_time_domain(samples, sampling_rate=1e9),
-            "psd": lambda: plotting.plot_psd(samples, sampling_rate=1e9, nperseg=1024),
+            "waveform": lambda: plotting.plot_time_domain(samples, sampling_rate=fs),
+            "psd": lambda: plotting.plot_psd(samples, sampling_rate=fs, nperseg=1024),
             "llr distribution": lambda: plotting.plot_llr_distribution(llrs, bits),
             "equalizer": lambda: plotting.plot_equalizer_result(
                 EqualizerResult(
@@ -266,22 +297,16 @@ class TestDeviceReduction:
             "constellation": lambda: plotting.plot_constellation(samples[0]),
             "eye": lambda: plotting.plot_eye_diagram(real_wave, sps=8),
             "spectrogram": lambda: plotting.plot_spectrogram(
-                samples[0], sampling_rate=1e9, nperseg=256
+                samples[0], sampling_rate=fs, nperseg=256
             ),
         }
-
-    # Image plots transfer a fixed-size 2-D grid (e.g. 500x500), independent of N.
-    _IMAGE_LIMITS: dict[str, int] = {
-        "constellation": 300 * 300,
-        "eye": 500 * 500,
-        "spectrogram": 256 * 2500,
-    }
 
     @pytest.mark.gpu_only
     @pytest.mark.parametrize(
         "case",
         [
             "trajectory",
+            "block phase",
             "decomposition",
             "drift",
             "spectrum",
@@ -300,40 +325,17 @@ class TestDeviceReduction:
         ],
     )  # fmt: skip
     def test_moves_only_the_drawn_points(self, xp: Any, case: str) -> None:
-        """Every device-to-host copy is plot-sized (reduced trace or image),
-        well below the 2 x 2^18 sample record."""
-        from commkit import backend
+        from tests.common.transfers import recording
 
-        sizes: list[int] = []
-        real = backend.to_device
-
-        def counting(data: Any, device: str) -> Any:
-            if device == "cpu" and isinstance(data, xp.ndarray):
-                sizes.append(int(data.size))
-            return real(data, device)
-
-        import commkit.plotting.coding as coding_plot
-        import commkit.plotting.constellation as const_plot
-        import commkit.plotting.equalizer as eq_plot
-        import commkit.plotting.eye as eye_plot
-        import commkit.plotting.recovery as recovery
-        import commkit.plotting.spectral as spec_plot
-
-        # backend._to_host calls backend.to_device; modules that import
-        # to_device directly need patching too.
-        with (
-            patch.object(backend, "to_device", counting),
-            patch.object(recovery, "to_device", counting),
-            patch.object(coding_plot, "to_device", counting),
-            patch.object(const_plot, "to_device", counting),
-            patch.object(eq_plot, "to_device", counting),
-            patch.object(eye_plot, "to_device", counting),
-            patch.object(spec_plot, "to_device", counting),
-        ):
-            self._cases(xp)[case]()
-        plt.close("all")
-        limit = self._IMAGE_LIMITS.get(case, 2 * (4000 + 2000))
-        assert sizes and max(sizes) <= limit, (case, max(sizes), limit)
+        limit = self.LIMITS.get(case, self.TRACE)
+        for n in self.LENGTHS:
+            draw = self._cases(xp, n)[case]
+            with recording() as copies:
+                draw()
+            plt.close("all")
+            # Copies below 512 elements (histograms, scalars) are not traced.
+            largest = max((c.size for c in copies if c.kind == "D2H"), default=0)
+            assert largest <= limit, (case, n, largest, limit)
 
 
 # -----------------------------------------------------------------------------

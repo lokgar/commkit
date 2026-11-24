@@ -734,7 +734,7 @@ class TestFindBiasTone:
 # -----------------------------------------------------------------------------
 
 
-def _block_estimate(n, block_size, overlap, values):
+def _block_estimate(n, block_size, overlap, values, sampling_rate=1e6):
     """A BlockwiseFrequencyEstimate with given per-block values."""
     starts, length = frequency._block_starts(n, block_size, overlap)
     centers = np.array([st + length / 2.0 for st in starts])
@@ -742,8 +742,10 @@ def _block_estimate(n, block_size, overlap, values):
     return frequency.BlockwiseFrequencyEstimate(
         value=np.asarray(block_values.mean(axis=-1)),
         weights=np.ones(block_values.shape[:-1]),
+        sampling_rate=sampling_rate,
         block_centers=centers,
         block_values=block_values,
+        num_samples=n,
     )
 
 

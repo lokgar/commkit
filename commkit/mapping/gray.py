@@ -13,6 +13,7 @@ from types import ModuleType
 import numpy as np
 
 from .. import _cuda
+from .._array import require_int
 from ..backend import ArrayType, dispatch
 from ..logger import logger
 from ..math import normalize as _normalize
@@ -49,8 +50,7 @@ def gray_code(n: int) -> np.ndarray:
     >>> gray_code(2)
     array([0, 1, 3, 2])
     """
-    if n < 0:
-        raise ValueError("n must be non-negative")
+    n = require_int(n, "gray_code(): n", low=0)
     if n == 0:
         return _read_only(np.array([0], dtype=int))
 
@@ -82,8 +82,7 @@ def gray_to_binary(n: int) -> np.ndarray:
     >>> gray_to_binary(3)
     array([0, 1, 3, 2, 7, 6, 4, 5])
     """
-    if n < 0:
-        raise ValueError("n must be non-negative")
+    n = require_int(n, "gray_to_binary(): n", low=0)
     if n == 0:
         return _read_only(np.array([0], dtype=int))
 

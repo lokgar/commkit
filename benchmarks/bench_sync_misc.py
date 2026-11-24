@@ -3,7 +3,7 @@
 from workloads import FS, bps_workload, iq_imbalance_workload, rotated_symbols_workload
 
 from commkit import frequency, recovery
-from commkit.impairments import Lowdin, correct_iq_imbalance
+from commkit.equalization import Lowdin, correct_iq_imbalance
 from commkit.mapping import Constellation
 from commkit.metrics import evm
 

@@ -14,14 +14,16 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
+from .._array import freeze_host, require_int
 from .._circular import convolve_periodic
+from .._value import _Value
 from ..backend import ArrayType, dispatch, require_device, to_device
 from ..logger import logger
 from ..mapping.constellation import Constellation
 from ..math import db_to_linear, normalize
 from . import generation
 from ._signal_input import _same_value, require_integer_sps
-from .preamble import Preamble, _check_int
+from .preamble import Preamble
 from .signal import Reference, Signal
 
 if TYPE_CHECKING:
@@ -31,7 +33,7 @@ __all__ = ["FrameStructure", "SingleCarrierFrame", "extract_payload"]
 
 
 @dataclass(frozen=True, eq=False)
-class FrameStructure:
+class FrameStructure(_Value):
     """Boolean masks of a frame's segments, from
     :meth:`SingleCarrierFrame.get_structure_map`.
 
@@ -55,6 +57,12 @@ class FrameStructure:
     payload: np.ndarray
     preamble: np.ndarray | None = None
     guard: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("pilots", "payload", "preamble", "guard"):
+            value = getattr(self, name)
+            if value is not None:
+                freeze_host(self, name, value, bool)
 
 
 def _qpsk() -> Constellation:
@@ -200,13 +208,13 @@ class SingleCarrierFrame:
             self, "pilot_rng", _resolve_seed(self.pilot_rng, "pilot_rng")
         )
         if self.payload_num_symbols is not None:
-            _check_int("payload_num_symbols", self.payload_num_symbols, 1)
+            require_int(self.payload_num_symbols, "payload_num_symbols", low=1)
         if self.payload_blocks is not None:
-            _check_int("payload_blocks", self.payload_blocks, 1)
-        _check_int("pilot_period", self.pilot_period, 0)
-        _check_int("pilot_block_num_symbols", self.pilot_block_num_symbols, 0)
-        _check_int("guard_num_symbols", self.guard_num_symbols, 0)
-        _check_int("num_channels", self.num_channels, 1)
+            require_int(self.payload_blocks, "payload_blocks", low=1)
+        require_int(self.pilot_period, "pilot_period", low=0)
+        require_int(self.pilot_block_num_symbols, "pilot_block_num_symbols", low=0)
+        require_int(self.guard_num_symbols, "guard_num_symbols", low=0)
+        require_int(self.num_channels, "num_channels", low=1)
         for name in ("payload_constellation", "pilot_constellation"):
             if not isinstance(getattr(self, name), Constellation):
                 raise TypeError(
@@ -741,12 +749,7 @@ class SingleCarrierFrame:
         """
         sps = require_integer_sps(sps, "SingleCarrierFrame.to_signal()")
         device = require_device(device, "SingleCarrierFrame.to_signal()")
-        pulse_obj: Pulse | None = None
-        if pulse is not None:
-            from ..filtering.pulses import Pulse
-
-            if isinstance(pulse, Pulse):
-                pulse_obj = pulse
+        pulse_obj = generation._pulse_object(pulse)
         logger.info(
             "Building frame: %s symbols x %s channel(s), payload %s symbols of %r, "
             "pilot period %s, sps=%s, pulse=%r, periodic=%s, on %s.",
@@ -852,12 +855,7 @@ class SingleCarrierFrame:
         sections and the guard then form one symbol stream that is shaped
         as a whole.
         """
-        taps: Any = pulse
-        if pulse is not None:
-            from ..filtering.pulses import Pulse
-
-            if isinstance(pulse, Pulse):
-                taps = pulse.taps(sps)
+        taps = generation._taps(pulse, sps)
         body, xp, _ = dispatch(to_device(self.body_symbols, device))
 
         def dac_peak_gain(symbols: ArrayType) -> ArrayType:
@@ -969,5 +967,5 @@ def _resolve_seed(rng: Any, name: str) -> int:
         return int(rng.integers(2**63))
     if rng is None:
         return int(np.random.SeedSequence().generate_state(1, np.uint64)[0] >> 1)
-    _check_int(name, rng, 0)
+    require_int(rng, name, low=0)
     return int(rng)

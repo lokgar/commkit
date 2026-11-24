@@ -205,8 +205,8 @@ def test_slow_iir_time_panels_reach_end(xp: Any) -> None:
 
 
 def test_invalid_num_impulse_samples_raises() -> None:
-    for bad in (0, -5, True):
-        with pytest.raises(ValueError, match="num_impulse_samples"):
+    for bad, error in ((0, ValueError), (-5, ValueError), (True, TypeError)):
+        with pytest.raises(error, match="num_impulse_samples"):
             plot_filter_response([1.0], num_impulse_samples=bad)  # type: ignore[arg-type]
 
 

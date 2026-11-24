@@ -84,11 +84,13 @@ class TestBlockFDAFEngine:
             )
 
     @pytest.mark.parametrize("fn", [block_lms, block_cma, block_rde])
-    @pytest.mark.parametrize("block_size", [0, -4, 256.0])
-    def test_block_size_must_be_positive_integer(self, xp, fn, block_size):
+    @pytest.mark.parametrize(
+        ("block_size", "error"), [(0, ValueError), (-4, ValueError), (256.0, TypeError)]
+    )
+    def test_block_size_must_be_positive_integer(self, xp, fn, block_size, error):
         rx = xp.ones(2000, dtype=xp.complex64)
         data = (rx[:10],) if fn is block_lms else ()
-        with pytest.raises(ValueError, match="block_size must be a positive integer"):
+        with pytest.raises(error, match="block_size must be an integer"):
             fn(
                 rx,
                 *data,

@@ -8,7 +8,7 @@ import pytest
 
 from commkit import timing
 from commkit.core import Preamble, SingleCarrierFrame
-from commkit.plotting.timing import plot_timing_correlation
+from commkit.plotting.timing import plot_timing_estimate
 
 FS = 1e6
 
@@ -34,7 +34,7 @@ class TestPlotTimingSync:
     def test_timing_correlation(self, xp: Any, channels: int) -> None:
         """One overall/zoom row per channel; the marked peak is the start."""
         est = self._estimate(xp, channels)
-        fig, axes = plot_timing_correlation(est, show=False)
+        fig, axes = plot_timing_estimate(est, show=False)
         assert np.asarray(axes, dtype=object).shape == (channels, 2)
         starts = np.atleast_1d(
             np.asarray(est.integer.get() if xp is not np else est.integer)
@@ -50,14 +50,14 @@ class TestPlotTimingSync:
 
     def test_timing_correlation_show(self, xp: Any) -> None:
         with patch("matplotlib.pyplot.show"):
-            assert plot_timing_correlation(self._estimate(xp), show=True) is None
+            assert plot_timing_estimate(self._estimate(xp), show=True) is None
 
 
 def test_selected_timing_detail_overlay(xp: Any) -> None:
     """Timing details can be overlaid on one axis for comparison."""
     est = TestPlotTimingSync()._estimate(xp)
-    fig, ax = plot_timing_correlation(est, quantity="detail", label="first")
-    fig2, ax2 = plot_timing_correlation(
+    fig, ax = plot_timing_estimate(est, quantity="detail", label="first")
+    fig2, ax2 = plot_timing_estimate(
         est, quantity="detail", ax=ax, label="second", xlim=(20, 60), legend=False
     )
     assert fig2 is fig and ax2 is ax

@@ -25,6 +25,7 @@ from functools import cached_property
 
 import numpy as np
 
+from .._array import require_int
 from ..backend import ArrayType, _device_tables, dispatch
 from ._gf2 import matmul_mod2
 from .base import _CODECS, _Code, _Codec, _Decoded, _hard
@@ -82,18 +83,11 @@ class CRC(_Code):
 
     def __post_init__(self) -> None:
         r, k = self.degree, self.info_bits
-        if isinstance(r, bool) or not isinstance(r, int) or not 1 <= r <= 64:
-            raise ValueError(f"degree must be an integer in [1, 64], got {r!r}.")
-        if isinstance(k, bool) or not isinstance(k, int) or k < 1:
-            raise ValueError(f"info_bits must be an integer >= 1, got {k!r}.")
+        require_int(r, "degree", low=1, high=64)
+        require_int(k, "info_bits", low=1)
         for name in ("polynomial", "init", "xor_out"):
             value = getattr(self, name)
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, int)
-                or not 0 <= value < (1 << r)
-            ):
-                raise ValueError(f"{name} must be an integer in [0, 2^{r}).")
+            require_int(value, name, low=0, high=(1 << r) - 1)
         if self.reflect_in and k % 8:
             raise ValueError("reflect_in needs info_bits that is a multiple of 8.")
 

@@ -19,8 +19,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .._array import validate_array
+from .._array import require_finite, require_int, validate_array
 from .._constants import SPEED_OF_LIGHT
+from .._value import _Record
 from ..backend import (
     ArrayType,
     get_array_module,
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, eq=False)
-class Reference:
+class Reference(_Record):
     """Ground truth of a Signal: the transmitted symbols and bits.
 
     Parameters
@@ -206,8 +207,7 @@ class Reference:
         ``info_bits`` keeps the blocks carried whole by the kept bits.  The
         Reference itself when it has no more symbols than that.
         """
-        if num_symbols < 0:
-            raise ValueError(f"num_symbols must be >= 0, got {num_symbols}.")
+        num_symbols = require_int(num_symbols, "num_symbols", low=0)
         if num_symbols >= self.symbols.shape[-1]:
             return self
         symbols = self.symbols[..., :num_symbols]
@@ -229,7 +229,7 @@ class Reference:
 
 
 @dataclass(frozen=True, eq=False, kw_only=True)
-class Signal:
+class Signal(_Record):
     """A sampled waveform with its properties, description and ground truth.
 
     Parameters
@@ -555,27 +555,6 @@ def _validate_samples(v: Any) -> Any:
     return arr
 
 
-def _number(
-    name: str,
-    value: Any,
-    kind: type,
-    *,
-    low: float | None = None,
-    low_open: bool = False,
-) -> Any:
-    if isinstance(value, bool) or not isinstance(
-        value, int | float | np.integer | np.floating
-    ):
-        raise ValueError(f"{name} must be a number, got {value!r}.")
-    value = kind(value)
-    if not np.isfinite(value):
-        raise ValueError(f"{name} must be finite, got {value!r}.")
-    if low is not None and (value <= low if low_open else value < low):
-        bound = ">" if low_open else ">="
-        raise ValueError(f"{name} must be {bound} {low}, got {value}.")
-    return value
-
-
 def _check_carrier(signal: Signal) -> None:
     """A carrier needs a band: a digital signal keeps ``center_frequency`` 0."""
     if signal.domain == "DIG" and signal.center_frequency != 0:
@@ -590,9 +569,9 @@ def _validate_field(name: str, value: Any) -> Any:
     if name == "samples":
         return _validate_samples(value)
     if name in ("sampling_rate", "symbol_rate"):
-        return _number(name, value, float, low=0, low_open=True)
+        return require_finite(value, name, low=0.0)
     if name == "center_frequency":
-        return _number(name, value, float, low=0)
+        return require_finite(value, name, low=0.0, inclusive=True)
     if name == "domain":
         if not isinstance(value, str) or value.upper() not in _DOMAIN_NAMES:
             raise ValueError(f"domain must be 'DIG', 'RF' or 'OPT', got {value!r}.")

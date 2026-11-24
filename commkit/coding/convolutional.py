@@ -26,6 +26,7 @@ from typing import NamedTuple
 
 import numpy as np
 
+from .._array import require_int
 from ..backend import ArrayType, dispatch, to_device
 from .base import _CODECS, _Code, _Codec, _Decoded, _numba
 
@@ -123,15 +124,10 @@ class ConvolutionalCode(_Code):
 
     def __post_init__(self) -> None:
         k = self.constraint_length
-        if isinstance(k, bool) or not isinstance(k, int) or not 2 <= k <= 16:
-            raise ValueError(
-                f"constraint_length must be an integer in [2, 16], got {k!r}."
-            )
+        require_int(k, "constraint_length", low=2, high=16)
         raw_gens = list(self.generators)
-        if any(
-            isinstance(g, bool) or not isinstance(g, int | np.integer) for g in raw_gens
-        ):
-            raise ValueError("generators must be integers.")
+        for g in raw_gens:
+            require_int(g, "generators")
         gens = tuple(int(g) for g in raw_gens)
         if len(gens) < 2 or any(not 0 < g < (1 << k) for g in gens):
             raise ValueError(
@@ -139,8 +135,7 @@ class ConvolutionalCode(_Code):
             )
         object.__setattr__(self, "generators", gens)
         b = self.info_bits
-        if isinstance(b, bool) or not isinstance(b, int) or b < 1:
-            raise ValueError(f"info_bits must be an integer >= 1, got {b!r}.")
+        require_int(b, "info_bits", low=1)
         if self.termination not in ("zero", "tail-biting"):
             raise ValueError(
                 f"termination must be 'zero' or 'tail-biting', got {self.termination!r}."

@@ -19,8 +19,8 @@ plays the record in a loop.  The receiver undoes such a record exactly with
 FIR or blocks (see :mod:`commkit.filtering.fiber`).
 
 The compensation counterparts are
-:func:`commkit.filtering.correct_chromatic_dispersion` and digital
-backpropagation, :func:`commkit.filtering.correct_fiber_propagation`.  Import
+:func:`commkit.equalization.correct_chromatic_dispersion` and digital
+backpropagation, :func:`commkit.equalization.correct_fiber_propagation`.  Import
 the public names from :mod:`commkit.impairments`, their documented home.
 """
 
@@ -31,7 +31,7 @@ from typing import Any
 import numpy as np
 
 from .. import _fft
-from .._array import require_channels, restore_1d
+from .._array import require_channels, require_finite, restore_1d
 from .._dispersion import apply_dispersion
 from .._fiber import Fiber, check_link, jones_section, propagate, to_watts
 from .._random import RNG
@@ -304,7 +304,7 @@ def apply_chromatic_dispersion(
 
     See Also
     --------
-    commkit.filtering.correct_chromatic_dispersion :
+    commkit.equalization.correct_chromatic_dispersion :
         Remove CD in the receiver (electronic dispersion compensation).
 
     Examples
@@ -413,7 +413,7 @@ def apply_fiber_propagation(
 
     See Also
     --------
-    commkit.filtering.correct_fiber_propagation :
+    commkit.equalization.correct_fiber_propagation :
         Digital backpropagation, the inverse of this model.
     apply_chromatic_dispersion : the linear, single-span special case.
 
@@ -463,11 +463,9 @@ def apply_fiber_propagation(
         center_wavelength_nm=center_wavelength_nm,
         function_name=name,
     )
-    if noise_figure_db is not None and not (
-        math.isfinite(noise_figure_db) and noise_figure_db >= 0
-    ):
-        raise ValueError(
-            f"{name}: noise_figure_db must be >= 0 (or None), got {noise_figure_db!r}."
+    if noise_figure_db is not None:
+        require_finite(
+            noise_figure_db, f"{name}: noise_figure_db", low=0.0, inclusive=True
         )
     x, xp, _ = dispatch(inp.samples)
     field, was_1d, scale = to_watts(x, xp, launch_power_dbm, name)

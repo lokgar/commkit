@@ -234,11 +234,11 @@ class TestLinewidthEstimation:
         phi = xp.asarray(_wiener_phase(2e6, 1 << 14, seed=17))
         res = analysis.estimate_linewidth(phi, IncrementSlope(), sampling_rate=R)
         assert res.increment_var.shape == (1, res.lag_s.size)
-        plotting.plot_increment_variance(res)
+        plotting.plot_linewidth_estimate(res)
         res = analysis.estimate_linewidth(
             phi, IncrementSubtract(noise_var=0.0), sampling_rate=R
         )
-        plotting.plot_increment_variance(res)
+        plotting.plot_linewidth_estimate(res)
 
     def test_increment_subtract_known_noise(self, xp):
         """Subtracting the known AWGN term recovers Δν under heavy noise.
@@ -534,15 +534,15 @@ class TestDshLinewidth:
         z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=12)
         z = xp.asarray(z)
         fm = analysis.estimate_linewidth(z, DshFmFit(delay=m / FS), sampling_rate=FS)
-        plotting.plot_frequency_noise_psd(fm)
+        plotting.plot_linewidth_estimate(fm)
         inc = analysis.estimate_linewidth(
             z, DshIncrement(delay=m / FS), sampling_rate=FS
         )
-        plotting.plot_increment_variance(inc)
+        plotting.plot_linewidth_estimate(inc)
         lor = analysis.estimate_linewidth(
             z, DshLorentzian(delay=m / FS), sampling_rate=FS
         )
-        plotting.plot_dsh_beat_psd(lor)
+        plotting.plot_linewidth_estimate(lor)
 
     def test_signal_input(self, xp):
         n, m = 1 << 18, 500
@@ -788,10 +788,13 @@ class TestEstimateLinewidthContract:
             (lambda: IncrementSubtract(noise_var=-1.0), "noise_var"),
             (lambda: BetaSeparation(f_min=2e6, f_max=1e6), "f_min"),
             (lambda: BetaSeparation(nperseg=1), "nperseg"),
-            (lambda: DshFmFit(delay=0.0), "positive"),
-            (lambda: DshIncrement(delay=1e-6, lags=(0, 5)), "positive"),
+            (lambda: DshFmFit(delay=0.0), "delay must be > 0"),
+            (
+                lambda: DshIncrement(delay=1e-6, lags=(0, 5)),
+                "lags must be an integer >= 1",
+            ),
             (lambda: DshIncrement(delay=1e-6, lags=(5, 5)), "two distinct"),
-            (lambda: DshLorentzian(delay=-1e-6), "positive"),
+            (lambda: DshLorentzian(delay=-1e-6), "delay must be > 0"),
             (lambda: DshLorentzian(delay=1e-6, level_db=0.0), "level_db"),
         ],
     )

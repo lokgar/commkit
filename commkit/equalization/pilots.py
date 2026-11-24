@@ -8,12 +8,13 @@ from typing import Any
 import numpy as np
 
 from .._array import broadcast_channels, freeze_host, host_array
+from .._value import _Value
 
 __all__ = ["EqualizerPilots"]
 
 
 @dataclass(frozen=True, eq=False)
-class EqualizerPilots:
+class EqualizerPilots(_Value):
     """Known pilot symbols at known positions, for ``cma``, ``rde``,
     ``block_cma`` and ``block_rde``.
 

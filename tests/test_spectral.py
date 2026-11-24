@@ -490,6 +490,11 @@ class TestGridFrequency:
         assert (peak - n if peak > n // 2 else peak) * fs / n == pytest.approx(expected)
 
 
-def test_welch_psd_empty_raises(xp: Any) -> None:
-    with pytest.raises(ValueError, match="non-empty"):
-        spectral.welch_psd(xp.zeros(0, dtype=xp.complex64), sampling_rate=1e6)
+def test_empty_samples_raise(xp: Any) -> None:
+    """Both spectral estimators name the empty argument (SciPy's own message
+    for the spectrogram did not)."""
+    empty = xp.zeros(0, dtype=xp.complex64)
+    with pytest.raises(ValueError, match="welch_psd.*non-empty"):
+        spectral.welch_psd(empty, sampling_rate=1e6)
+    with pytest.raises(ValueError, match="spectrogram.*non-empty"):
+        spectral.spectrogram(empty, sampling_rate=1e6)

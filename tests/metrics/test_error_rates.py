@@ -177,7 +177,7 @@ class TestFrameErrorRate:
             metrics.fer(bits, bits[:4], info_bits=4)
         with pytest.raises(ValueError, match="info_bits"):
             metrics.fer(bits, bits, info_bits=0)
-        with pytest.raises(ValueError, match="info_bits"):
+        with pytest.raises(TypeError, match="info_bits"):
             metrics.fer(bits, bits, info_bits=2.0)
 
 

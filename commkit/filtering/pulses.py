@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 import scipy
 
+from .._array import require_finite, require_int
 from ..core._signal_input import require_integer_sps
 from ..math import normalize
 
@@ -39,13 +40,7 @@ def _symbol_grid(sps: float, span: float) -> np.ndarray:
     the sample grid of the signal (a symmetric pulse has its peak on a
     sample and its Nyquist zeros on the other symbols' samples).
     """
-    if (
-        isinstance(sps, bool)
-        or not isinstance(sps, int | float | np.integer | np.floating)
-        or not np.isfinite(sps)
-        or sps <= 0
-    ):
-        raise ValueError(f"sps must be finite and > 0, got {sps!r}.")
+    sps = require_finite(sps, "sps", low=0.0)
     num_taps = int(span * sps)
     num_taps += 1 - num_taps % 2
     return (np.arange(num_taps) - num_taps // 2) / sps
@@ -299,8 +294,7 @@ class Pulse:
 
 
 def _check_span(span: int) -> None:
-    if isinstance(span, bool) or not isinstance(span, int | np.integer) or span < 1:
-        raise ValueError(f"span must be a positive integer, got {span!r}.")
+    require_int(span, "span", low=1)
 
 
 def _check_rolloff(rolloff: float) -> None:

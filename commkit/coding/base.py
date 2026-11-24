@@ -16,7 +16,6 @@ along the last axis; a block never spans channels.
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -26,6 +25,7 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from .._array import as_2d, restore_1d, validate_array, warn_if_double
+from .._value import _Record, _Value
 from ..backend import ArrayType, get_array_module, to_device
 from ..logger import logger
 
@@ -44,7 +44,7 @@ _HARD_LLR = 1.0
 
 
 @dataclass(frozen=True, eq=False)
-class DecodeResult:
+class DecodeResult(_Record):
     """Output of :func:`decode`, arrays on the input's device.
 
     Attributes
@@ -113,46 +113,6 @@ class _Decoded(NamedTuple):
     llrs: ArrayType | None
     valid: ArrayType
     iterations: ArrayType
-
-
-class _Value:
-    """Value equality and hashing of frozen dataclasses with host arrays.
-
-    Equality compares the fields (arrays by value), so equal objects share
-    their cached device tables.
-    """
-
-    def _key(self) -> tuple[Any, ...]:
-        return tuple(
-            (v.shape, v.dtype.str, v.tobytes()) if isinstance(v, np.ndarray) else v
-            for f in dataclasses.fields(self)  # type: ignore[arg-type]
-            if f.compare
-            for v in (getattr(self, f.name),)
-        )
-
-    def __eq__(self, other: object) -> bool:
-        # The device-table cache compares an object with itself on every
-        # lookup (through a weak reference); _key() copies each array to bytes.
-        if self is other:
-            return True
-        if type(other) is not type(self):
-            return NotImplemented
-        return self._key() == other._key()
-
-    def __hash__(self) -> int:
-        # Cached: the device-table cache hashes the object on every call, and
-        # a large code's arrays are megabytes.
-        h: int | None = self.__dict__.get("_hash")
-        if h is None:
-            h = hash((type(self), self._key()))
-            self.__dict__["_hash"] = h
-        return h
-
-    def __getstate__(self) -> dict[str, Any]:
-        # Not the cached hash: hashes of bytes differ between processes.
-        state = self.__dict__.copy()
-        state.pop("_hash", None)
-        return state
 
 
 class _Code(_Value):

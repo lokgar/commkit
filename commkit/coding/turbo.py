@@ -28,6 +28,7 @@ from functools import cached_property
 
 import numpy as np
 
+from .._array import require_int
 from ..backend import ArrayType, dispatch, to_device
 from .base import _CODECS, _Code, _Codec, _Decoded, _numba
 from .convolutional import _Trellis, _trellis
@@ -100,8 +101,7 @@ class TurboCode(_Code):
 
     def __post_init__(self) -> None:
         k = self.info_bits
-        if isinstance(k, bool) or not isinstance(k, int | np.integer):
-            raise TypeError(f"info_bits must be an integer, got {k!r}.")
+        require_int(k, "info_bits")
         object.__setattr__(self, "info_bits", int(k))
         if self.info_bits not in _QPP_PARAMETERS:
             raise ValueError(
@@ -177,8 +177,7 @@ class TurboIterations:
 
     def __post_init__(self) -> None:
         it = self.max_iterations
-        if isinstance(it, bool) or not isinstance(it, int) or it < 1:
-            raise ValueError(f"max_iterations must be an integer >= 1, got {it!r}.")
+        require_int(it, "max_iterations", low=1)
         if self.method not in ("maxlog", "exact"):
             raise ValueError(
                 f"method must be 'maxlog' or 'exact', got {self.method!r}."

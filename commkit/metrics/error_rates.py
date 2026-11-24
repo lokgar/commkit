@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from .._array import to_report_scalar
+from .._array import require_int, to_report_scalar
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_input import SignalInput
 from ..core.signal import Reference, Signal
@@ -158,10 +158,7 @@ def fer(
             f"{name}: give info_bits, or a DecodeResult and the Signal or "
             "Reference that holds the code."
         )
-    if isinstance(info_bits, bool) or not isinstance(info_bits, int | np.integer):
-        raise ValueError(f"{name}: info_bits must be an integer, got {info_bits!r}.")
-    if info_bits < 1:
-        raise ValueError(f"{name}: info_bits must be >= 1, got {info_bits}.")
+    require_int(info_bits, f"{name}: info_bits", low=1)
     rx, xp, _ = dispatch(bits)
     rx, tx = _paired(rx, reference, xp, name)
     total = rx.shape[-1]

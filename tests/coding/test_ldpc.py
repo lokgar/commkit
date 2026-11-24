@@ -121,7 +121,7 @@ class TestConstruction:
             MinSum(offset=-1.0)
         with pytest.raises(ValueError, match="max_iterations"):
             SumProduct(max_iterations=0)
-        with pytest.raises(ValueError, match="max_iterations"):
+        with pytest.raises(TypeError, match="max_iterations"):
             MinSum(max_iterations=True)
 
     @pytest.mark.allow_warnings

@@ -3,7 +3,7 @@
 The fused CuPy kernels and the per-span CUDA graph are checked against the
 plain CuPy stages and against the CPU; the physics is tested through the
 public functions (impairments/test_fiber_channel_nonlinear.py,
-test_filtering.py).
+equalization/test_fiber_compensation.py).
 """
 
 import logging
@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from commkit import _fiber
-from commkit.filtering import correct_fiber_propagation
+from commkit.equalization import correct_fiber_propagation
 from commkit.impairments import Fiber, apply_fiber_propagation
 from tests.common.metrics import relative_rms_error
 from tests.common.signals import make_band_limited_field

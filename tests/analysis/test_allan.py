@@ -80,7 +80,7 @@ class TestAllanDeviation:
             analysis.allan_deviation(y, sampling_rate=0.0)
         with pytest.raises(ValueError, match="num_taus"):
             analysis.allan_deviation(y, sampling_rate=R, num_taus=0)
-        with pytest.raises(ValueError, match="num_taus"):
+        with pytest.raises(TypeError, match="num_taus"):
             analysis.allan_deviation(
                 y,
                 sampling_rate=R,
@@ -92,3 +92,20 @@ class TestAllanDeviation:
             analysis.allan_deviation(y, sampling_rate=R, taus=[])
         with pytest.raises(ValueError, match="taus"):
             analysis.allan_deviation(y, sampling_rate=R, taus=[-1.0])
+        # 16 samples hold at most m = 8: a longer tau alone leaves nothing.
+        with pytest.raises(ValueError, match="no tau fits"):
+            analysis.allan_deviation(y, sampling_rate=R, taus=[9 / R, 20 / R])
+
+    def test_taus_beyond_half_the_record_are_left_out(self, xp: Any) -> None:
+        """``m = N/2`` is the longest averaging the record holds twice: it is
+        kept and matches the definition; ``m = N/2 + 1`` is dropped."""
+        rng = np.random.default_rng(3)
+        y = rng.standard_normal(16)
+        out = analysis.allan_deviation(
+            xp.asarray(y), sampling_rate=R, taus=[8 / R, 9 / R]
+        )
+        np.testing.assert_allclose(out.taus, [8 / R])
+        x = np.concatenate([[0.0], np.cumsum(y) / R])
+        d2 = x[16] - 2 * x[8] + x[0]
+        expected = np.sqrt(d2**2 / (2 * (8 / R) ** 2))
+        np.testing.assert_allclose(out.adev, [expected], rtol=1e-12)

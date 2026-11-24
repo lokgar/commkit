@@ -61,7 +61,7 @@ class TestTimingSequences:
 
     def test_zadoff_chu_errors(self, xp):
         """Verify ZC sequence generator input validation."""
-        with pytest.raises(ValueError, match="num_symbols must be positive"):
+        with pytest.raises(ValueError, match="num_symbols must be an integer >= 1"):
             timing.zadoff_chu_sequence(0)
         with pytest.raises(ValueError, match="Root must be in"):
             timing.zadoff_chu_sequence(10, root=10)

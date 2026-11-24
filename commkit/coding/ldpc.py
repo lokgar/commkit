@@ -33,7 +33,7 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from .. import _cuda
-from .._array import freeze_host, host_array
+from .._array import freeze_host, host_array, require_finite, require_int
 from ..backend import ArrayType, _device_tables, dispatch
 from ..logger import logger
 from ._gf2 import inverse, matmul_mod2, row_reduce
@@ -85,8 +85,7 @@ class LDPCCode(_Code):
         cols = host_array(self.variables)
         for name in ("num_checks", "num_variables", "punctured"):
             v = getattr(self, name)
-            if isinstance(v, bool) or not isinstance(v, int | np.integer):
-                raise TypeError(f"{name} must be an integer, got {v!r}.")
+            require_int(v, name)
         m, n = int(self.num_checks), int(self.num_variables)
         if rows.ndim != 1 or rows.shape != cols.shape or rows.size == 0:
             raise ValueError("checks and variables must be equal-length 1-D arrays.")
@@ -106,9 +105,7 @@ class LDPCCode(_Code):
             raise ValueError("H has duplicate entries.")
         if np.bincount(rows, minlength=m).min() < 2:
             raise ValueError("every parity check needs at least two bits.")
-        p = int(self.punctured)
-        if p < 0:
-            raise ValueError(f"punctured must be >= 0, got {p}.")
+        p = require_int(self.punctured, "punctured", low=0)
         freeze_host(self, "checks", rows)
         freeze_host(self, "variables", cols)
         object.__setattr__(self, "num_checks", m)
@@ -203,13 +200,7 @@ class LDPCCode(_Code):
             Logs a warning on 4-cycles, as :meth:`from_parity_check`.
         """
         b = host_array(base)
-        if (
-            isinstance(lifting, bool)
-            or not isinstance(lifting, int | np.integer)
-            or int(lifting) < 1
-        ):
-            raise ValueError(f"lifting must be an integer >= 1, got {lifting!r}.")
-        z = int(lifting)
+        z = require_int(lifting, "lifting", low=1)
         if b.ndim != 2 or b.size == 0 or b.dtype.kind not in "iu":
             raise ValueError("base must be a non-empty 2-D integer matrix.")
         if b.min() < -1:
@@ -351,10 +342,9 @@ class MinSum:
     early_stop: bool = True
 
     def __post_init__(self) -> None:
-        if not 0.0 < self.scale <= 1.0:
+        if not require_finite(self.scale, "scale", low=0.0) <= 1.0:
             raise ValueError(f"scale must be in (0, 1], got {self.scale}.")
-        if self.offset < 0:
-            raise ValueError(f"offset must be >= 0, got {self.offset}.")
+        require_finite(self.offset, "offset", low=0.0, inclusive=True)
         _check_iterations(self.max_iterations)
 
 
@@ -382,8 +372,7 @@ class SumProduct:
 
 
 def _check_iterations(value: int) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ValueError(f"max_iterations must be an integer >= 1, got {value!r}.")
+    require_int(value, "max_iterations", low=1)
 
 
 # -----------------------------------------------------------------------------

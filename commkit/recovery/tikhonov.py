@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from .._array import require_finite, require_int
 from ..backend import ArrayType, dispatch, to_device
 from ._common import (
     _Context,
@@ -143,14 +144,8 @@ class Tikhonov:
             raise ValueError(
                 f"Tikhonov: smoother must be 'rts' or 'steady_state', got {self.smoother!r}."
             )
-        if not self.linewidth > 0:
-            raise ValueError(
-                f"Tikhonov: linewidth must be > 0 Hz, got {self.linewidth}."
-            )
-        if self.block_size < 1:
-            raise ValueError(
-                f"Tikhonov: block_size must be >= 1, got {self.block_size}."
-            )
+        require_finite(self.linewidth, "Tikhonov: linewidth", low=0.0)
+        require_int(self.block_size, "Tikhonov: block_size", low=1)
 
 
 def _vv_observation_variance(

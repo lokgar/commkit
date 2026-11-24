@@ -4,42 +4,32 @@
         --ignore=tests/test_examples.py
 
 Every copy of at least 512 elements between the GPU and the host that commkit
-makes during the run is recorded with the commkit function that made it:
+makes during the run is recorded with the commkit function that made it, by
+:mod:`tests.common.transfers` (which defines the copies traced).
 
-- ``D2H``: ``cupy.ndarray.get``, directly or through ``cupy.asnumpy`` or
-  :func:`commkit.backend.to_device`;
-- ``H2D``: ``cupy.asarray`` / ``cupy.array`` of a NumPy array, or
-  ``cupy.ndarray.set``.
-
-A transfer is charged to the innermost commkit frame outside ``backend`` (so a
-:func:`~commkit.backend.to_device` call is charged to its caller); one with no
-commkit frame on the stack (the tests' own) is ignored.  The terminal summary
-lists every site with its lines, ``!`` marking a site that is neither in
-``_DOCUMENTED`` nor a plot-sized (``<= _PLOT_MAX`` elements) D2H copy in
-``plotting/``; such a site fails the run.  The documented
-kinds are those of AGENTS.md: the sequential recursions' round trip, the
+The terminal summary lists every site with its lines and largest copy, ``!``
+marking a site that is neither in ``_DOCUMENTED`` nor a plot-sized
+(``<= _PLOT_MAX`` elements) D2H copy in ``plotting/``; such a site fails the
+run.  The documented kinds are those of AGENTS.md: the sequential recursions' round trip, the
 equalizers' continuation state (host copies), the reporting layer (metrics,
 analysis summaries, plotting), explicit device moves and the transmitted
 payload, and host values (reference symbols, pilots, tables built from host
 parameters) moved to the data's device.  Documented sites that the run did not
 reach are listed too, as a hint that an entry is stale (meaningful on the full
-suite only).  Calls are traced with ``sys.monitoring``, since
-``cupy.ndarray.get`` cannot be patched.
+suite only).
 """
 
 import collections
-import importlib.util
-import os
 import sys
-from types import CodeType, FrameType
 from typing import Any
 
-import numpy as np
 import pytest
 
-_MIN = 512
-# Plot-sized ceiling for D2H copies inside plotting/: covers 500x500 density
-# and eye images (250 000 elements) while catching accidental full-record pulls.
+from tests.common.transfers import install
+
+# Plot-sized ceiling for D2H copies inside plotting/: the images are bounded
+# independently of the record (500x500 density and eye grids, a spectrogram
+# of at most 1000 rows of 256 bins), so a full-record pull stands out.
 _PLOT_MAX = 300_000
 _TOOL = sys.monitoring.PROFILER_ID + 1  # 3: free for third-party tools
 
@@ -86,11 +76,11 @@ _DOCUMENTED: dict[str, str] = {
     "equalization/_sequential/_setup.py::_assemble_sequential": _RECURSION,
     "equalization/_sequential/_setup.py::_prepare_sequential": _RECURSION,
     "io.py::save_npz": "explicit device move (samples to the host to store them)",
-    "filtering/fiber/estimation.py::_quadratic_phase": _HOST_VALUE
+    "equalization/fiber/estimation.py::_quadratic_phase": _HOST_VALUE
     + " (the known symbols)",
-    "filtering/fiber/estimation.py::_quadratic_phase_pass": _REPORT
+    "equalization/fiber/estimation.py::_quadratic_phase_pass": _REPORT
     + " (the differential phase across the band, fitted on the host)",
-    "filtering/fiber/estimation.py::_clock_tone": _REPORT
+    "equalization/fiber/estimation.py::_clock_tone": _REPORT
     + " (the dispersion scan, searched for its peak on the host)",
     "filtering/linear.py::_sosfilt": _RECURSION
     + " (IIR above the 16-section GPU kernel limit)",
@@ -120,26 +110,6 @@ _LINES: collections.defaultdict[tuple[str, str], set[int]] = collections.default
 )
 
 
-def _package_dir() -> str:
-    """The directory of the commkit package, found without importing it.
-
-    Sites are matched against it, not against a ``commkit/commkit/`` path
-    fragment, so the audit works in a checkout of any name (a worktree).
-    """
-    spec = importlib.util.find_spec("commkit")
-    assert spec is not None and spec.origin is not None, "commkit is not importable"
-    return os.path.dirname(os.path.realpath(spec.origin)).replace("\\", "/") + "/"
-
-
-_PKG = _package_dir()
-
-
-def _relative(path: str) -> str | None:
-    """``path`` relative to the commkit package, or None outside it."""
-    path = path.replace("\\", "/")
-    return path[len(_PKG) :] if path.startswith(_PKG) else None
-
-
 def _documented(kind: str, site: str) -> bool:
     if site in _DOCUMENTED:
         return True
@@ -148,66 +118,15 @@ def _documented(kind: str, site: str) -> bool:
     return False
 
 
-def _site() -> tuple[str, int] | None:
-    frame: FrameType | None = sys._getframe(2)
-    while frame is not None:
-        path = frame.f_code.co_filename.replace("\\", "/")
-        if path.endswith("/commkit/backend.py") and frame.f_code.co_qualname.startswith(
-            "_device_tables"
-        ):
-            return "backend.py::_device_tables", frame.f_lineno
-        if "/site-packages/cupy" in path or path.endswith("/commkit/backend.py"):
-            frame = frame.f_back
-            continue
-        rel = _relative(path)
-        if rel is None:
-            return None
-        return f"{rel}::{frame.f_code.co_qualname}", frame.f_lineno
-    return None
-
-
-def _install() -> None:
-    import cupy as cp
-
-    get, set_ = cp.ndarray.get, cp.ndarray.set
-    uploads = (cp.asarray, cp.array)
-    disable = sys.monitoring.DISABLE
-
-    def on_call(code: CodeType, offset: int, f: Any, arg0: Any) -> Any:
-        # ``x.get()`` passes the method descriptor and x; ``h = x.get; h()``
-        # passes the bound method and its first argument.
-        bound = getattr(f, "__self__", None)
-        method = getattr(f, "__name__", None) if isinstance(bound, cp.ndarray) else None
-        kind, size = None, 0
-        if f is get or f is set_:
-            kind, size = ("D2H" if f is get else "H2D"), getattr(arg0, "size", 0)
-        elif method in ("get", "set"):
-            kind, size = ("D2H" if method == "get" else "H2D"), bound.size
-        elif any(f is u for u in uploads):
-            if isinstance(arg0, np.ndarray):
-                kind, size = "H2D", arg0.size
-        elif _relative(code.co_filename) is None:
-            # The callee at a call site outside commkit does not change, so
-            # stop watching it.  Inside commkit it may (``xp.asarray`` with
-            # xp = numpy first, cupy later), so keep watching.
-            return disable
-        if kind and size >= _MIN:
-            found = _site()
-            if found:
-                key = (kind, found[0])
-                _HITS[key] += 1
-                if size > _MAX_SIZE[key]:
-                    _MAX_SIZE[key] = size
-                _LINES[key].add(found[1])
-        return None
-
-    sys.monitoring.use_tool_id(_TOOL, "commkit-transfer-trace")
-    sys.monitoring.register_callback(_TOOL, sys.monitoring.events.CALL, on_call)
-    sys.monitoring.set_events(_TOOL, sys.monitoring.events.CALL)
+def _record(kind: str, size: int, site: str, line: int) -> None:
+    key = (kind, site)
+    _HITS[key] += 1
+    _MAX_SIZE[key] = max(_MAX_SIZE[key], size)
+    _LINES[key].add(line)
 
 
 def pytest_configure(config: Any) -> None:
-    _install()
+    install(_TOOL, "commkit-transfer-trace", _record)
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:

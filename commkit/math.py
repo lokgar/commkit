@@ -2,7 +2,8 @@
 
 :func:`rms`, :func:`normalize`, :func:`db_to_linear` and
 :func:`linear_to_db`.  Also the private helpers shared by the DSP modules:
-the FFT size ``_next_pow2``, the linear trend (``_linear_trend_slope``,
+the FFT size ``_next_pow2``, the data-aided gain ``_data_aided_gain`` of
+the metrics and :func:`~commkit.equalization.estimate_gain`, the linear trend (``_linear_trend_slope``,
 ``_remove_linear_trend``) and the
 phase rotations ``_unit_phasor`` (``exp(j·phase)`` in a chosen precision),
 ``_phasor`` and ``_derotate`` (``x·exp(-j·phase)`` in the precision of
@@ -224,6 +225,37 @@ def linear_to_db(x: ArrayType, *, power: bool = True) -> ArrayType:
     factor = 10.0 if power else 20.0
     with np.errstate(divide="ignore", invalid="ignore"):
         return factor * xp.log10(x)
+
+
+# ---------------------------------------------------------------------------
+# Data-aided gain, shared by the metrics and equalization.estimate_gain
+# ---------------------------------------------------------------------------
+
+
+def _data_aided_gain(
+    rx: ArrayType, tx: ArrayType, xp: Any, tx_power: ArrayType | None = None
+) -> ArrayType:
+    """The data-aided gain ``g = |<r s*>| / <|s|^2>`` per channel, ``(..., 1)``.
+
+    ``g`` is the amplitude of the symbols in ``rx`` relative to ``tx`` (the
+    transmittance), so ``rx / g`` is on the scale of ``tx`` whatever the
+    noise: AWGN is uncorrelated with ``s`` and leaves ``<r s*>`` unbiased,
+    while normalizing to unit total power shrinks the symbols by
+    ``1/sqrt(1 + 1/SNR)``.  Only the magnitude is used: a rotation, ``pi``
+    included, stays visible.  A channel without reference power or
+    correlation gets ``g = 1``.  ``tx_power`` is ``<|s|^2>`` ``(..., 1)``
+    when the caller has it.  Accumulated in double precision, returned in
+    the real precision of ``rx``.
+    """
+    num = xp.abs(xp.mean(rx * xp.conj(tx), axis=-1, keepdims=True, dtype=xp.complex128))
+    den = (
+        xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True, dtype=xp.float64)
+        if tx_power is None
+        else tx_power
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        g = num / den
+    return xp.where((den > 0) & (g > 0), g, 1.0).astype(rx.real.dtype)
 
 
 # ---------------------------------------------------------------------------

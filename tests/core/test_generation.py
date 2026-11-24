@@ -213,7 +213,7 @@ class TestGenerate:
         [
             (dict(constellation="qam"), TypeError),
             (dict(num_symbols=0), ValueError),
-            (dict(num_channels=1.5), ValueError),
+            (dict(num_channels=1.5), TypeError),
             (dict(sps=2.5), ValueError),
             (dict(device="tpu"), ValueError),
         ],

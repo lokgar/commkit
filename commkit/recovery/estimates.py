@@ -10,9 +10,11 @@ channel axis; :func:`~commkit.recovery.estimate_carrier_phase` drops it for
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
+from .._value import _Record
 from ..backend import ArrayType
 
 __all__ = [
@@ -25,7 +27,7 @@ __all__ = [
 
 
 @dataclass(frozen=True, eq=False)
-class CarrierPhaseEstimate:
+class CarrierPhaseEstimate(_Record):
     """Result of :func:`estimate_carrier_phase`: the result of ``PLL`` and
     ``ConstantPhase``, and the field every method gives.
 
@@ -102,9 +104,15 @@ class PilotToneEstimate(CarrierPhaseEstimate):
         Measured tone centers in Hz on the host: per channel (0-d or
         ``(C,)``) for ``PilotTone``, per channel and tone (``(K,)`` or
         ``(C, K)``) for ``PilotTones``.
+    method : PilotTone or PilotTones
+        The method used (its nominal frequencies and extraction bandwidth).
+    sampling_rate : float
+        Sampling rate in Hz of the samples the estimate was made from.
     """
 
     tone_frequencies: np.ndarray
+    method: Any
+    sampling_rate: float
 
 
 @dataclass(frozen=True, eq=False)

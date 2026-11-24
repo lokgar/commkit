@@ -392,6 +392,10 @@ def require_integer_sps(value: float, function_name: str) -> int:
     computed as ``sampling_rate / symbol_rate`` carries rounding error.  A
     genuinely fractional SPS (1.5) raises; it is never truncated.
     """
+    if isinstance(value, bool) or not isinstance(
+        value, int | float | np.integer | np.floating
+    ):
+        raise TypeError(f"{function_name}: sps must be a number, got {value!r}.")
     if not np.isfinite(value) or value < 1:
         raise ValueError(
             f"{function_name} requires sps to be a positive integer; got {value!r}."

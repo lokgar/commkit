@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .._array import require_finite
 from ..backend import ArrayType, _to_host
 
 if TYPE_CHECKING:
@@ -112,9 +113,8 @@ def maxwell_boltzmann(constellation: Constellation, *, nu: float) -> np.ndarray:
             f"maxwell_boltzmann(): constellation must be a Constellation, got "
             f"{type(constellation).__name__}."
         )
-    if not np.isfinite(nu) or nu < 0:
-        raise ValueError(f"nu must be finite and >= 0, got {nu}.")
-    return _mb_pmf(_grid_energies(constellation.points), float(nu)).copy()
+    nu = require_finite(nu, "maxwell_boltzmann(): nu", low=0.0, inclusive=True)
+    return _mb_pmf(_grid_energies(constellation.points), nu).copy()
 
 
 def optimal_nu(constellation: Constellation, *, entropy: float) -> float:
@@ -192,7 +192,7 @@ def _nu_for_entropy(energies: np.ndarray, entropy: float) -> float:
     m_min = int(np.count_nonzero(np.isclose(energies, min_e, rtol=1e-9, atol=1e-12)))
     min_h = float(np.log2(m_min))
     max_h = float(np.log2(energies.size))
-    if not (np.isfinite(entropy) and min_h < entropy <= max_h):
+    if not min_h < require_finite(entropy, "entropy") <= max_h:
         raise ValueError(
             f"entropy must be in ({min_h:g}, {max_h:g}] bits, got {entropy}."
         )

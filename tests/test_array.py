@@ -52,6 +52,48 @@ class TestValidationHelpers:
             _array.validate_array(Unconvertible())
 
 
+class TestScalarChecks:
+    """require_int / require_finite, and public sites that went through
+    hand-written comparisons before (``2.5 < 1`` is False, so a fractional
+    integer passed)."""
+
+    @pytest.mark.parametrize("value", [2.0, 2.5, True, "3", None])
+    def test_require_int_rejects_non_integers(self, value):
+        with pytest.raises(TypeError, match="n must be an integer"):
+            _array.require_int(value, "n", low=1)
+
+    def test_require_int_bounds(self):
+        assert _array.require_int(np.int64(3), "n", low=1, high=3) == 3
+        with pytest.raises(ValueError, match=r"in \[1, 3\]"):
+            _array.require_int(4, "n", low=1, high=3)
+
+    @pytest.mark.parametrize("value", ["1.0", True, None, np.ones(2)])
+    def test_require_finite_rejects_non_numbers(self, value):
+        with pytest.raises(TypeError, match="x must be a real number"):
+            _array.require_finite(value, "x")
+
+    @pytest.mark.parametrize("value", [np.nan, np.inf, 0.0])
+    def test_require_finite_rejects_bad_values(self, value):
+        with pytest.raises(ValueError, match="x must be"):
+            _array.require_finite(value, "x", low=0.0)
+
+    def test_fractional_integers_are_rejected(self, xp):
+        from commkit import backend, equalization, recovery
+        from commkit.logger import set_log_level
+
+        with pytest.raises(TypeError, match="block_size"):
+            recovery.BPS(block_size=2.5)
+        with pytest.raises(TypeError, match="block_size"):
+            recovery.Tikhonov(linewidth=1e5, snr_db=15.0, block_size=2.5)
+        x = xp.ones(256, dtype=xp.complex64)
+        with pytest.raises(TypeError, match="nfft"):
+            equalization.estimate_channel(x, x, nfft=64.5)
+        with pytest.raises(TypeError, match="device"):
+            backend.to_device(x, 1)  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="level"):
+            set_log_level(1.5)  # type: ignore[arg-type]
+
+
 class TestShapeHelpers:
     """Dimensional promotion, squeezing, channel broadcasting, and layout round-trips."""
 

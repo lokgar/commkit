@@ -12,7 +12,14 @@ from typing import Any
 import numpy as np
 from scipy.stats import chi2
 
-from ..._array import as_2d, broadcast_channels, freeze_host, to_report_scalar
+from ..._array import (
+    as_2d,
+    broadcast_channels,
+    freeze_host,
+    require_int,
+    to_report_scalar,
+)
+from ..._value import _Value
 from ...backend import ArrayType, _to_host, dispatch, to_device
 from ...logger import logger
 from ...math import _next_pow2, normalize
@@ -49,11 +56,6 @@ __all__ = [
 _BETA_MIN_BINS = 10
 #: Family-wise false-rejection rate of the spur screen (that of the fit).
 _SPUR_ALPHA = 0.01
-
-
-def _check_edge_trim(edge_trim: int) -> None:
-    if int(edge_trim) != edge_trim or edge_trim < 0:
-        raise ValueError(f"edge_trim must be a non-negative integer, got {edge_trim}.")
 
 
 @dataclass(frozen=True)
@@ -109,12 +111,12 @@ class IncrementSlope:
         lags = tuple(sorted({int(k) for k in self.lags if k >= 1}))
         if len(lags) < 2:
             raise ValueError("IncrementSlope needs at least two distinct lags >= 1.")
-        _check_edge_trim(self.edge_trim)
+        require_int(self.edge_trim, "edge_trim", low=0)
         object.__setattr__(self, "lags", lags)
 
 
 @dataclass(frozen=True, eq=False)
-class IncrementSubtract:
+class IncrementSubtract(_Value):
     r"""Lag-1 phase-increment variance minus a known AWGN term.
 
     ``Δν = (Var(Δφ_1) - σ²) / (2π·T)``.  With unit-power symbols the angle
@@ -160,7 +162,7 @@ class IncrementSubtract:
                 raise ValueError(
                     f"reference must have shape (N,) or (C, N), got {ref.shape}."
                 )
-        _check_edge_trim(self.edge_trim)
+        require_int(self.edge_trim, "edge_trim", low=0)
 
 
 @dataclass(frozen=True)
@@ -235,7 +237,7 @@ class BetaSeparation:
     * The AWGN's ``f²`` tail crosses back above the β-line: set ``f_max``
       below the knee where the plateau ``Δν/π`` meets the tail
       ``2σ_φ²T·f²``, ``f_knee = (Δν/(2π σ_φ² T))^{1/2}``.  Inspect it with
-      :func:`commkit.plotting.plot_frequency_noise_psd`.
+      :func:`commkit.plotting.plot_linewidth_estimate`.
     * For pure white FM the β-area FWHM matches ``linewidth_floor`` within
       that spread once ``f_c`` is resolved; the floor, fitted over the whole
       band, spreads far less (0.2 %).  Drift or flicker adds area at low frequencies,

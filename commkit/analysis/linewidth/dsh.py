@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 
 from ... import _fft
-from ..._array import as_2d, restore_1d, to_report_scalar
+from ..._array import as_2d, require_finite, require_int, restore_1d, to_report_scalar
 from ...backend import ArrayType, _to_host, dispatch, to_device
 from ...logger import logger
 from ...smoothing import moving_average
@@ -45,8 +45,7 @@ __all__ = [
 
 
 def _check_delay(delay: float) -> None:
-    if not float(delay) > 0.0:
-        raise ValueError(f"delay={delay} must be positive (seconds).")
+    require_finite(delay, "delay", low=0.0)
 
 
 @dataclass(frozen=True)
@@ -144,7 +143,7 @@ class DshFmFit:
       Other structure in the band (random-walk FM ``∝ 1/f²`` at the lowest
       bins, fiber acoustic lines, a colored receiver noise) biases the fit;
       fence it out with ``f_min`` and ``f_max``, and compare ``fm_psd`` with
-      ``fm_psd_model`` on :func:`commkit.plotting.plot_frequency_noise_psd`.
+      ``fm_psd_model`` on :func:`commkit.plotting.plot_linewidth_estimate`.
     * The detection-noise term assumes additive Gaussian angle noise, that is a
       beat SNR well above the unwrap threshold (≳ 10 dB in the record's
       bandwidth).  Below it phase slips add a white-FM-like floor.
@@ -214,9 +213,7 @@ class DshIncrement:
     def __post_init__(self) -> None:
         _check_delay(self.delay)
         if self.lags is not None:
-            lags = tuple(int(lag) for lag in self.lags)
-            if any(lag < 1 for lag in lags):
-                raise ValueError("lags must be positive sample counts.")
+            lags = tuple(require_int(lag, "lags", low=1) for lag in self.lags)
             if len(set(lags)) < 2:
                 raise ValueError("DshIncrement needs at least two distinct lags.")
             object.__setattr__(self, "lags", lags)
@@ -267,8 +264,7 @@ class DshLorentzian:
     def __post_init__(self) -> None:
         _check_delay(self.delay)
         _check_nperseg(self.nperseg)
-        if not float(self.level_db) > 0.0:
-            raise ValueError(f"level_db must be positive, got {self.level_db}.")
+        require_finite(self.level_db, "level_db", low=0.0)
 
 
 # -----------------------------------------------------------------------------

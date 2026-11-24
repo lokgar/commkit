@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from .._array import as_2d, restore_1d
+from .._array import as_2d, require_finite, require_int, restore_1d
 from .._constants import ELEMENTARY_CHARGE
 from .._random import RNG, as_generator, complex_normal, standard_normal
 from ..backend import ArrayType, _to_host, dispatch
@@ -273,23 +273,11 @@ def apply_ase(
             "apply_ase(): needs a complex optical Signal (domain='OPT'), whose "
             "sampling rate sets the noise bandwidth."
         )
-    if not reference_bandwidth > 0:
-        raise ValueError(
-            "apply_ase(): reference_bandwidth must be positive (Hz), got "
-            f"{reference_bandwidth!r}."
-        )
+    require_finite(reference_bandwidth, "apply_ase(): reference_bandwidth", low=0.0)
     num_channels = 1 if x.ndim == 1 else x.shape[0]
     if noise_modes is None:
         noise_modes = max(num_channels, 2)
-    if (
-        isinstance(noise_modes, bool)
-        or not isinstance(noise_modes, int)
-        or noise_modes < num_channels
-    ):
-        raise ValueError(
-            f"apply_ase(): noise_modes must be an integer of at least the "
-            f"{num_channels} channels, got {noise_modes!r}."
-        )
+    noise_modes = require_int(noise_modes, "apply_ase(): noise_modes", low=num_channels)
     logger.info(
         "Adding ASE noise (OSNR target: %.2f dB, %d modes).", osnr_db, noise_modes
     )
@@ -423,19 +411,17 @@ def apply_coherent_detection(
     ...     responsivity=1.0, thermal_noise_density=15e-12,
     ... )
     """
-    if not responsivity > 0:
-        raise ValueError(
-            f"apply_coherent_detection(): responsivity must be positive, got {responsivity!r}."
+    require_finite(responsivity, "apply_coherent_detection(): responsivity", low=0.0)
+    if cmrr_db is not None:
+        require_finite(
+            cmrr_db, "apply_coherent_detection(): cmrr_db", low=0.0, inclusive=True
         )
-    if cmrr_db is not None and not cmrr_db >= 0:
-        raise ValueError(
-            f"apply_coherent_detection(): cmrr_db must be non-negative, got {cmrr_db!r}."
-        )
-    if not thermal_noise_density >= 0:
-        raise ValueError(
-            "apply_coherent_detection(): thermal_noise_density must be non-negative, "
-            f"got {thermal_noise_density!r}."
-        )
+    require_finite(
+        thermal_noise_density,
+        "apply_coherent_detection(): thermal_noise_density",
+        low=0.0,
+        inclusive=True,
+    )
     function_name = "apply_coherent_detection()"
     inp = SignalInput(samples, function_name)
     fs = inp.sampling_rate(sampling_rate)
@@ -597,21 +583,15 @@ def apply_photodetection(
     ...                          thermal_noise_density=15e-12, rng=1)
     """
     function_name = "apply_photodetection()"
-    if not responsivity > 0:
-        raise ValueError(
-            f"{function_name}: responsivity must be positive, got {responsivity!r}."
-        )
+    require_finite(responsivity, f"{function_name}: responsivity", low=0.0)
     for name, value in (
         ("thermal_noise_density", thermal_noise_density),
         ("dark_current", dark_current),
     ):
-        if not value >= 0:
-            raise ValueError(
-                f"{function_name}: {name} must be non-negative, got {value!r}."
-            )
-    if saturation_current is not None and not saturation_current > 0:
-        raise ValueError(
-            f"{function_name}: saturation_current must be positive, got {saturation_current!r}."
+        require_finite(value, f"{function_name}: {name}", low=0.0, inclusive=True)
+    if saturation_current is not None:
+        require_finite(
+            saturation_current, f"{function_name}: saturation_current", low=0.0
         )
     inp = SignalInput(samples, function_name)
     fs = inp.sampling_rate(sampling_rate)

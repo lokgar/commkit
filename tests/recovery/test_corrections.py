@@ -791,11 +791,11 @@ class TestCorrectionValidation:
         sym = xp.ones(16, dtype=xp.complex64)
         with pytest.raises(ValueError, match="symmetry"):
             recovery.resolve_phase_ambiguity(sym, sym, symmetry=0)
-        with pytest.raises(ValueError, match="symmetry"):
+        with pytest.raises(TypeError, match="symmetry"):
             recovery.resolve_phase_ambiguity(sym, sym, symmetry=True)  # type: ignore[arg-type]
         with pytest.raises(ValueError, match="num_skip_symbols"):
             recovery.resolve_phase_ambiguity(sym, sym, symmetry=4, num_skip_symbols=-1)
-        with pytest.raises(ValueError, match="num_skip_symbols"):
+        with pytest.raises(TypeError, match="num_skip_symbols"):
             recovery.resolve_phase_ambiguity(
                 sym,
                 sym,

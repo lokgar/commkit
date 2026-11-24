@@ -339,8 +339,13 @@ class TestASE:
         for bad in (0.0, -12.5e9, float("nan")):
             with pytest.raises(ValueError, match="reference_bandwidth"):
                 apply_ase(opt, osnr_db=10.0, reference_bandwidth=bad)
-        for bad in (3, 0, 4.0, True):
-            with pytest.raises(ValueError, match="noise_modes"):
+        for bad, error in (
+            (3, ValueError),
+            (0, ValueError),
+            (4.0, TypeError),
+            (True, TypeError),
+        ):
+            with pytest.raises(error, match="noise_modes"):
                 apply_ase(opt, osnr_db=20.0, noise_modes=bad)
 
 

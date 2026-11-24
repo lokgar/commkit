@@ -15,7 +15,7 @@ from types import ModuleType
 import numpy as np
 
 from .. import _fft
-from .._array import as_2d, restore_1d
+from .._array import as_2d, require_finite, restore_1d
 from .._random import RNG, as_generator, standard_normal
 from ..backend import ArrayType, _module_for, dispatch, require_device, to_device
 from ..core._signal_input import S, SignalInput
@@ -64,16 +64,10 @@ def _phase_trajectory(
     closes on itself, and the step from the last sample back to the first is
     an ordinary increment.
     """
-    if not np.isfinite(linewidth) or linewidth < 0.0:
-        raise ValueError(f"linewidth must be finite and >= 0, got {linewidth!r}.")
-    if not np.isfinite(flicker) or flicker < 0.0:
-        raise ValueError(f"flicker must be finite and >= 0, got {flicker!r}.")
-    if flicker_f_min is not None and (
-        not np.isfinite(flicker_f_min) or flicker_f_min <= 0.0
-    ):
-        raise ValueError(
-            f"flicker_f_min must be finite and > 0, got {flicker_f_min!r}."
-        )
+    require_finite(linewidth, "linewidth", low=0.0, inclusive=True)
+    require_finite(flicker, "flicker", low=0.0, inclusive=True)
+    if flicker_f_min is not None:
+        require_finite(flicker_f_min, "flicker_f_min", low=0.0)
     num_samples = shape[-1]
     phi = xp.zeros(shape, dtype=xp.float64)
 

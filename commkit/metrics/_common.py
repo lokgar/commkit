@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from .._array import require_int
 from ..backend import ArrayType, to_device
 from ..core._signal_input import SignalInput, reference_of
 from ..core.signal import Reference
@@ -205,8 +206,7 @@ def _reference_scaled(
 
 def _skip(x: ArrayType, n: int, name: str) -> ArrayType:
     """Drop the first ``n`` entries of the last axis; nothing left raises."""
-    if n < 0:
-        raise ValueError(f"{name}: num_skip_symbols must be >= 0, got {n}.")
+    n = require_int(n, f"{name}: num_skip_symbols", low=0)
     x = x[..., n:]
     if x.shape[-1] == 0:
         raise ValueError(f"{name}: nothing to measure (no symbols after skipping).")

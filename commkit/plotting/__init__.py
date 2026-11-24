@@ -18,7 +18,8 @@ follow that theme or any other style.
   :mod:`~commkit.plotting.equalizer`: filters and equalizers.
 - :mod:`~commkit.plotting.timing`, :mod:`~commkit.plotting.frequency`,
   :mod:`~commkit.plotting.recovery`: timing, frequency-offset and
-  carrier-phase estimates.
+  carrier-phase estimates (``plot_<quantity>_estimate``, which draws the
+  diagnostics of the estimate's method, chosen by its class).
 - :mod:`~commkit.plotting.coding`: error-rate curves, LLR distributions,
   parity-check matrices and EXIT charts.
 - :mod:`~commkit.plotting.analysis`: carrier-phase decomposition, drift,
@@ -31,10 +32,8 @@ from .analysis import (
     plot_allan_deviation,
     plot_carrier_phase_characterization,
     plot_carrier_phase_decomposition,
-    plot_dsh_beat_psd,
     plot_frequency_drift,
-    plot_frequency_noise_psd,
-    plot_increment_variance,
+    plot_linewidth_estimate,
 )
 from .coding import (
     plot_error_rate,
@@ -46,20 +45,11 @@ from .constellation import plot_constellation, plot_ideal_constellation
 from .equalizer import plot_channel_correction, plot_equalizer_result
 from .eye import plot_eye_diagram
 from .filter_response import plot_filter_response
-from .frequency import (
-    plot_frequency_offset_blockwise_result,
-    plot_frequency_offset_spectrum,
-    plot_mm_autocorrelation,
-)
-from .recovery import (
-    plot_carrier_phase_trajectory,
-    plot_pilot_phase_estimate,
-    plot_pilot_tone_phase_estimate,
-    plot_pilot_tones_phase_estimate,
-)
+from .frequency import plot_frequency_offset_estimate
+from .recovery import plot_carrier_phase_estimate, plot_carrier_phase_trajectory
 from .spectral import plot_psd, plot_spectrogram
 from .theme import apply_default_theme
-from .timing import plot_timing_correlation
+from .timing import plot_timing_estimate
 from .waveform import plot_time_domain
 
 __all__ = [
@@ -67,29 +57,23 @@ __all__ = [
     "plot_allan_deviation",
     "plot_carrier_phase_characterization",
     "plot_carrier_phase_decomposition",
+    "plot_carrier_phase_estimate",
     "plot_carrier_phase_trajectory",
     "plot_channel_correction",
     "plot_constellation",
-    "plot_dsh_beat_psd",
     "plot_equalizer_result",
     "plot_error_rate",
     "plot_exit_chart",
     "plot_eye_diagram",
     "plot_filter_response",
     "plot_frequency_drift",
-    "plot_frequency_noise_psd",
-    "plot_frequency_offset_blockwise_result",
-    "plot_frequency_offset_spectrum",
+    "plot_frequency_offset_estimate",
     "plot_ideal_constellation",
-    "plot_increment_variance",
+    "plot_linewidth_estimate",
     "plot_llr_distribution",
-    "plot_mm_autocorrelation",
     "plot_parity_check",
-    "plot_pilot_phase_estimate",
-    "plot_pilot_tone_phase_estimate",
-    "plot_pilot_tones_phase_estimate",
     "plot_psd",
     "plot_spectrogram",
     "plot_time_domain",
-    "plot_timing_correlation",
+    "plot_timing_estimate",
 ]

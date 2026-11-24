@@ -35,6 +35,7 @@ from typing import Any
 import numpy as np
 
 from .. import _cuda
+from .._array import require_int
 from .._bits import pack_bits
 from ..backend import ArrayType, _device_tables, dispatch
 from ._galois import PRIMITIVE, _Field
@@ -137,18 +138,11 @@ class ReedSolomonCode(_Algebraic):
 
     def __post_init__(self) -> None:
         for name in ("symbols", "info_symbols", "m", "first_root"):
-            v = getattr(self, name)
-            if isinstance(v, bool) or not isinstance(v, int | np.integer):
-                raise ValueError(f"{name} must be an integer, got {v!r}.")
-            object.__setattr__(self, name, int(v))
+            object.__setattr__(self, name, require_int(getattr(self, name), name))
         if self.primitive is not None:
-            if isinstance(self.primitive, bool) or not isinstance(
-                self.primitive, int | np.integer
-            ):
-                raise ValueError(
-                    f"primitive must be an integer, got {self.primitive!r}."
-                )
-            object.__setattr__(self, "primitive", int(self.primitive))
+            object.__setattr__(
+                self, "primitive", require_int(self.primitive, "primitive")
+            )
         n, k, m = self.symbols, self.info_symbols, self.m
         prim = PRIMITIVE.get(m) if self.primitive is None else self.primitive
         if prim is None:
@@ -293,23 +287,18 @@ class BCHCode(_Algebraic):
 
     def __post_init__(self) -> None:
         for name in ("m", "t"):
-            v = getattr(self, name)
-            if isinstance(v, bool) or not isinstance(v, int | np.integer):
-                raise ValueError(f"{name} must be an integer, got {v!r}.")
-            object.__setattr__(self, name, int(v))
+            object.__setattr__(self, name, require_int(getattr(self, name), name))
         for name in ("length", "primitive"):
             v = getattr(self, name)
             if v is not None:
-                if isinstance(v, bool) or not isinstance(v, int | np.integer):
-                    raise ValueError(f"{name} must be an integer, got {v!r}.")
+                require_int(v, name)
                 object.__setattr__(self, name, int(v))
         prim = PRIMITIVE.get(self.m) if self.primitive is None else self.primitive
         if prim is None:
             raise ValueError(f"no default primitive polynomial for m = {self.m}.")
         object.__setattr__(self, "primitive", prim)
         full = (1 << self.m) - 1
-        if self.t < 1:
-            raise ValueError(f"t must be an integer >= 1, got {self.t!r}.")
+        require_int(self.t, "t", low=1)
         if self.length is None:
             object.__setattr__(self, "length", full)
         degree = self._generator.bit_length() - 1

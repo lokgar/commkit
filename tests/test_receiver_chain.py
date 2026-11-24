@@ -236,7 +236,7 @@ class TestFiberChain:
         z = ck.impairments.apply_phase_noise(z, linewidth=1e5, rng=2)
         y = ck.impairments.apply_awgn(z, esn0_db=self.ESN0_DB, rng=3)
         if dispersion_sign:
-            y = ck.filtering.correct_chromatic_dispersion(
+            y = ck.equalization.correct_chromatic_dispersion(
                 y,
                 dispersion_ps_nm=dispersion_sign * fiber.dispersion_ps_nm_km * 80.0,
                 method="whole_record",

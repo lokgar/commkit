@@ -11,7 +11,7 @@ import pytest
 from workloads import fiber_workload
 
 from commkit import _fiber
-from commkit.filtering import correct_fiber_propagation
+from commkit.equalization import correct_fiber_propagation
 from commkit.impairments import Fiber, apply_fiber_propagation
 
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)

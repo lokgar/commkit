@@ -23,6 +23,7 @@ import math
 from fractions import Fraction
 from typing import Any
 
+from ._array import require_finite, require_int
 from .backend import ArrayType, dispatch, to_device
 from .core._signal_input import S, SignalInput
 from .logger import logger
@@ -319,8 +320,7 @@ def _sps_ratio(sps_out: float, sps_in: float) -> tuple[int, int]:
     """``(up, down)`` of ``sps_out / sps_in`` with both at most
     ``_MAX_SPS_RATIO_FACTOR``; raise when no such fraction matches the ratio
     to a relative 1e-9."""
-    if not (sps_out > 0 and math.isfinite(sps_out)):
-        raise ValueError(f"resample(): sps_out must be positive, got {sps_out}.")
+    sps_out = require_finite(sps_out, "resample(): sps_out", low=0.0)
     target = sps_out / sps_in
     ratio = Fraction(target).limit_denominator(_MAX_SPS_RATIO_FACTOR)
     if (
@@ -376,8 +376,4 @@ def _resample_periodic(
 
 
 def _check_factor(factor: int, function_name: str) -> int:
-    if isinstance(factor, bool) or int(factor) != factor or factor < 1:
-        raise ValueError(
-            f"{function_name}: factors must be positive integers, got {factor!r}."
-        )
-    return int(factor)
+    return require_int(factor, f"{function_name}: factor", low=1)

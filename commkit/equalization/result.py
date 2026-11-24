@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from .._value import _Record
 from ..backend import ArrayType, dispatch, to_device
 from ..logger import logger
 
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, eq=False)
-class EqualizerState:
+class EqualizerState(_Record):
     """Where an adaptive equalizer stopped; pass as ``state=`` to continue.
 
     The state is taken after the last output symbol whose filter window lies
@@ -154,7 +155,7 @@ def _check_state(
 
 
 @dataclass(frozen=True, eq=False)
-class EqualizerResult:
+class EqualizerResult(_Record):
     """Output of an adaptive or block equalizer.
 
     Arrays stay on the input's device.

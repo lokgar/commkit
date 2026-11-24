@@ -24,7 +24,7 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
-from .._array import freeze_host, host_array
+from .._array import freeze_host, host_array, require_int
 from .._bits import pack_bits, unpack_bits
 from ..backend import ArrayType, _device_tables, dispatch
 from ._gf2 import matmul_mod2, null_space, row_reduce
@@ -177,8 +177,7 @@ class LinearBlockCode(_Code):
         standards fix their own column orders; any order gives an
         equivalent code with the same distance properties.
         """
-        if isinstance(r, bool) or not isinstance(r, int | np.integer) or r < 2:
-            raise ValueError(f"r must be an integer >= 2, got {r!r}.")
+        require_int(r, "r", low=2)
         values = np.arange(1, 1 << r)
         info = values[(values & (values - 1)) != 0]
         h = np.concatenate([unpack_bits(info, r).T, np.eye(r, dtype=np.int8)], axis=1)
@@ -265,10 +264,7 @@ class Chase:
 
     def __post_init__(self) -> None:
         p = self.test_positions
-        if isinstance(p, bool) or not isinstance(p, int) or not 1 <= p <= 12:
-            raise ValueError(
-                f"test_positions must be an integer in [1, 12], got {p!r}."
-            )
+        require_int(p, "test_positions", low=1, high=12)
         if self.beta is not None and self.beta <= 0:
             raise ValueError(f"beta must be positive, got {self.beta}.")
         if not isinstance(self.soft, bool):
@@ -302,8 +298,8 @@ class Syndrome:
 
     def __post_init__(self) -> None:
         w = self.max_weight
-        if w is not None and (isinstance(w, bool) or not isinstance(w, int) or w < 0):
-            raise ValueError(f"max_weight must be an integer >= 0 or None, got {w!r}.")
+        if w is not None:
+            require_int(w, "max_weight", low=0)
 
 
 @dataclass(frozen=True)

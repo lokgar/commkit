@@ -14,7 +14,8 @@ from typing import Any, cast
 import numpy as np
 
 from . import _fft
-from ._array import as_2d, restore_1d
+from ._array import as_2d, require_finite, require_int, restore_1d
+from ._value import _Record
 from .backend import ArrayType, dispatch
 from .core._signal_input import S, SignalInput
 from .core.signal import Signal
@@ -118,8 +119,10 @@ def grid_frequency(
     >>> tone = grid_frequency(f, sampling_rate=sig.sampling_rate,
     ...                       num_samples=sig.samples.shape[-1])
     """
-    if num_samples < 1:
-        raise ValueError(f"num_samples must be >= 1, got {num_samples}.")
+    num_samples = require_int(num_samples, "grid_frequency(): num_samples", low=1)
+    sampling_rate = require_finite(
+        sampling_rate, "grid_frequency(): sampling_rate", low=0.0
+    )
     df = sampling_rate / num_samples
     snapped = np.round(np.asarray(frequency, dtype=np.float64) / df) * df
     return float(snapped) if snapped.ndim == 0 else snapped
@@ -433,7 +436,8 @@ def welch_psd(
         If ``return_onesided=True`` for complex input, ``nperseg`` is not
         positive or differs from the length of an array ``window``,
         ``noverlap`` is not below ``nperseg``, ``nfft`` is below
-        ``nperseg``, or ``average``, ``scaling`` or ``detrend`` is unknown.
+        ``nperseg``, ``average``, ``scaling`` or ``detrend`` is unknown, or
+        ``samples`` is empty.
     """
     inp = SignalInput(samples, "welch_psd()")
     x = inp.samples
@@ -495,9 +499,7 @@ def _welch(
     n = x.shape[-1]
     real = x.real.dtype
     if isinstance(window, str | tuple):
-        nperseg = int(nperseg)
-        if nperseg < 1:
-            raise ValueError(f"nperseg must be a positive integer, got {nperseg}.")
+        nperseg = require_int(nperseg, "nperseg", low=1)
         if 0 < n < nperseg:
             logger.warning(
                 "welch_psd: nperseg=%s exceeds the record (%s samples); one "
@@ -539,9 +541,9 @@ def _welch(
             f"{detrend!r}."
         )
 
-    f = xp.fft.rfftfreq(nfft, 1 / fs) if onesided else xp.fft.fftfreq(nfft, 1 / fs)
     if n == 0:
         raise ValueError("welch_psd(): samples must be non-empty.")
+    f = xp.fft.rfftfreq(nfft, 1 / fs) if onesided else xp.fft.fftfreq(nfft, 1 / fs)
     win = xp.asarray(win, dtype=np.float64)
     if scaling == "density":
         scale = 1.0 / (fs * float(xp.sum(win * win)))
@@ -593,7 +595,7 @@ def _median_bias(n: int) -> float:
 
 
 @dataclass(frozen=True, eq=False)
-class Spectrogram:
+class Spectrogram(_Record):
     """Result of :func:`spectrogram`.
 
     Attributes
@@ -668,7 +670,8 @@ def spectrogram(
     Raises
     ------
     ValueError
-        If ``return_onesided=True`` for complex input.
+        If ``return_onesided=True`` for complex input, or ``samples`` is
+        empty.
     """
     inp = SignalInput(samples, "spectrogram()")
     x = inp.samples
@@ -676,6 +679,8 @@ def spectrogram(
     axis = -1
 
     x, xp, sp = dispatch(x)
+    if x.shape[-1] == 0:
+        raise ValueError("spectrogram(): samples must be non-empty.")
     is_complex = xp.iscomplexobj(x)
 
     return_onesided, shift = _validate_and_shift(

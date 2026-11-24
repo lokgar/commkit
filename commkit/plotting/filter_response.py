@@ -41,6 +41,7 @@ from typing import Any
 import matplotlib.ticker as ticker
 import numpy as np
 
+from .._array import require_finite, require_int
 from ..backend import dispatch, to_device
 from ..filtering import filter_response, impulse_response, step_response
 from .theme import _finish, _guide, _panel_grid, _select, _set_eng_formatter
@@ -153,14 +154,10 @@ def plot_filter_response(
         xlim=xlim,
         ylim=ylim,
     )
-    if sps is not None and not sps > 0:
-        raise ValueError("sps must be positive")
-    if num_impulse_samples is not None and (
-        isinstance(num_impulse_samples, bool)
-        or not isinstance(num_impulse_samples, (int, np.integer))
-        or num_impulse_samples <= 0
-    ):
-        raise ValueError("num_impulse_samples must be a positive integer")
+    if sps is not None:
+        require_finite(sps, "plot_filter_response(): sps", low=0.0)
+    if num_impulse_samples is not None:
+        require_int(num_impulse_samples, "num_impulse_samples", low=1)
     if quantity is None:
         selected: tuple[str, ...] = ("impulse", "magnitude", "phase", "group_delay")
         fig, grid = _panel_grid(ax, 2, 2)

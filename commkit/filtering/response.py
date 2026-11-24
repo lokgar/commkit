@@ -15,6 +15,8 @@ import numpy as np
 import scipy
 
 from .. import _fft
+from .._array import require_finite, require_int
+from .._value import _Record
 from ..backend import ArrayType, _to_host, dispatch
 from ..math import _phasor
 from .linear import iir_filter
@@ -23,7 +25,7 @@ __all__ = ["FilterResponse", "filter_response", "impulse_response", "step_respon
 
 
 @dataclass(frozen=True, eq=False)
-class FilterResponse:
+class FilterResponse(_Record):
     """Frequency response and group delay of a digital filter.
 
     Attributes
@@ -104,12 +106,9 @@ def filter_response(
     undefined. Frequency grids and phase wrapping use float64; coefficient
     arithmetic follows the coefficient dtype.
     """
-    if not isinstance(nfft, (int, np.integer)) or nfft <= 0:
-        raise ValueError("nfft must be a positive integer")
-    if sampling_rate is not None and (
-        not np.isfinite(sampling_rate) or sampling_rate <= 0
-    ):
-        raise ValueError("sampling_rate must be positive and finite")
+    nfft = require_int(nfft, "filter_response(): nfft", low=1)
+    if sampling_rate is not None:
+        require_finite(sampling_rate, "filter_response(): sampling_rate", low=0.0)
     kind, b, a, xp, _ = _system(system)
     scale = float(sampling_rate) if sampling_rate is not None else 1.0
     two_sided = frequencies is None and bool(
@@ -274,12 +273,8 @@ def _default_num_samples(
 
 def _time_response(system: Any, num_samples: int | None, step: bool) -> ArrayType:
     """Impulse (``step=False``) or unit-step response of ``num_samples``."""
-    if num_samples is not None and (
-        isinstance(num_samples, bool)
-        or not isinstance(num_samples, (int, np.integer))
-        or num_samples <= 0
-    ):
-        raise ValueError("num_samples must be a positive integer")
+    if num_samples is not None:
+        require_int(num_samples, "num_samples", low=1)
     kind, b, a, xp, sp = _system(system)
     if kind == "ba" and a is not None and a.size == 1:
         kind, b = "fir", b / a[0]

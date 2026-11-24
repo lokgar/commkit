@@ -16,9 +16,10 @@ from typing import Any
 import numpy as np
 
 from .. import _fft
-from .._array import as_2d, restore_1d
+from .._array import as_2d, require_int, restore_1d
 from .._peaks import parabolic_peak_offset
 from .._sequences import barker_sequence, zadoff_chu_sequence
+from .._value import _Record
 from ..backend import ArrayType, dispatch, to_device
 from ..core import Preamble, Signal
 from ..core._signal_input import (
@@ -85,6 +86,11 @@ def cross_correlate(
         Complex correlation, ``(M,)`` or ``(C, M)`` as ``samples``, with
         ``M`` set by ``mode``.
     """
+    if mode not in ("full", "same", "valid", "positive_lags"):
+        raise ValueError(
+            f"cross_correlate(): mode must be 'full', 'same', 'valid' or "
+            f"'positive_lags', got {mode!r}."
+        )
     samples, xp, _ = dispatch(samples)
     template = xp.asarray(template)
 
@@ -107,11 +113,6 @@ def cross_correlate(
     TPL = _fft.fft(template, n_fft, axis=-1)
     corr_circ = _fft.ifft(SIG * xp.conj(TPL), axis=-1)
 
-    if mode not in ("full", "same", "valid", "positive_lags"):
-        raise ValueError(
-            f"cross_correlate(): mode must be 'full', 'same', 'valid' or "
-            f"'positive_lags', got {mode!r}."
-        )
     if mode == "positive_lags":
         corr = corr_circ[..., :N]  # zero-copy view; lags 0 ... N-1
     else:
@@ -188,15 +189,7 @@ def peak_offset(
         raise ValueError(
             f"method must be 'parabolic' or 'log-parabolic', got {method!r}."
         )
-    if (
-        isinstance(dft_upsample, bool)
-        or not isinstance(dft_upsample, int | np.integer)
-        or dft_upsample < 1
-    ):
-        raise ValueError(
-            f"peak_offset(): dft_upsample must be an integer >= 1, got {dft_upsample!r}."
-        )
-    dft_upsample = int(dft_upsample)
+    dft_upsample = require_int(dft_upsample, "peak_offset(): dft_upsample", low=1)
     fit = method
     correlation, xp, _ = dispatch(correlation)
     peak_indices = xp.asarray(peak_indices)
@@ -415,7 +408,7 @@ def apply_delay(samples: S, *, delay: float | ArrayType) -> S:
 
 
 @dataclass(frozen=True, eq=False)
-class TimingEstimate:
+class TimingEstimate(_Record):
     """Result of :func:`estimate_timing`.
 
     Per-channel fields follow the rank rule: 0-d for ``(N,)`` input and
@@ -438,7 +431,7 @@ class TimingEstimate:
     correlation : ndarray
         Complex correlation at non-negative lags ``0 .. N_search - 1`` of the
         searched window, ``(N_search,)`` or ``(C, N_search)``; the data
-        ``plot_timing_correlation`` draws.
+        ``plot_timing_estimate`` draws.
     search_start : int
         First sample of the searched window: lag ``k`` is sample
         ``search_start + k``.

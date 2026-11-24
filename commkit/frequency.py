@@ -22,8 +22,16 @@ from typing import Any
 import numpy as np
 
 from . import _fft
-from ._array import as_2d, broadcast_channels, freeze_host, restore_1d
+from ._array import (
+    as_2d,
+    broadcast_channels,
+    freeze_host,
+    require_finite,
+    require_int,
+    restore_1d,
+)
 from ._peaks import parabolic_peak_offset
+from ._value import _Record, _Value
 from .backend import ArrayType, _to_host, dispatch, to_device
 from .core._signal_input import S, SignalInput, require_integer_sps
 from .core.signal import Signal
@@ -63,9 +71,9 @@ __all__ = [
 
 
 def _check_blocks(block_size: int | None, overlap: float) -> None:
-    if block_size is not None and block_size < 4:
-        raise ValueError(f"block_size must be >= 4 samples, got {block_size}.")
-    if not 0.0 <= overlap < 1.0:
+    if block_size is not None:
+        require_int(block_size, "block_size", low=4)
+    if not 0.0 <= require_finite(overlap, "overlap") < 1.0:
         raise ValueError(f"overlap must be in [0, 1), got {overlap}.")
 
 
@@ -109,28 +117,20 @@ class MthPower:
     overlap: float = 0.5
 
     def __post_init__(self) -> None:
-        if self.power is not None and (
-            isinstance(self.power, bool)
-            or not isinstance(self.power, int | np.integer)
-            or self.power < 1
-        ):
-            raise ValueError(f"power must be an integer >= 1, got {self.power!r}.")
-        if self.nfft is not None and (
-            isinstance(self.nfft, bool)
-            or not isinstance(self.nfft, int | np.integer)
-            or self.nfft < 1
-        ):
-            raise ValueError(f"nfft must be an integer >= 1, got {self.nfft!r}.")
+        if self.power is not None:
+            require_int(self.power, "power", low=1)
+        if self.nfft is not None:
+            require_int(self.nfft, "nfft", low=1)
         if self.search_range is not None:
             if len(self.search_range) != 2:
                 raise ValueError(
                     f"search_range must be a (low, high) pair, got {self.search_range!r}."
                 )
-            lo, hi = self.search_range
-            if not (np.isfinite(lo) and np.isfinite(hi) and lo < hi):
+            lo = require_finite(self.search_range[0], "search_range[0]")
+            hi = require_finite(self.search_range[1], "search_range[1]")
+            if not lo < hi:
                 raise ValueError(
-                    f"search_range must satisfy low < high and be finite, "
-                    f"got {self.search_range!r}."
+                    f"search_range must satisfy low < high, got {self.search_range!r}."
                 )
         if self.interpolation not in ("jacobsen", "parabolic"):
             raise ValueError(
@@ -177,15 +177,15 @@ class MengaliMorelli:
     overlap: float = 0.5
 
     def __post_init__(self) -> None:
-        if self.power is not None and self.power < 1:
-            raise ValueError(f"power must be >= 1, got {self.power}.")
-        if self.max_lag is not None and self.max_lag < 1:
-            raise ValueError(f"max_lag must be >= 1, got {self.max_lag}.")
+        if self.power is not None:
+            require_int(self.power, "power", low=1)
+        if self.max_lag is not None:
+            require_int(self.max_lag, "max_lag", low=1)
         _check_blocks(self.block_size, self.overlap)
 
 
 @dataclass(frozen=True, eq=False)
-class PilotSlope:
+class PilotSlope(_Value):
     """Least-squares phase slope of known pilot symbols.
 
     The pilot phase ``angle(r · conj(s))`` is unwrapped and fitted with a
@@ -292,12 +292,8 @@ class SpectralPeak:
             raise ValueError(
                 "target_frequency and search_band must both be given or both omitted."
             )
-        if self.search_band is not None and (
-            not np.isfinite(self.search_band) or self.search_band <= 0
-        ):
-            raise ValueError(
-                f"search_band must be finite and > 0, got {self.search_band!r}."
-            )
+        if self.search_band is not None:
+            require_finite(self.search_band, "search_band", low=0.0)
         _check_blocks(self.block_size, self.overlap)
 
 
@@ -310,7 +306,7 @@ FrequencyMethod = MthPower | MengaliMorelli | PilotSlope | SpectralPeak
 
 
 @dataclass(frozen=True, eq=False)
-class FrequencyOffsetEstimate:
+class FrequencyOffsetEstimate(_Record):
     """Result of :func:`estimate_frequency_offset`: the result of
     ``SpectralPeak``, and the fields every method gives.
 
@@ -329,10 +325,15 @@ class FrequencyOffsetEstimate:
     weights : ndarray
         Per-channel reliability weights used by :meth:`combined` (peak
         magnitude, autocorrelation energy or pilot power).
+    sampling_rate : float
+        Sampling rate in Hz of the samples the estimate was made from (the
+        axis of its diagnostics; the correction reads the rate of the
+        samples it corrects).
     """
 
     value: ArrayType
     weights: ArrayType
+    sampling_rate: float
 
     def combined(self) -> "FrequencyOffsetEstimate":
         """One estimate for all channels: the weighted mean over channels.
@@ -347,7 +348,9 @@ class FrequencyOffsetEstimate:
             return self
         w = self.weights / xp.sum(self.weights)
         return FrequencyOffsetEstimate(
-            value=xp.sum(w * self.value), weights=xp.sum(self.weights)
+            value=xp.sum(w * self.value),
+            weights=xp.sum(self.weights),
+            sampling_rate=self.sampling_rate,
         )
 
 
@@ -427,10 +430,13 @@ class BlockwiseFrequencyEstimate(FrequencyOffsetEstimate):
         Block center sample indices, ``(B,)``.
     block_values : ndarray
         Estimate per block in Hz, ``(B,)`` or ``(C, B)``.
+    num_samples : int
+        Length of the record the estimate was made from.
     """
 
     block_centers: np.ndarray
     block_values: ArrayType
+    num_samples: int
 
     def combined(self) -> "BlockwiseFrequencyEstimate":
         """One estimate for all channels: the weighted mean over channels,
@@ -443,8 +449,10 @@ class BlockwiseFrequencyEstimate(FrequencyOffsetEstimate):
         return BlockwiseFrequencyEstimate(
             value=xp.sum(w * self.value),
             weights=xp.sum(self.weights),
+            sampling_rate=self.sampling_rate,
             block_centers=self.block_centers,
             block_values=xp.sum(w[:, None] * self.block_values, axis=0),
+            num_samples=self.num_samples,
         )
 
 
@@ -540,7 +548,7 @@ def _mth_power(
     values = ((f_bin + mu * (fs / nfft)) / M).astype(xp.float64)
     weights = mag[rows, k_peak].astype(xp.float64)
     if not shared_rows:
-        return FrequencyOffsetEstimate(values, weights)
+        return FrequencyOffsetEstimate(values, weights, fs)
     # The diagnostic spectrum in ascending frequency, cut to the search range
     # (the mask zeroed every other bin), gathered on the device.
     f_sorted = np.fft.fftshift(np.fft.fftfreq(nfft, d=1.0 / fs))
@@ -550,7 +558,7 @@ def _mth_power(
         hi = int(np.searchsorted(f_sorted, tone_hi, side="right"))
     bins = (xp.arange(lo, hi) + (nfft + 1) // 2) % nfft  # fftshift order
     values, weights, spectrum = restore_1d(was_1d, values, weights, mag[:, bins])
-    return MthPowerEstimate(values, weights, M, spectrum, f_sorted[lo:hi])
+    return MthPowerEstimate(values, weights, fs, M, spectrum, f_sorted[lo:hi])
 
 
 def _mengali_morelli(
@@ -585,9 +593,9 @@ def _mengali_morelli(
     values = _numba().mm_bootstrap(np.angle(R_np), amp, float(M), float(fs))
     values, weights = xp.asarray(values), xp.asarray(np.sum(amp**2, axis=-1))
     if not shared_rows:
-        return FrequencyOffsetEstimate(values, weights)
+        return FrequencyOffsetEstimate(values, weights, fs)
     values, weights, R_rows = restore_1d(was_1d, values, weights, R_rows)
-    return MengaliMorelliEstimate(values, weights, M, R_rows)
+    return MengaliMorelliEstimate(values, weights, fs, M, R_rows)
 
 
 def _pilot_slope(
@@ -641,7 +649,7 @@ def _pilot_slope(
         xp.mean(pwr, axis=-1).astype(xp.float64),
         phi_u,
     )
-    return PilotSlopeEstimate(values, weights, phi_u, idx_np)
+    return PilotSlopeEstimate(values, weights, fs, phi_u, idx_np)
 
 
 def _spectral_peak(
@@ -682,7 +690,8 @@ def _spectral_peak(
     )
     delta = parabolic_peak_offset(left, peak, right, xp, log=True)
     values = freqs[k] + delta * (fs / nfft)
-    return FrequencyOffsetEstimate(*restore_1d(was_1d, values, peak))
+    values, peak = restore_1d(was_1d, values, peak)
+    return FrequencyOffsetEstimate(values, peak, fs)
 
 
 #: Estimator per method type.
@@ -794,8 +803,10 @@ def _estimate_frequency_offset(
         est = BlockwiseFrequencyEstimate(
             value=values,
             weights=weights,
+            sampling_rate=fs,
             block_centers=np.arange(B, dtype=np.float64) * step + length / 2.0,
             block_values=block_values,
+            num_samples=N,
         )
 
     if logger.isEnabledFor(logging.INFO):

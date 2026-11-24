@@ -37,6 +37,7 @@ from typing import Any
 
 import numpy as np
 
+from .._array import require_int
 from .._bits import pack_bits
 from ..backend import ArrayType, dispatch, to_device
 from ..mapping import Constellation
@@ -98,13 +99,8 @@ class CCDM(_Code):
                 f"{type(self.constellation).__name__}."
             )
         n = self.num_symbols
-        if (
-            isinstance(n, bool)
-            or not isinstance(n, int | np.integer)
-            or not 1 <= n <= _MAX_BLOCK
-        ):
-            raise ValueError(f"num_symbols must be an integer in [1, 2^30], got {n!r}.")
-        object.__setattr__(self, "num_symbols", int(n))
+        n = require_int(n, "num_symbols", low=1, high=_MAX_BLOCK)
+        object.__setattr__(self, "num_symbols", n)
         if self.k < 1:
             raise ValueError(
                 f"CCDM(): a block of {n} points carries no information bit; use a "

@@ -391,3 +391,41 @@ def test_spectrogram_relative_and_dynamic_range(backend_device: str) -> None:
         with pytest.raises(ValueError):
             plot_spectrogram(sig, **bad)
     plt.close("all")
+
+
+def test_spectrogram_rows_are_averaged_in_power(xp: Any) -> None:
+    """A long spectrogram is averaged over groups of segments on the device.
+
+    Complex white noise of variance 1 at f_s has the two-sided PSD 1/f_s.
+    2^20 samples in 256-sample segments (hop 224) give 4681 rows, averaged in
+    groups of k = 5 to 937 rows.  Averaging the power keeps the level: the
+    linear mean over the image is 1/f_s within 1 % (sampling error of 2.4e5
+    periodogram bins, 0.2 %; measured 0.1 %).  It also shrinks the spread of
+    a cell from that of one periodogram (relative std 1) to 1/sqrt(5) =
+    0.45 (measured 0.45); keeping every fifth row instead, the baseline,
+    leaves it at 1 (measured 1.00) and fails the 0.6 bound.  Averaging the
+    dB values instead would read the geometric mean, biased low (measured
+    -1.9 dB), and fail the 1 %.
+    """
+    fs = 1e9
+    rng = np.random.default_rng(3)
+    n = 1 << 20
+    x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)) / np.sqrt(2)
+    x = xp.asarray(x.astype(np.complex64))
+
+    def image(**kwargs: Any) -> np.ndarray:
+        fig, ax = plot_spectrogram(x, sampling_rate=fs, nperseg=256, **kwargs)
+        data = np.asarray(ax.images[0].get_array(), dtype=np.float64)
+        plt.close(fig)
+        return 10.0 ** (data / 10.0)
+
+    reduced = image()
+    assert reduced.shape[0] == 937
+    assert reduced.mean() * fs == pytest.approx(1.0, rel=0.01)
+    assert reduced.std() / reduced.mean() < 0.6
+    # The baseline from the spectrogram itself (time on the last axis), not
+    # a plot of every row: that copy would be the full record's size.
+    every_row = to_numpy(spectral.spectrogram(x, sampling_rate=fs, nperseg=256).values)
+    assert every_row.shape[-1] == 4681
+    kept = every_row[:, ::5]
+    assert kept.std() / kept.mean() > 0.9

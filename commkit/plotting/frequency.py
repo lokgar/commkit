@@ -1,8 +1,8 @@
 """Frequency-offset plots.
 
-:func:`plot_mm_autocorrelation`, :func:`plot_frequency_offset_spectrum` and
-:func:`plot_frequency_offset_blockwise_result` draw the fields of a
-:class:`~commkit.frequency.FrequencyOffsetEstimate`.
+:func:`plot_frequency_offset_estimate` draws a
+:class:`~commkit.frequency.FrequencyOffsetEstimate` with the diagnostics of
+its method, chosen by the estimate's class through a private table.
 """
 
 from typing import Any
@@ -12,33 +12,31 @@ import numpy as np
 from ..backend import _to_host, get_array_module
 from ..frequency import (
     BlockwiseFrequencyEstimate,
+    FrequencyOffsetEstimate,
     MengaliMorelliEstimate,
     MthPowerEstimate,
+    PilotSlopeEstimate,
     correct_frequency_offset,
 )
+from .recovery import _plot_pilot_phases
 from .theme import (
+    _background,
     _device_channels,
     _finish,
     _marker_area,
     _panel_grid,
     _reference_line,
-    _require,
     _select,
     _set_eng_formatter,
     _trace,
 )
 
-__all__ = [
-    "plot_frequency_offset_blockwise_result",
-    "plot_frequency_offset_spectrum",
-    "plot_mm_autocorrelation",
-]
+__all__ = ["plot_frequency_offset_estimate"]
 
 
-def plot_mm_autocorrelation(
-    estimate: Any,
+def _plot_mm_autocorrelation(
+    estimate: MengaliMorelliEstimate,
     *,
-    sampling_rate: float,
     quantity: str | None = None,
     label: str | None = None,
     legend: bool | None = None,
@@ -50,51 +48,13 @@ def plot_mm_autocorrelation(
     title: str = "FOE - Mengali-Morelli",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """Plot the autocorrelation of a Mengali-Morelli frequency estimate.
-
-    Per channel: ``|R[m]|`` and the wrapped ``angle(R[m])`` against the lag,
-    with the ramp ``2π·Δf·M·m/f_s`` the estimate implies.
-
-    Parameters
-    ----------
-    estimate : MengaliMorelliEstimate
-        From ``estimate_frequency_offset(x, MengaliMorelli())``.
-    sampling_rate : float
-        Sampling rate in Hz of the estimated samples.
-    quantity : {"magnitude", "phase"}, optional
-        Select one panel; ``None`` draws both.
-    label : str, optional
-        Label for the measured values on selected panels.
-    legend : bool, optional
-        Show or hide legends; ``None`` preserves the default.
-    annotations : bool, default True
-        Draw the expected phase and the wrap boundaries; ``False`` leaves
-        only the measured values, for overlays.
-    xlim, ylim : tuple of float, optional
-        Limits for the selected panels.
-    ax : matplotlib.axes.Axes or array_like of Axes, optional
-        One axis per channel and selected panel; ``None`` creates a figure.
-    show : bool, default False
-        Call ``plt.show()`` and return ``None``.
-    title : str, default "FOE - Mengali-Morelli"
-        Title of the figure.
-    max_points : int, default 4000
-        Lags drawn: ``|R[m]|`` beyond it as its min/max envelope, the phase
-        at evenly spaced lags, both reduced on the data's device.  ``<= 0``
-        draws every lag.
-
-    Returns
-    -------
-    (fig, axes) or None
-        The figure and its axes; ``None`` with ``show=True``, which
-        shows the figure instead.
-    """
+    """A Mengali-Morelli estimate: per channel ``|R[m]|`` and the wrapped
+    ``angle(R[m])`` against the lag, with the ramp ``2π·Δf·M·m/f_s`` the
+    estimate implies."""
     panels = _select(
         quantity, ("magnitude", "phase"), label=label, xlim=xlim, ylim=ylim
     )
-    estimate = _require(
-        estimate, MengaliMorelliEstimate, "plot_mm_autocorrelation()", "MengaliMorelli"
-    )
+    sampling_rate = estimate.sampling_rate
     R = _device_channels(estimate.autocorrelation)
     xp = get_array_module(R)
     f_ests = [float(f) for f in np.atleast_1d(_to_host(estimate.value))]
@@ -156,10 +116,10 @@ def plot_mm_autocorrelation(
     return _finish((fig, output_axes), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
-def plot_frequency_offset_spectrum(
-    estimate: Any,
+def _plot_mth_power_spectrum(
+    estimate: MthPowerEstimate,
     *,
-    search_range: tuple[float, float] | None = None,
+    quantity: str | None = None,
     label: str | None = None,
     annotations: bool = True,
     ax=None,
@@ -170,46 +130,9 @@ def plot_frequency_offset_spectrum(
     title: str = "FOE - M-th Power Spectrum",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """Plot the M-th power spectrum of an ``MthPower`` frequency estimate.
-
-    The axis is mapped back from ``M·Δf`` to ``Δf`` so the detected peak
-    lines up with the estimate.  The spectrum covers the search range the
-    estimate used (all bins without one).
-
-    Parameters
-    ----------
-    estimate : MthPowerEstimate
-        From ``estimate_frequency_offset(x, MthPower())``.
-    search_range : (float, float), optional
-        The ``MthPower(search_range=)`` used, shaded.
-    label : str, optional
-        Label for the measured spectrum.
-    annotations : bool, default True
-        Draw the detected peak and the search range; ``False`` leaves only
-        the measured spectrum, for overlays.
-    ax : array_like of matplotlib.axes.Axes, optional
-        Axes to draw on, one per channel; ``None`` creates a figure.
-    xlim, ylim : tuple of float, optional
-        Limits applied to the displayed channels.
-    legend : bool, optional
-        Show or hide the legend; ``None`` preserves the default.
-    show : bool, default False
-        Call ``plt.show()`` and return ``None``.
-    title : str, default "FOE - M-th Power Spectrum"
-        Title of the figure.
-    max_points : int, default 4000
-        Points per trace; longer traces are drawn as their min/max envelope,
-        reduced on the data's device.  ``<= 0`` draws every point.
-
-    Returns
-    -------
-    (fig, axes) or None
-        The figure and its axes; ``None`` with ``show=True``, which
-        shows the figure instead.
-    """
-    estimate = _require(
-        estimate, MthPowerEstimate, "plot_frequency_offset_spectrum()", "MthPower"
-    )
+    """An ``MthPower`` estimate: the M-th power spectrum over the bins the
+    estimate searched, its axis mapped back from ``M·Δf`` to ``Δf`` so the
+    detected peak lines up with the estimate."""
     mag_spectrum = _device_channels(estimate.spectrum)
     freqs = np.asarray(estimate.spectrum_frequencies, dtype=float)
     M = estimate.power
@@ -235,14 +158,6 @@ def plot_frequency_offset_spectrum(
                 linestyle="--",
                 label=rf"$\hat{{f}}$ = {f_est:.2f} Hz",
             )
-            if search_range is not None:
-                axi.axvspan(
-                    search_range[0],
-                    search_range[1],
-                    alpha=0.4,
-                    color="C2",
-                    label="Search range",
-                )
         axi.set_title(f"{title}{ch_suffix}")
         axi.set_xlabel(f"$\\Delta f$ (÷M={M} applied) [Hz]")
         _set_eng_formatter(axi, "x")
@@ -259,11 +174,9 @@ def plot_frequency_offset_spectrum(
     )
 
 
-def plot_frequency_offset_blockwise_result(
-    estimate: Any,
+def _plot_blockwise(
+    estimate: BlockwiseFrequencyEstimate,
     *,
-    num_samples: int,
-    sampling_rate: float,
     quantity: str | None = None,
     label: str | None = None,
     legend: bool | None = None,
@@ -274,111 +187,212 @@ def plot_frequency_offset_blockwise_result(
     title: str = "Block-wise FOE",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """Plot a blockwise frequency estimate and the correction it applies.
-
-    Two panels: the block estimates with the interpolated ``Δf`` trajectory,
-    and the integrated phase.  Both are recomputed with
+    """A blockwise estimate, every channel on the same axes: the block
+    estimates with the interpolated ``Δf`` trajectory, and the integrated
+    phase, both recomputed by
     :func:`~commkit.frequency.correct_frequency_offset` on a unit record of
-    ``num_samples`` samples, so they show exactly what correction applies.
-
-    Parameters
-    ----------
-    estimate : BlockwiseFrequencyEstimate
-        A blockwise estimate (``MthPower(block_size=)`` or
-        ``MengaliMorelli(block_size=)``); the first channel is drawn.
-    num_samples : int
-        Length of the corrected record.
-    sampling_rate : float
-        Sampling rate in Hz.
-    quantity : {"frequency", "phase"}, optional
-        Select one panel; ``None`` draws both.
-    label : str, optional
-        Label for the trajectory on a selected panel.
-    legend : bool, optional
-        Show or hide legends; ``None`` preserves the default.
-    xlim, ylim : tuple of float, optional
-        Limits applied to a selected panel.
-    ax : matplotlib.axes.Axes or array_like of Axes, optional
-        One axis for a selected panel, or two for the dashboard.
-    show : bool, default False
-        Call ``plt.show()`` and return ``None``.
-    title : str, default "Block-wise FOE"
-        Title of the figure.
-    max_points : int, default 4000
-        Points per trace; longer traces are drawn as their min/max envelope.
-        ``<= 0`` draws every point.
-
-    Returns
-    -------
-    (fig, axes) or None
-        The figure and its axes; ``None`` with ``show=True``, which
-        shows the figure instead.
-    """
-
+    the estimate's length, so they show exactly the correction it applies."""
     panels = _select(
         quantity, ("frequency", "phase"), label=label, xlim=xlim, ylim=ylim
     )
 
-    estimate = _require(
-        estimate,
-        BlockwiseFrequencyEstimate,
-        "plot_frequency_offset_blockwise_result()",
-        "a blockwise method (block_size=)",
-    )
-    centers = estimate.block_centers
-    # The probe lives on the estimate's device, as the samples it was made from.
-    # Unwrap, differentiate and decimate on-device so only the plotted points
-    # cross to the host.
-    xp = get_array_module(estimate.block_values)
-    probe_shape = (
-        (estimate.block_values.shape[0], num_samples)
-        if estimate.block_values.ndim > 1
-        else (num_samples,)
-    )
+    num_samples, fs = estimate.num_samples, estimate.sampling_rate
+    # The probe lives on the estimate's device, as the samples it was made
+    # from; unwrapped, differentiated and decimated there, so only the drawn
+    # points cross to the host.
+    values = _device_channels(estimate.block_values)  # (C, B)
+    xp = get_array_module(values)
+    C = values.shape[0]
     rotation = correct_frequency_offset(
-        xp.ones(probe_shape, dtype=xp.complex128),
+        xp.ones((C, num_samples), dtype=xp.complex128),
         estimate,
-        sampling_rate=sampling_rate,
+        sampling_rate=fs,
     )
-    rot_row = rotation[0] if rotation.ndim > 1 else rotation
-    phase = -xp.unwrap(xp.angle(rot_row))
-    df_dense = xp.gradient(phase) * (sampling_rate / (2.0 * np.pi))
-    block_values = np.atleast_2d(_to_host(estimate.block_values))[0]
-    t_centers = _to_host(centers, np.float64)
-    df_estimates = _to_host(block_values, np.float64)
+    phase = -xp.unwrap(xp.angle(rotation), axis=-1)  # (C, N)
+    df_dense = xp.gradient(phase, axis=-1) * (fs / (2.0 * np.pi))
+    t_centers = _to_host(estimate.block_centers, np.float64) / fs
+    df_blocks = _to_host(values, np.float64)
 
     fig, grid = _panel_grid(ax, 1, len(panels))
     axes = grid[0]
-
-    # Decimate the dense per-sample traces on device for fast rendering.
-    nf, df_k = _trace(df_dense, max_points)
-    np_, ph_deg = _trace(phase * (180.0 / np.pi), max_points)
+    for c in range(C):
+        name = label if C == 1 else f"{label or 'Channel'} {c}"
+        if "frequency" in panels:
+            ax_f = axes[panels.index("frequency")]
+            ax_f.plot(
+                *_trace(df_dense[c], max_points, dx=1.0 / fs),
+                color=f"C{c}",
+                label=name or r"Interpolated $\Delta f$",
+            )
+            ax_f.scatter(
+                t_centers,
+                df_blocks[c],
+                s=_marker_area(1.18),
+                zorder=5,
+                color=f"C{c}",
+                edgecolors=_background(),
+                label="Block estimate" if C == 1 else None,
+            )
+        if "phase" in panels:
+            ax_p = axes[panels.index("phase")]
+            ax_p.plot(
+                *_trace(phase[c] * (180.0 / np.pi), max_points, dx=1.0 / fs),
+                color=f"C{c}",
+                label=name,
+            )
 
     if "frequency" in panels:
-        # Panel 1: frequency trajectory
         ax_f = axes[panels.index("frequency")]
-        ax_f.plot(nf, df_k, label=label or r"Interpolated $\Delta f$")
-        ax_f.scatter(
-            t_centers,
-            df_estimates,
-            s=_marker_area(1.18),
-            zorder=5,
-            color="C1",
-            label="Block estimate",
-        )
-        ax_f.set_xlabel("Sample Index")
+        ax_f.set_xlabel("Time [s]")
         ax_f.set_ylabel(r"$\Delta f$ [Hz]")
+        _set_eng_formatter(ax_f, "x")
         _set_eng_formatter(ax_f, "y")
         ax_f.set_title(f"{title} - Frequency")
         ax_f.legend()
-
     if "phase" in panels:
-        # Panel 2: phase trajectory
         ax_p = axes[panels.index("phase")]
-        ax_p.plot(np_, ph_deg, label=label)
-        ax_p.set_xlabel("Sample Index")
+        ax_p.set_xlabel("Time [s]")
         ax_p.set_ylabel("Phase [deg]")
+        _set_eng_formatter(ax_p, "x")
         ax_p.set_title(f"{title} - Integrated Phase")
 
     output_axes = axes if quantity is None else axes[0]
     return _finish((fig, output_axes), show, xlim=xlim, ylim=ylim, legend=legend)
+
+
+_PANELS: dict[type, tuple[str, ...]] = {
+    MthPowerEstimate: ("spectrum",),
+    MengaliMorelliEstimate: ("magnitude", "phase"),
+    PilotSlopeEstimate: ("pilots",),
+    BlockwiseFrequencyEstimate: ("frequency", "phase"),
+}
+
+
+def plot_frequency_offset_estimate(
+    estimate: FrequencyOffsetEstimate,
+    *,
+    quantity: str | None = None,
+    label: str | None = None,
+    annotations: bool = True,
+    legend: bool | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    ax=None,
+    show: bool = False,
+    title: str | None = None,
+    max_points: int = 4000,
+) -> tuple[Any, Any] | None:
+    """Plot a frequency-offset estimate with the diagnostics of its method.
+
+    The panels follow the estimate's class:
+
+    - :class:`~commkit.frequency.MthPowerEstimate`: ``"spectrum"``, the
+      M-th power spectrum over the searched bins, its axis mapped back to
+      ``Δf``, with the detected peak; one panel per channel.
+    - :class:`~commkit.frequency.MengaliMorelliEstimate`: ``"magnitude"``
+      and ``"phase"`` of the autocorrelation ``R[m]`` against the lag, with
+      the ramp ``2π·Δf·M·m/f_s`` the estimate implies; per channel.
+    - :class:`~commkit.frequency.PilotSlopeEstimate`: ``"pilots"``, the
+      unwrapped pilot phases with the fit labeled by the offset; per
+      channel.
+    - :class:`~commkit.frequency.BlockwiseFrequencyEstimate`:
+      ``"frequency"``, the block estimates and the interpolated ``Δf``, and
+      ``"phase"``, the integrated phase the correction removes (first
+      channel).
+
+    The estimate carries the sampling rate (and a blockwise one the record
+    length) its axes need.
+
+    Parameters
+    ----------
+    estimate : FrequencyOffsetEstimate
+        From :func:`commkit.frequency.estimate_frequency_offset`.
+    quantity : str, optional
+        Select one panel of those above; ``None`` draws all.
+    label : str, optional
+        Label for the measured trace of a selected panel.
+    annotations : bool, default True
+        Draw the detected peak or the expected phase ramp and its wrap
+        boundaries; ``False`` leaves the measured values, for overlays.
+    legend : bool, optional
+        Show or hide legends; ``None`` preserves the default.
+    xlim, ylim : tuple of float, optional
+        Limits for a selected panel (every channel's).
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        One axis per drawn panel; ``None`` creates a figure.
+    show : bool, default False
+        Call ``plt.show()`` and return ``None``.
+    title : str, optional
+        Title of the figure; ``None`` names the method.
+    max_points : int, default 4000
+        Points per trace; longer traces are drawn as their min/max envelope,
+        reduced on the data's device.  ``<= 0`` draws every point.
+
+    Returns
+    -------
+    (fig, ax) or (fig, axes) or None
+        The figure and its axes (an array for several panels); ``None`` with
+        ``show=True``, which shows the figure instead.
+
+    Raises
+    ------
+    TypeError
+        If ``estimate`` is not a ``FrequencyOffsetEstimate``.
+    ValueError
+        For an estimate without diagnostics (``SpectralPeak``'s, or one
+        reduced by :meth:`~commkit.frequency.FrequencyOffsetEstimate.combined`),
+        or a ``quantity`` it does not draw.
+    """
+    name = "plot_frequency_offset_estimate()"
+    if not isinstance(estimate, FrequencyOffsetEstimate):
+        raise TypeError(
+            f"{name}: estimate must be a FrequencyOffsetEstimate, got "
+            f"{type(estimate).__name__}."
+        )
+    kind = next((k for k in _PANELS if isinstance(estimate, k)), None)
+    if kind is None:
+        raise ValueError(
+            f"{name}: a {type(estimate).__name__} holds only the offset, no "
+            "diagnostics to draw (SpectralPeak, or a combined() estimate)."
+        )
+    if quantity is not None and quantity not in _PANELS[kind]:
+        raise ValueError(
+            f"{name}: a {type(estimate).__name__} draws {', '.join(_PANELS[kind])}, "
+            f"got quantity={quantity!r}."
+        )
+    common = dict(
+        quantity=quantity,
+        label=label,
+        legend=legend,
+        xlim=xlim,
+        ylim=ylim,
+        ax=ax,
+        show=show,
+        max_points=max_points,
+    )
+    if kind is MthPowerEstimate:
+        assert isinstance(estimate, MthPowerEstimate)
+        return _plot_mth_power_spectrum(
+            estimate,
+            annotations=annotations,
+            title=title or "FOE - M-th Power Spectrum",
+            **common,
+        )
+    if kind is MengaliMorelliEstimate:
+        assert isinstance(estimate, MengaliMorelliEstimate)
+        return _plot_mm_autocorrelation(
+            estimate,
+            annotations=annotations,
+            title=title or "FOE - Mengali-Morelli",
+            **common,
+        )
+    if kind is PilotSlopeEstimate:
+        assert isinstance(estimate, PilotSlopeEstimate)
+        return _plot_pilot_phases(
+            estimate,
+            sampling_rate=estimate.sampling_rate,
+            title=title or "FOE - Pilot Slope",
+            **common,
+        )
+    assert isinstance(estimate, BlockwiseFrequencyEstimate)
+    return _plot_blockwise(estimate, title=title or "Block-wise FOE", **common)

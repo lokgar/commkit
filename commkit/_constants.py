@@ -1,7 +1,7 @@
 """Physical constants shared across the package (private).
 
 Used by :mod:`commkit._dispersion`, :mod:`commkit.core.signal`,
-:mod:`commkit.filtering.fiber.estimation`, :mod:`commkit.impairments.noise`
+:mod:`commkit.equalization.fiber.estimation`, :mod:`commkit.impairments.noise`
 and :mod:`commkit.plotting.spectral`.
 """
 

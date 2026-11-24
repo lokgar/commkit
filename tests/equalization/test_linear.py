@@ -450,3 +450,108 @@ class TestEstimateChannel:
             equalization.correct_channel(x, xp.zeros(0, dtype=xp.complex64))
         with pytest.raises(ValueError, match="shape"):
             equalization.correct_channel(x, xp.ones((2, 3), dtype=xp.complex64))
+
+
+class TestDataAidedGain:
+    """estimate_gain / correct_gain: the amplitude of the reference in the
+    symbols, scored against the true gain and against oracle LLRs."""
+
+    N = 100_000
+
+    def _received(self, xp, gains, esn0_db, seed=0):
+        """16-QAM ``a·e^{j0.3}·s + n`` per channel with ``E|n|^2 = a^2/SNR``."""
+        from commkit.mapping import Constellation
+
+        rng = np.random.default_rng(seed)
+        c = Constellation.qam(16)
+        idx = rng.integers(0, 16, (len(gains), self.N))
+        s = c.points[idx].astype(np.complex64)
+        a = np.asarray(gains)[:, None]
+        sigma = a * np.sqrt(10 ** (-esn0_db / 10) / 2)
+        n = sigma * (rng.standard_normal(s.shape) + 1j * rng.standard_normal(s.shape))
+        r = (a * np.exp(0.3j) * s + n).astype(np.complex64)
+        return c, idx, xp.asarray(s), xp.asarray(r)
+
+    def test_gain_is_unbiased_at_low_snr(self, xp):
+        """At Es/N0 = 0 dB the gain error is ``Re<n s*>/<|s|^2>``, of
+        relative std ``sqrt(1 / (2 N SNR)) = 2.2e-3``: the estimate stays
+        within 5 sigma of the true gains (measured 0.08 %), and a rotation does
+        not touch it.  A power normalization, the baseline, reads
+        ``a sqrt(1 + 1/SNR) = 1.41 a`` and fails the same bound."""
+        gains = [0.37, 1.9]
+        _, _, s, r = self._received(xp, gains, 0.0)
+        g = to_numpy(equalization.estimate_gain(r, s).value)
+        bound = 5 * np.sqrt(1 / (2 * self.N))
+        np.testing.assert_allclose(g / gains, 1.0, atol=bound)
+        power_gain = np.sqrt(np.mean(np.abs(to_numpy(r)) ** 2, axis=-1))
+        assert np.all(np.abs(power_gain / gains - 1.0) > bound)
+
+    def test_corrected_llrs_reach_the_oracle_gmi(self, xp):
+        """LLRs of normalized symbols after ``correct_gain``, with
+        ``noise_variance``, give the GMI of the oracle LLRs (true gain, true
+        noise variance) on the same noise: both errors are O(1/sqrt N) and
+        the GMI is stationary in the scale and the variance, so the loss is
+        second order (bound 5e-3 bit, measured 6e-4).  Without the gain
+        correction the normalized symbols sit at ``1/sqrt(2)`` of the
+        constellation's scale and lose 0.1 bit (measured 0.764 against
+        0.865 bit)."""
+        from commkit.mapping import compute_llr
+        from commkit.math import normalize
+        from commkit.metrics import noise_variance
+
+        c, idx, s, r = self._received(xp, [0.37], 0.0, seed=4)
+        r, s = r[0], s[0]
+        r = r * np.complex64(np.exp(-0.3j))  # carrier recovery is not under test
+        bits = c.bit_labels[idx[0]].reshape(-1)
+
+        def gmi(llrs):
+            sign = 1.0 - 2.0 * bits
+            loss = np.log2(1.0 + np.exp(-sign * to_numpy(llrs).reshape(-1)))
+            return (
+                c.bits_per_symbol - loss.reshape(-1, c.bits_per_symbol).sum(-1).mean()
+            )
+
+        oracle = gmi(compute_llr(r / np.float32(0.37), constellation=c, noise_var=1.0))
+        y = normalize(r, mode="average_power")
+        corrected = equalization.correct_gain(y, equalization.estimate_gain(y, s))
+        nv = noise_variance(corrected, s)
+        assert gmi(compute_llr(corrected, constellation=c, noise_var=nv)) == (
+            pytest.approx(oracle, abs=5e-3)
+        )
+        baseline = gmi(compute_llr(y, constellation=c, noise_var=noise_variance(y, s)))
+        assert oracle - baseline > 0.05
+
+    def test_correct_gain_keeps_precision_and_signal(self, xp, xpt):
+        """``samples / g`` per channel, in the samples' precision; a Signal
+        stays a Signal with its properties, and a 0-d gain serves every
+        channel."""
+        x = xp.asarray(
+            (np.ones((2, 8)) * np.array([[2.0], [0.5]])).astype(np.complex64)
+        )
+        est = equalization.GainEstimate(value=xp.asarray([2.0, 0.5]))
+        y = equalization.correct_gain(x, est)
+        assert y.dtype == xp.complex64
+        xpt.assert_allclose(y, xp.ones((2, 8), dtype=xp.complex64), rtol=1e-7)
+        sig = Signal(samples=x, sampling_rate=2e9, symbol_rate=1e9)
+        out = equalization.correct_gain(
+            sig, equalization.GainEstimate(value=xp.asarray(2.0))
+        )
+        assert isinstance(out, Signal) and out.sampling_rate == 2e9
+        xpt.assert_allclose(out.samples, x / 2)
+
+    def test_validation(self, xp):
+        x = xp.ones((2, 8), dtype=xp.complex64)
+        with pytest.raises(TypeError, match="GainEstimate"):
+            equalization.correct_gain(x, 2.0)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="channel"):
+            equalization.correct_gain(x, equalization.GainEstimate(value=xp.ones(3)))
+        with pytest.raises(ValueError, match="finite and > 0"):
+            equalization.correct_gain(
+                x, equalization.GainEstimate(value=xp.asarray([1.0, 0.0]))
+            )
+        with pytest.raises(ValueError, match="reference"):
+            equalization.estimate_gain(x)
+        with pytest.raises(ValueError, match="leaves no symbol"):
+            equalization.estimate_gain(x, x, num_skip_symbols=8)
+        with pytest.raises(ValueError, match="shape mismatch"):
+            equalization.estimate_gain(x, x[:, :4])

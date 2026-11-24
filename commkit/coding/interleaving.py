@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from .._array import freeze_host, host_array, validate_array
+from .._array import freeze_host, host_array, require_int, validate_array
 from ..backend import ArrayType, _device_tables, get_array_module
 from .base import _Value
 
@@ -71,8 +71,7 @@ class Interleaver(_Value):
             output values come from input values ``columns`` apart.
         """
         for name, v in (("rows", rows), ("columns", columns)):
-            if isinstance(v, bool) or not isinstance(v, int) or v < 1:
-                raise ValueError(f"{name} must be an integer >= 1, got {v!r}.")
+            require_int(v, name, low=1)
         return cls(np.arange(rows * columns).reshape(rows, columns).T.ravel())
 
     @classmethod
@@ -92,8 +91,7 @@ class Interleaver(_Value):
         -------
         Interleaver
         """
-        if isinstance(length, bool) or not isinstance(length, int) or length < 1:
-            raise ValueError(f"length must be an integer >= 1, got {length!r}.")
+        require_int(length, "length", low=1)
         return cls(np.random.default_rng(rng).permutation(length))
 
 

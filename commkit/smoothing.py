@@ -11,6 +11,7 @@ belongs in :mod:`commkit.filtering`.
 
 import numpy as np
 
+from ._array import require_int
 from .backend import ArrayType, dispatch
 from .logger import logger
 
@@ -63,14 +64,7 @@ def moving_average(
     """
     if mode not in ("same", "valid"):
         raise ValueError(f"Unknown mode: {mode!r}. Use 'same' or 'valid'.")
-    if (
-        isinstance(window, bool)
-        or not isinstance(window, int | np.integer)
-        or window < 1
-    ):
-        raise ValueError(
-            f"moving_average(): window must be an integer >= 1, got {window!r}."
-        )
+    window = require_int(window, "moving_average(): window", low=1)
     x, xp, sp = dispatch(x)
     window = int(window)
     if window == 1:

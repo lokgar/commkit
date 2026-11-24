@@ -10,6 +10,9 @@ from typing import Any
 
 import numpy as np
 
+from ..._array import require_int
+from ..._value import _Record
+
 __all__ = [
     "BetaSeparationEstimate",
     "DshFmFitEstimate",
@@ -28,7 +31,7 @@ __all__ = [
 
 
 @dataclass(frozen=True, eq=False)
-class LinewidthEstimate:
+class LinewidthEstimate(_Record):
     """Result of :func:`estimate_linewidth`, the fields every method gives.
 
     The constructor takes the same fields.  Each method returns a subclass
@@ -257,8 +260,8 @@ class DshLorentzianEstimate(LinewidthEstimate):
 
 
 def _check_nperseg(nperseg: int | None) -> None:
-    if nperseg is not None and (int(nperseg) != nperseg or nperseg < 2):
-        raise ValueError(f"nperseg must be an integer >= 2, got {nperseg}.")
+    if nperseg is not None:
+        require_int(nperseg, "nperseg", low=2)
 
 
 def _check_fence(f_min: float | None, f_max: float | None) -> None:

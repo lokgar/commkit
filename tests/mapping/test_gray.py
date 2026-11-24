@@ -30,9 +30,9 @@ class TestGrayCode:
         xpt.assert_array_equal(mapping.gray_to_binary(2), xp.array([0, 1, 3, 2]))
 
         # n < 0
-        with pytest.raises(ValueError, match="n must be non-negative"):
+        with pytest.raises(ValueError, match="n must be an integer >= 0"):
             mapping.gray_code(-1)
-        with pytest.raises(ValueError, match="n must be non-negative"):
+        with pytest.raises(ValueError, match="n must be an integer >= 0"):
             mapping.gray_to_binary(-1)
 
     def test_gray_code_zero(self, xp: Any, xpt: Any) -> None:

@@ -166,12 +166,14 @@ class TestResample:
             multirate.resample(data, up=2)
         with pytest.raises(ValueError, match="requires sps_in"):
             multirate.resample(data, sps_out=4)
-        with pytest.raises(ValueError, match="positive integers"):
+        with pytest.raises(TypeError, match="factor must be an integer"):
             multirate.upsample(data, factor=1.5)
+        with pytest.raises(ValueError, match="factor must be an integer >= 1"):
+            multirate.upsample(data, factor=0)
         # 2.0001 / 2 reduces to 20001/20000: a 400 021-tap filter.
         with pytest.raises(ValueError, match="up and down explicitly"):
             multirate.resample(data, sps_in=2, sps_out=2.0001)
-        with pytest.raises(ValueError, match="sps_out must be positive"):
+        with pytest.raises(ValueError, match="sps_out must be > 0"):
             multirate.resample(data, sps_in=2, sps_out=0.0)
         with pytest.raises(ValueError, match="offset"):
             multirate.decimate_to_symbol_rate(data, sps=2, offset=2)

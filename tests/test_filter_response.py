@@ -47,9 +47,10 @@ def test_response_invalid_arguments():
     with pytest.raises(ValueError, match="sampling_rate"):
         filtering.filter_response(np.ones(3), sampling_rate=0)
     for bad in (0, -1, True, 1.5):
-        with pytest.raises(ValueError, match="num_samples"):
+        error = ValueError if type(bad) is int else TypeError
+        with pytest.raises(error, match="num_samples"):
             filtering.step_response(np.ones(3), num_samples=bad)  # type: ignore[arg-type]
-        with pytest.raises(ValueError, match="num_samples"):
+        with pytest.raises(error, match="num_samples"):
             filtering.impulse_response(np.ones(3), num_samples=bad)  # type: ignore[arg-type]
 
 

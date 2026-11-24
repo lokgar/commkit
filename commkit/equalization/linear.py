@@ -1,13 +1,18 @@
-"""Linear block equalization: channel estimation, ZF / MMSE and fixed taps.
+"""Linear block equalization: channel estimation, ZF / MMSE, fixed taps and gain.
 
 :func:`estimate_channel` estimates a (MIMO) channel from a known reference
 (a :class:`ChannelEstimate`), :func:`correct_channel` inverts it in the
 frequency domain (zero-forcing, or MMSE with a noise variance), and
-:func:`apply_taps` applies frozen equalizer taps.
+:func:`apply_taps` applies frozen equalizer taps.  :func:`estimate_gain`
+measures the data-aided amplitude gain of symbols against a reference (a
+:class:`GainEstimate`, the gain the metrics divide by) and
+:func:`correct_gain` removes it, putting the symbols on the reference's
+scale.
 """
 
 from __future__ import annotations
 
+import logging
 import operator
 from dataclasses import dataclass
 from typing import Any
@@ -15,16 +20,25 @@ from typing import Any
 import numpy as np
 
 from .. import _fft
-from .._array import as_2d, restore_1d
+from .._array import as_2d, broadcast_channels, require_finite, require_int, restore_1d
 from .._overlap_save import ols_apply
+from .._value import _Record
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_input import S, SignalInput
 from ..core.signal import Signal
 from ..logger import logger
-from ..math import _next_pow2
+from ..math import _data_aided_gain, _next_pow2
 from ._common import _build_padded_samples, _normalize_inputs
 
-__all__ = ["ChannelEstimate", "apply_taps", "correct_channel", "estimate_channel"]
+__all__ = [
+    "ChannelEstimate",
+    "GainEstimate",
+    "apply_taps",
+    "correct_channel",
+    "correct_gain",
+    "estimate_channel",
+    "estimate_gain",
+]
 
 # -----------------------------------------------------------------------------
 # BLOCK EQUALIZATION (Signal-aware)
@@ -32,7 +46,7 @@ __all__ = ["ChannelEstimate", "apply_taps", "correct_channel", "estimate_channel
 
 
 @dataclass(frozen=True, eq=False)
-class ChannelEstimate:
+class ChannelEstimate(_Record):
     """A (MIMO) channel estimated from a known reference, from
     :func:`estimate_channel`, inverted by :func:`correct_channel`.
 
@@ -99,7 +113,12 @@ def correct_channel(
     Raises
     ------
     ValueError
-        If ``center_tap`` is outside ``[0, L)``, or given with an estimate.
+        If ``noise_var`` is not finite and ``>= 0``; if the impulse response
+        is empty or not ``(L,)`` or ``(C, C, L)`` for ``C`` channels of
+        ``samples``; or if ``center_tap`` is outside ``[0, L)`` or given
+        with an estimate.
+    TypeError
+        If ``noise_var`` is not a real number.
     """
     inp = SignalInput(samples, "correct_channel()")
     x = inp.samples
@@ -113,10 +132,9 @@ def correct_channel(
     else:
         channel_estimate = how
 
-    if not (np.isfinite(noise_var) and noise_var >= 0):
-        raise ValueError(
-            f"correct_channel(): noise_var must be finite and >= 0, got {noise_var!r}."
-        )
+    noise_var = require_finite(
+        noise_var, "correct_channel(): noise_var", low=0.0, inclusive=True
+    )
     logger.info(
         "correct_channel: %s, noise_var=%.2e",
         "MMSE" if noise_var > 0 else "ZF",
@@ -433,20 +451,13 @@ def estimate_channel(
             f"estimate_channel(): samples shape {y.shape} does not match "
             f"reference shape {x.shape}."
         )
-    if nfft < 2:
-        raise ValueError(f"estimate_channel(): nfft must be >= 2, got {nfft!r}.")
-    if max_windows < 1:
-        raise ValueError(
-            f"estimate_channel(): max_windows must be >= 1, got {max_windows!r}."
-        )
-    if regularization < 0:
-        raise ValueError(
-            f"estimate_channel(): regularization must be >= 0, got {regularization!r}."
-        )
-    if num_taps is not None and num_taps < 1:
-        raise ValueError(
-            f"estimate_channel(): num_taps must be >= 1, got {num_taps!r}."
-        )
+    nfft = require_int(nfft, "estimate_channel(): nfft", low=2)
+    max_windows = require_int(max_windows, "estimate_channel(): max_windows", low=1)
+    regularization = require_finite(
+        regularization, "estimate_channel(): regularization", low=0.0, inclusive=True
+    )
+    if num_taps is not None:
+        num_taps = require_int(num_taps, "estimate_channel(): num_taps", low=1)
     single = x.ndim == 1
     if single:
         x, y = x[None, :], y[None, :]
@@ -500,3 +511,151 @@ def estimate_channel(
         return ChannelEstimate(taps[:, 0, 0], half, B[:, 0, 0])  # (L,), (nfft,)
     # (C, C, L), the layout of correct_channel
     return ChannelEstimate(xp.transpose(taps, (1, 2, 0)), half, B)
+
+
+# -----------------------------------------------------------------------------
+# DATA-AIDED GAIN (Signal-aware)
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, eq=False)
+class GainEstimate(_Record):
+    """The data-aided amplitude gain of symbols against a reference, from
+    :func:`estimate_gain`, removed by :func:`correct_gain`.
+
+    The constructor takes the same fields.
+
+    Attributes
+    ----------
+    value : ndarray
+        Gain ``g = |<r s*>| / <|s|^2>`` per channel, float64: 0-d for
+        ``(N,)`` input, ``(C,)`` for ``(C, N)``, on the input's device.
+    """
+
+    value: ArrayType
+
+
+def estimate_gain(
+    symbols: ArrayType | Signal,
+    reference: ArrayType | None = None,
+    *,
+    num_skip_symbols: int = 0,
+) -> GainEstimate:
+    """Measure the data-aided amplitude gain of symbols against a reference.
+
+    ``g = |<r s*>| / <|s|^2>`` per channel: the amplitude at which the
+    reference ``s`` appears in the received symbols ``r``.  AWGN is
+    uncorrelated with ``s``, so ``g`` is unbiased at any SNR, unlike the
+    gain of a power normalization, which counts the noise as signal and
+    shrinks the symbols by ``1/sqrt(1 + 1/SNR)``.  Only the magnitude is
+    measured: a rotation is left to carrier recovery.  It is the gain
+    :func:`~commkit.metrics.evm`, :func:`~commkit.metrics.snr`,
+    :func:`~commkit.metrics.noise_variance` and the information rates of a
+    Signal divide by.
+
+    Parameters
+    ----------
+    symbols : array_like or Signal
+        Received symbols at one sample per symbol, ``(N,)`` or ``(C, N)``.  A
+        Signal must be at one sample per symbol; its ``reference.symbols`` is
+        the default reference.
+    reference : array_like, optional
+        Transmitted symbols, ``(N,)`` (shared by every channel) or the shape
+        of ``symbols``.  Required for arrays.
+    num_skip_symbols : int, default 0
+        Leading symbols left out of the estimate (for example equalizer
+        training or convergence).
+
+    Returns
+    -------
+    GainEstimate
+        The gain per channel, on the input's device.
+
+    Raises
+    ------
+    ValueError
+        Without a reference for an array, on a shape mismatch, if
+        ``num_skip_symbols`` is negative or leaves no symbol, or for a frame
+        Signal or one not at one sample per symbol.
+    TypeError
+        If ``num_skip_symbols`` is not an integer.
+
+    See Also
+    --------
+    correct_gain : Divide the symbols by the gain.
+
+    Examples
+    --------
+    >>> y = correct_gain(y, estimate_gain(y, tx))
+    >>> llrs = compute_llr(y, constellation=c, noise_var=noise_variance(y, tx))
+    """
+    name = "estimate_gain()"
+    skip = require_int(num_skip_symbols, f"{name}: num_skip_symbols", low=0)
+    inp = SignalInput(symbols, name)
+    y, xp, _ = dispatch(inp.symbols())
+    ref = inp.reference_symbols(reference, required=True)
+    y2, was_1d = as_2d(y, name="symbols")
+    d2 = broadcast_channels(
+        to_device(ref, "cpu" if xp is np else "gpu"), y2.shape[0], xp, name="reference"
+    )
+    if d2.shape[-1] != y2.shape[-1]:
+        raise ValueError(
+            f"{name}: shape mismatch: symbols have {y2.shape[-1]} symbols, the "
+            f"reference {d2.shape[-1]}."
+        )
+    if skip >= y2.shape[-1]:
+        raise ValueError(
+            f"{name}: num_skip_symbols={skip} leaves no symbol of {y2.shape[-1]}."
+        )
+    y2, d2 = y2[:, skip:], d2[:, skip:]
+    g = _data_aided_gain(y2, d2, xp).astype(xp.float64)[:, 0]
+    if logger.isEnabledFor(logging.INFO):
+        logger.info("estimate_gain: g = %s", np.round(to_device(g, "cpu"), 4).tolist())
+    return GainEstimate(value=g[0] if was_1d else g)
+
+
+def correct_gain(samples: S, how: GainEstimate) -> S:
+    """Divide samples by a data-aided gain, putting them on the reference's scale.
+
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Samples, ``(N,)`` or ``(C, N)``, at any rate: the gain of the
+        symbols applies to the waveform they came from too.
+    how : GainEstimate
+        From :func:`estimate_gain`; its value is 0-d (one gain for every
+        channel) or ``(C,)`` for ``C`` channels of ``samples``.
+
+    Returns
+    -------
+    ndarray or Signal
+        ``samples / g``, in the precision of ``samples``, on their device.
+
+    Raises
+    ------
+    TypeError
+        If ``how`` is not a :class:`GainEstimate`.
+    ValueError
+        If the gain has another number of channels than ``samples``, or a
+        value that is not finite and ``> 0``.
+    """
+    name = "correct_gain()"
+    if not isinstance(how, GainEstimate):
+        raise TypeError(
+            f"{name}: how must be a GainEstimate, got {type(how).__name__}."
+        )
+    inp = SignalInput(samples, name)
+    x, xp, _ = dispatch(inp.samples)
+    x2, was_1d = as_2d(x, name="samples")
+    g = xp.asarray(to_device(how.value, "cpu" if xp is np else "gpu"), dtype=xp.float64)
+    if g.ndim > 1 or (g.ndim == 1 and g.shape[0] != x2.shape[0]):
+        raise ValueError(
+            f"{name}: the gain has shape {g.shape}; samples have {x2.shape[0]} "
+            "channel(s)."
+        )
+    if not bool(xp.all(xp.isfinite(g) & (g > 0))):
+        raise ValueError(f"{name}: the gain must be finite and > 0.")
+    real = x2.real.dtype if x2.dtype.kind in "fc" else xp.dtype(xp.float32)
+    inverse = (1.0 / xp.reshape(g, (-1, 1))).astype(real)
+    logger.debug("correct_gain: %d channel(s)", x2.shape[0])
+    return inp.wrap(restore_1d(was_1d, x2 * inverse))

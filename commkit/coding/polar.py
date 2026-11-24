@@ -28,7 +28,7 @@ from typing import Any
 
 import numpy as np
 
-from .._array import freeze_host, host_array
+from .._array import freeze_host, host_array, require_int
 from ..backend import ArrayType, _device_tables, dispatch, to_device
 from .base import _CODECS, _Code, _Codec, _Decoded, _encode_blocks, _numba
 from .crc import CRC
@@ -139,7 +139,8 @@ class PolarCode(_Code):
 
     def __post_init__(self) -> None:
         n = self.length
-        if isinstance(n, bool) or not isinstance(n, int) or n < 2 or n & (n - 1):
+        require_int(n, "length", low=2)
+        if n & (n - 1):
             raise ValueError(f"length must be a power of two >= 2, got {n!r}.")
         raw = host_array(self.info_positions)
         p = np.unique(raw)
@@ -196,14 +197,9 @@ class PolarCode(_Code):
         -------
         PolarCode
         """
-        if (
-            isinstance(n, bool)
-            or not isinstance(n, int | np.integer)
-            or int(n) not in (32, 64, 128, 256, 512, 1024)
-        ):
+        if require_int(n, "n") not in (32, 64, 128, 256, 512, 1024):
             raise ValueError(f"n must be a power of two from 32 to 1024, got {n!r}.")
-        if isinstance(k, bool) or not isinstance(k, int | np.integer) or int(k) < 1:
-            raise ValueError(f"k must be an integer >= 1, got {k!r}.")
+        require_int(k, "k", low=1)
         n, k = int(n), int(k)
         check = None if crc is None else CRC.nr(crc, info_bits=k)
         size = k + (0 if check is None else check.degree)
@@ -262,8 +258,7 @@ class SCL:
 
     def __post_init__(self) -> None:
         s = self.list_size
-        if isinstance(s, bool) or not isinstance(s, int) or s < 1:
-            raise ValueError(f"list_size must be an integer >= 1, got {s!r}.")
+        require_int(s, "list_size", low=1)
 
 
 def _transform(u: ArrayType) -> ArrayType:

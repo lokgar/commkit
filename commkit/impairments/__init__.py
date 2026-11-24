@@ -9,15 +9,19 @@
   noise (:func:`apply_intensity_noise`) and the carrier frequency offset
   (:func:`apply_frequency_offset`).
 - :mod:`~commkit.impairments.frontend`: transceiver IQ imbalance
-  (:func:`apply_iq_imbalance`, :func:`estimate_iq_imbalance`, and
-  :func:`correct_iq_imbalance` with :class:`Lowdin`, :class:`GramSchmidt` or
-  an :class:`IQImbalanceEstimate`), and the ADC
+  (:func:`apply_iq_imbalance`), and the ADC
   (:func:`apply_sampling_clock_offset`, :func:`apply_sampling_jitter`,
   :func:`apply_quantization`).
 - :mod:`~commkit.impairments.fiber_channel`: the fiber channel, linear
   (:func:`apply_chromatic_dispersion`, :func:`apply_pmd`,
   :func:`apply_polarization_mixing`) and nonlinear
   (:func:`apply_fiber_propagation` over amplified spans of a :class:`Fiber`).
+
+These are forward models only.  Each effect's estimation and correction
+lives in the receiver module of its quantity: :mod:`commkit.equalization`
+(IQ imbalance, chromatic dispersion, digital backpropagation,
+polarization), :mod:`commkit.frequency`, :mod:`commkit.timing` (sampling
+clock) and :mod:`commkit.recovery` (carrier phase).
 """
 
 from .fiber_channel import (
@@ -28,15 +32,10 @@ from .fiber_channel import (
     apply_polarization_mixing,
 )
 from .frontend import (
-    GramSchmidt,
-    IQImbalanceEstimate,
-    Lowdin,
     apply_iq_imbalance,
     apply_quantization,
     apply_sampling_clock_offset,
     apply_sampling_jitter,
-    correct_iq_imbalance,
-    estimate_iq_imbalance,
 )
 from .noise import (
     apply_ase,
@@ -53,9 +52,6 @@ from .source import (
 
 __all__ = [
     "Fiber",
-    "GramSchmidt",
-    "IQImbalanceEstimate",
-    "Lowdin",
     "apply_ase",
     "apply_awgn",
     "apply_chromatic_dispersion",
@@ -71,7 +67,5 @@ __all__ = [
     "apply_photodetection",
     "apply_pmd",
     "apply_polarization_mixing",
-    "correct_iq_imbalance",
-    "estimate_iq_imbalance",
     "generate_phase_noise",
 ]

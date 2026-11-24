@@ -74,7 +74,7 @@ from typing import Any
 import numpy as np
 
 from . import _fft
-from ._array import as_2d
+from ._array import as_2d, require_finite, require_int
 from ._cuda.graphs import GraphRunner
 from ._dispersion import (
     _SPEED_OF_LIGHT,
@@ -190,13 +190,9 @@ def check_link(
         ("span_length_km", span_length_km),
         ("center_wavelength_nm", center_wavelength_nm),
     ):
-        if not math.isfinite(value) or value <= 0:
-            raise ValueError(f"{function_name}: {name} must be > 0, got {value!r}.")
+        require_finite(value, f"{function_name}: {name}", low=0.0)
     for name, value in (("num_spans", num_spans), ("steps_per_span", steps_per_span)):
-        if not isinstance(value, int | np.integer) or value < 1:
-            raise ValueError(
-                f"{function_name}: {name} must be a positive integer, got {value!r}."
-            )
+        require_int(value, f"{function_name}: {name}", low=1)
     return _Link(
         fiber,
         float(span_length_km),
@@ -216,10 +212,7 @@ def to_watts(
     ``launch_power_dbm``.  Divide the result by ``scale`` to return to the
     input's units.
     """
-    if not math.isfinite(launch_power_dbm):
-        raise ValueError(
-            f"{function_name}: launch_power_dbm must be finite, got {launch_power_dbm!r}."
-        )
+    require_finite(launch_power_dbm, f"{function_name}: launch_power_dbm")
     x2, was_1d = as_2d(x, name="samples")
     if x2.shape[0] not in (1, 2):
         raise ValueError(

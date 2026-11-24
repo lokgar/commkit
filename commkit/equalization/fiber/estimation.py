@@ -5,7 +5,7 @@ The blind scans :class:`ClockToneScan` (the clock tone, Godard) and
 the data-aided :class:`QuadraticPhaseFit` (the phase of the channel's
 response against known symbols), each give a
 :class:`ChromaticDispersionEstimate` of the accumulated dispersion ``D·L``
-in ps/nm, which :func:`~commkit.filtering.correct_chromatic_dispersion`
+in ps/nm, which :func:`~commkit.equalization.correct_chromatic_dispersion`
 takes as ``how``: a :class:`DispersionScanEstimate` from the scans, a
 :class:`QuadraticPhaseFitEstimate` from the fit.
 """
@@ -19,12 +19,13 @@ from typing import Any
 import numpy as np
 
 from ... import _fft
-from ..._array import as_2d, broadcast_channels, freeze_host
+from ..._array import as_2d, broadcast_channels, freeze_host, require_finite
 from ..._constants import SPEED_OF_LIGHT as _SPEED_OF_LIGHT
 from ..._dispersion import (
     beta2_length,
     spread_samples,
 )
+from ..._value import _Record, _Value
 from ...backend import ArrayType, _to_host, dispatch, to_device
 from ...core._signal_input import (
     SignalInput,
@@ -165,7 +166,7 @@ class FourthMomentScan:
 
 
 @dataclass(frozen=True, eq=False)
-class QuadraticPhaseFit:
+class QuadraticPhaseFit(_Value):
     """Data-aided chromatic-dispersion estimation from known symbols.
 
     The channel's frequency response is estimated against the known
@@ -214,13 +215,11 @@ class QuadraticPhaseFit:
     max_dispersion_ps_nm: float = 40000.0
 
     def __post_init__(self) -> None:
-        if not (
-            math.isfinite(self.max_dispersion_ps_nm) and self.max_dispersion_ps_nm > 0
-        ):
-            raise ValueError(
-                "QuadraticPhaseFit: max_dispersion_ps_nm must be positive and finite, got "
-                f"{self.max_dispersion_ps_nm!r}."
-            )
+        require_finite(
+            self.max_dispersion_ps_nm,
+            "QuadraticPhaseFit: max_dispersion_ps_nm",
+            low=0.0,
+        )
         if self.symbols is not None:
             symbols = freeze_host(self, "symbols", self.symbols)
             if symbols.ndim not in (1, 2):
@@ -231,7 +230,7 @@ class QuadraticPhaseFit:
 
 
 @dataclass(frozen=True, eq=False)
-class ChromaticDispersionEstimate:
+class ChromaticDispersionEstimate(_Record):
     """Result of :func:`estimate_chromatic_dispersion`, the fields every
     method gives.
 

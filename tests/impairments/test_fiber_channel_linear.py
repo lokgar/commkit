@@ -243,7 +243,7 @@ class TestApplyChomaticDispersion:
 
     def test_round_trip_siso(self, xp, xpt):
         """Apply CD then compensate: output should be ~equal to input."""
-        from commkit.filtering import correct_chromatic_dispersion
+        from commkit.equalization import correct_chromatic_dispersion
 
         N = 1024
         rng = xp.random.RandomState(42)
@@ -270,7 +270,7 @@ class TestApplyChomaticDispersion:
 
     def test_round_trip_mimo(self, xp, xpt):
         """Round-trip (MIMO): each channel should recover to input."""
-        from commkit.filtering import correct_chromatic_dispersion
+        from commkit.equalization import correct_chromatic_dispersion
 
         C, N = 2, 512
         rng = xp.random.RandomState(7)

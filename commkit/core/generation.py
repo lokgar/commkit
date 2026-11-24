@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from .._array import require_int
 from .._circular import convolve_periodic
 from .._random import as_generator
 from ..backend import ArrayType, dispatch, require_device, to_device
@@ -63,18 +64,29 @@ def expand(samples: ArrayType, *, factor: int) -> ArrayType:
     ndarray
         Expanded samples, ``(..., N * factor)``, same dtype and device.
     """
-    if (
-        isinstance(factor, bool)
-        or not isinstance(factor, int | np.integer)
-        or factor < 1
-    ):
-        raise ValueError(f"expand(): factor must be an integer >= 1, got {factor!r}.")
-    factor = int(factor)
+    factor = require_int(factor, "expand(): factor", low=1)
     logger.debug("Inserting zeros (expansion factor=%s).", factor)
     x, xp, _ = dispatch(samples)
     out = xp.zeros((*x.shape[:-1], x.shape[-1] * factor), x.dtype)
     out[..., ::factor] = x
     return out
+
+
+def _pulse_object(pulse: Any) -> Pulse | None:
+    """``pulse`` when it is a :class:`~commkit.filtering.Pulse`, else ``None``
+    (no pulse, or raw taps), for the Signal's ``pulse`` field.  ``filtering``
+    is imported here, not at module level, so ``core`` loads without it."""
+    if pulse is None:
+        return None
+    from ..filtering.pulses import Pulse
+
+    return pulse if isinstance(pulse, Pulse) else None
+
+
+def _taps(pulse: Any, sps: int) -> Any:
+    """The taps of a Pulse at ``sps``, or ``pulse`` itself (raw taps)."""
+    obj = _pulse_object(pulse)
+    return pulse if obj is None else obj.taps(sps)
 
 
 def shape_pulse(
@@ -115,9 +127,7 @@ def shape_pulse(
         return normalize(
             expand(symbols, factor=sps), mode="symbol_power", sps=sps, axis=-1
         )
-    from ..filtering.pulses import Pulse
-
-    taps = pulse.taps(sps) if isinstance(pulse, Pulse) else pulse
+    taps = _taps(pulse, sps)
     if periodic:
         return normalize(
             convolve_periodic(expand(symbols, factor=sps), taps),
@@ -300,8 +310,7 @@ def generate(
     for name, value in (*counts.items(), ("num_channels", num_channels)):
         if value is None:
             continue
-        if isinstance(value, bool) or not isinstance(value, int | np.integer):
-            raise ValueError(f"generate(): {name} must be an integer, got {value!r}.")
+        require_int(value, f"generate(): {name}")
         if value < 1:
             raise ValueError(f"generate(): {name} must be >= 1, got {value}.")
     sps = require_integer_sps(sps, "generate()")
@@ -367,12 +376,7 @@ def generate(
         bits = bits.reshape(num_channels, num_symbols * k)
 
     samples = shape_pulse(symbols, sps=sps, pulse=pulse, periodic=periodic)
-    pulse_obj: Pulse | None = None
-    if pulse is not None:
-        from ..filtering.pulses import Pulse
-
-        if isinstance(pulse, Pulse):
-            pulse_obj = pulse
+    pulse_obj = _pulse_object(pulse)
 
     logger.info(
         "Generated %r%s: %s symbols x %s channel(s), sps=%s, pulse=%r, "

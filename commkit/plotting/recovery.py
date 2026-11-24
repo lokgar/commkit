@@ -1,9 +1,10 @@
 """Carrier-phase recovery plots.
 
-:func:`plot_carrier_phase_trajectory`, :func:`plot_pilot_phase_estimate`,
-:func:`plot_pilot_tone_phase_estimate` and
-:func:`plot_pilot_tones_phase_estimate` draw a
-:class:`~commkit.recovery.CarrierPhaseEstimate` or a phase trajectory.
+:func:`plot_carrier_phase_estimate` draws a
+:class:`~commkit.recovery.CarrierPhaseEstimate` with the diagnostics of its
+method, chosen by the estimate's class through a private table;
+:func:`plot_carrier_phase_trajectory` draws a phase array (an equalizer's
+``phase_trajectory``).
 """
 
 from typing import Any
@@ -28,19 +29,13 @@ from .theme import (
     _marker_area,
     _panel_grid,
     _reference_line,
-    _require,
     _select,
     _series_label,
     _set_eng_formatter,
     _trace,
 )
 
-__all__ = [
-    "plot_carrier_phase_trajectory",
-    "plot_pilot_phase_estimate",
-    "plot_pilot_tone_phase_estimate",
-    "plot_pilot_tones_phase_estimate",
-]
+__all__ = ["plot_carrier_phase_estimate", "plot_carrier_phase_trajectory"]
 
 
 def plot_carrier_phase_trajectory(
@@ -60,10 +55,10 @@ def plot_carrier_phase_trajectory(
 
     Parameters
     ----------
-    phase : CarrierPhaseEstimate or array_like
-        An estimate (its block centers, if any, are marked) or a phase array
-        in radians, ``(N,)`` or ``(C, N)``, e.g. an equalizer's
-        ``phase_trajectory``.
+    phase : array_like
+        Phase in radians, ``(N,)`` or ``(C, N)``, e.g. an equalizer's
+        ``phase_trajectory``.  An estimate is drawn by
+        :func:`plot_carrier_phase_estimate`.
     num_train_symbols : int, default 0
         End of the training symbols, drawn as a dashed line.
     ax : matplotlib.axes.Axes, optional
@@ -87,15 +82,48 @@ def plot_carrier_phase_trajectory(
     (fig, ax) or None
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
-    """
 
+    Raises
+    ------
+    TypeError
+        For a :class:`~commkit.recovery.CarrierPhaseEstimate`, which
+        :func:`plot_carrier_phase_estimate` draws.
+    """
     if isinstance(phase, CarrierPhaseEstimate):
-        phi_full = phase.value
-        block_centers = (
-            phase.block_centers if isinstance(phase, BlockPhaseEstimate) else None
+        raise TypeError(
+            "plot_carrier_phase_trajectory() draws a phase array; draw an "
+            "estimate with plot_carrier_phase_estimate()."
         )
-    else:
-        phi_full, block_centers = phase, None
+    return _plot_trajectory(
+        phase,
+        None,
+        num_train_symbols=num_train_symbols,
+        ax=ax,
+        label=label,
+        xlim=xlim,
+        ylim=ylim,
+        legend=legend,
+        show=show,
+        title=title,
+        max_points=max_points,
+    )
+
+
+def _plot_trajectory(
+    phi_full: Any,
+    block_centers: Any,
+    *,
+    num_train_symbols: int = 0,
+    ax=None,
+    label: str | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
+    show: bool = False,
+    title: str = "Carrier Phase Trajectory",
+    max_points: int = 4000,
+) -> tuple[Any, Any] | None:
+    """The trajectory panel, with the block centers of a block method."""
     phi_deg = _device_channels(phi_full) * (180.0 / np.pi)
     C = phi_deg.shape[0]
 
@@ -127,10 +155,10 @@ def plot_carrier_phase_trajectory(
     return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
-def plot_pilot_phase_estimate(
-    estimate: Any,
+def _plot_pilot_phases(
+    estimate: PilotInterpolationEstimate | PilotSlopeEstimate,
     *,
-    sampling_rate: float = 1.0,
+    sampling_rate: float | None = None,
     quantity: str | None = None,
     label: str | None = None,
     legend: bool | None = None,
@@ -141,54 +169,15 @@ def plot_pilot_phase_estimate(
     title: str = "Pilot Phase Estimate",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """Plot the pilot phases of a pilot-based estimate with their linear fit.
+    """The pilot phases of a pilot-based estimate with their linear fit.
 
-    For a :class:`~commkit.recovery.PilotInterpolationEstimate` (``PilotInterpolation``) a
-    second panel shows the interpolated per-symbol trajectory; for a
-    :class:`~commkit.frequency.PilotSlopeEstimate` (``PilotSlope``)
-    the fit is labeled with the estimated offset.
-
-    Parameters
-    ----------
-    estimate : PilotInterpolationEstimate or PilotSlopeEstimate
-        With ``pilot_indices`` and ``pilot_phase``.
-    sampling_rate : float, default 1.0
-        Sampling rate in Hz of the pilot indices (labels the fitted slope in
-        Hz; 1.0 gives cycles per sample).
-    quantity : {"pilots", "trajectory"}, optional
-        Select one panel; ``None`` draws all available panels. A trajectory
-        is available only for a carrier-phase estimate.
-    label : str, optional
-        Label for the selected measurement or trajectory.
-    legend : bool, optional
-        Show or hide legends; ``None`` preserves the default.
-    xlim, ylim : tuple of float, optional
-        Limits applied to selected panels.
-    ax : matplotlib.axes.Axes or array_like of Axes, optional
-        One axis per channel and selected panel; ``None`` creates a figure.
-    show : bool, default False
-        Call ``plt.show()`` and return ``None``.
-    title : str, default "Pilot Phase Estimate"
-        Title of the figure.
-    max_points : int, default 4000
-        Points of the trajectory; a longer one is drawn as its min/max
-        envelope, reduced on the data's device.  ``<= 0`` draws every point.
-
-    Returns
-    -------
-    (fig, axes) or None
-        The figure and its axes; ``None`` with ``show=True``, which
-        shows the figure instead.
+    ``PilotInterpolation`` adds the interpolated trajectory as a second
+    panel; ``PilotSlope`` (``sampling_rate`` given) labels the fit with its
+    offset in Hz, ``PilotInterpolation`` with its slope per symbol.
     """
-
     panels = _select(
         quantity, ("pilots", "trajectory"), label=label, xlim=xlim, ylim=ylim
     )
-    name = "plot_pilot_phase_estimate()"
-    if not isinstance(estimate, PilotInterpolationEstimate | PilotSlopeEstimate):
-        raise ValueError(
-            f"{name} needs a pilot method (got {type(estimate).__name__})."
-        )
     pilot_phase = estimate.pilot_phase
     is_phase = isinstance(estimate, CarrierPhaseEstimate)
     pilot_indices = _to_host(estimate.pilot_indices)
@@ -215,7 +204,9 @@ def plot_pilot_phase_estimate(
         panels = tuple(p for p in panels if p != "trajectory")
     fig, axes = _panel_grid(ax, C, len(panels))
 
-    t_pilots = pilot_indices / sampling_rate
+    # Pilot indices are samples of the estimated record: seconds with a
+    # sampling rate (PilotSlope), symbols otherwise (PilotInterpolation).
+    t_pilots = pilot_indices / (sampling_rate or 1.0)
     for i in range(C):
         phi_p = phi_pilots_u[i]
         ch_suffix = f" - Ch {i}" if C > 1 else ""
@@ -231,7 +222,12 @@ def plot_pilot_phase_estimate(
         else:
             slope = 0.0
             phi_fit = phi_p.copy()
-        f_label = f_ests[i] if f_ests is not None else slope / (2.0 * np.pi)
+        if f_ests is not None:
+            fit_label = f"Fit  $\\Delta f$={f_ests[i]:.3f} Hz"
+        elif sampling_rate is not None:
+            fit_label = f"Fit  $\\Delta f$={slope / (2.0 * np.pi):.3f} Hz"
+        else:
+            fit_label = f"Fit  {np.degrees(slope):.3g}°/symbol"
 
         if "pilots" in panels:
             ax1 = axes[i, panels.index("pilots")]
@@ -247,7 +243,7 @@ def plot_pilot_phase_estimate(
                 np.degrees(phi_fit),
                 "--",
                 color="C3",
-                label=f"Fit  $\\Delta f$={f_label:.3f} Hz",
+                label=fit_label,
             )
             ax1.set_title(f"{title}{ch_suffix} - Pilots")
             ax1.set_xlabel("Sample Index")
@@ -279,12 +275,10 @@ def plot_pilot_phase_estimate(
     return _finish((fig, output_axes), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
-def plot_pilot_tone_phase_estimate(
-    estimate: Any,
+def _plot_pilot_tone(
+    estimate: PilotToneEstimate,
     samples: Any,
     *,
-    method: Any,
-    sampling_rate: float | None = None,
     quantity: str | None = None,
     label: str | None = None,
     annotations: bool = True,
@@ -296,57 +290,22 @@ def plot_pilot_tone_phase_estimate(
     title: str = "CPR - Pilot Tone",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """Plot a ``PilotTone`` carrier-phase estimate against the tone spectrum.
-
-    Two panels: ``|FFT(samples)|`` (dB) with the extraction passband
-    ``f_p ± B`` and the measured tone peaks, and the recovered phase.  The
-    spectrum is computed and reduced on the samples' device.
-
-    Parameters
-    ----------
-    estimate : PilotToneEstimate
-        From ``estimate_carrier_phase(samples, method)``.
-    samples : array_like or Signal
-        The samples the estimate was made from.
-    method : PilotTone
-        The method used (its ``frequency`` and ``bandwidth`` are drawn).
-    sampling_rate : float, optional
-        Sampling rate in Hz (a property): taken from a Signal, required for
-        arrays.
-    quantity : {"spectrum", "phase"}, optional
-        Select one panel; ``None`` draws both.
-    label : str, optional
-        Label for the selected measurement or phase trajectory.
-    annotations : bool, default True
-        Draw the extraction window and the tone markers; ``False`` leaves
-        only the measured spectrum, for overlays.
-    legend : bool, optional
-        Show or hide the legend; ``None`` preserves the default.
-    xlim, ylim : tuple of float, optional
-        Limits for a selected panel.
-    ax : matplotlib.axes.Axes or array_like of Axes, optional
-        One axis for a selected panel, or two for both.
-    show : bool, default False
-        Call ``plt.show()`` and return ``None``.
-    title : str, default "CPR - Pilot Tone"
-        Title of the figure.
-    max_points : int, default 4000
-        Points per trace; longer traces are drawn as their min/max envelope,
-        reduced on the data's device.  ``<= 0`` draws every point.
-
-    Returns
-    -------
-    (fig, axes) or None
-        The figure and its axes; ``None`` with ``show=True``, which
-        shows the figure instead.
-    """
-
+    """A ``PilotTone`` estimate: ``|FFT(samples)|`` (dB) with the extraction
+    passband ``f_p ± B`` and the measured tone peaks, computed and reduced
+    on the samples' device, and the recovered phase.  Without ``samples``
+    only the phase is drawn."""
+    name = "plot_carrier_phase_estimate()"
+    if samples is None:
+        if quantity == "spectrum":
+            raise ValueError(
+                f"{name}: the spectrum of a PilotTone estimate needs the samples "
+                "it was made from (samples=)."
+            )
+        quantity = "phase"
     _select(quantity, ("spectrum", "phase"), label=label, xlim=xlim, ylim=ylim)
-    name = "plot_pilot_tone_phase_estimate()"
-    estimate = _require(estimate, PilotToneEstimate, name, "PilotTone")
     tones = estimate.tone_frequencies
-    inp = SignalInput(samples, name)
-    fs = inp.sampling_rate(sampling_rate)
+    method = estimate.method
+    fs = estimate.sampling_rate
     theta_deg = _device_channels(estimate.value) * (180.0 / np.pi)
     if quantity == "phase":
         fig, axis = _get_axis(ax)
@@ -363,6 +322,9 @@ def plot_pilot_tone_phase_estimate(
         return _finish((fig, axis), show, xlim=xlim, ylim=ylim, legend=legend)
     # The spectrum on the samples' device, in ascending frequency; only the
     # drawn envelope is transferred.
+    # A Signal must be at the estimate's rate (a conflicting property raises).
+    inp = SignalInput(samples, name)
+    inp.sampling_rate(fs)
     x = _device_channels(inp.samples)
     xp = get_array_module(x)
     C, N = x.shape
@@ -439,8 +401,8 @@ def plot_pilot_tone_phase_estimate(
     return _finish((fig, (ax_spec, ax_phase)), show, legend=legend)
 
 
-def plot_pilot_tones_phase_estimate(
-    estimate: Any,
+def _plot_pilot_tones(
+    estimate: PilotTonesEstimate,
     *,
     quantity: str | None = None,
     label: str | None = None,
@@ -452,44 +414,10 @@ def plot_pilot_tones_phase_estimate(
     title: str = "CPR - Pilot Tones (MRC)",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """Plot a ``PilotTones`` carrier-phase estimate.
-
-    Two panels: the tracked inter-tone differentials ``δ_k[n]`` (gated
-    tones dashed) and the combined phase (the first channel).
-
-    Parameters
-    ----------
-    estimate : PilotTonesEstimate
-        From ``estimate_carrier_phase(x, PilotTones(...))``.
-    quantity : {"differential", "phase"}, optional
-        Select one panel; ``None`` draws both.
-    label : str, optional
-        Label for the selected trace or prefix for its tone curves.
-    legend : bool, optional
-        Show or hide legends; ``None`` preserves the default.
-    xlim, ylim : tuple of float, optional
-        Limits for a selected panel.
-    ax : matplotlib.axes.Axes or array_like of Axes, optional
-        One axis for a selected panel, or two for both.
-    show : bool, default False
-        Call ``plt.show()`` and return ``None``.
-    title : str, default "CPR - Pilot Tones (MRC)"
-        Title of the figure.
-    max_points : int, default 4000
-        Points per trace; longer traces are drawn as their min/max envelope,
-        reduced on the data's device.  ``<= 0`` draws every point.
-
-    Returns
-    -------
-    (fig, axes) or None
-        The figure and its axes; ``None`` with ``show=True``, which
-        shows the figure instead.
-    """
+    """A ``PilotTones`` estimate: the tracked inter-tone differentials
+    ``δ_k[n]`` (gated tones dashed) and the combined phase (first channel)."""
     panels = _select(
         quantity, ("differential", "phase"), label=label, xlim=xlim, ylim=ylim
-    )
-    estimate = _require(
-        estimate, PilotTonesEstimate, "plot_pilot_tones_phase_estimate()", "PilotTones"
     )
     delta = estimate.differential_phase
     phi_deg = _device_channels(estimate.value)[0] * (180.0 / np.pi)
@@ -536,3 +464,141 @@ def plot_pilot_tones_phase_estimate(
 
     output_axes = tuple(axes) if quantity is None else axes[0]
     return _finish((fig, output_axes), show, xlim=xlim, ylim=ylim, legend=legend)
+
+
+_PANELS: dict[type, tuple[str, ...]] = {
+    PilotTonesEstimate: ("differential", "phase"),
+    PilotToneEstimate: ("spectrum", "phase"),
+    PilotInterpolationEstimate: ("pilots", "trajectory"),
+    CarrierPhaseEstimate: ("trajectory",),
+}
+
+
+def plot_carrier_phase_estimate(
+    estimate: CarrierPhaseEstimate,
+    samples: Any = None,
+    *,
+    quantity: str | None = None,
+    label: str | None = None,
+    annotations: bool = True,
+    legend: bool | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    ax=None,
+    show: bool = False,
+    title: str | None = None,
+    max_points: int = 4000,
+) -> tuple[Any, Any] | None:
+    """Plot a carrier-phase estimate with the diagnostics of its method.
+
+    The panels follow the estimate's class:
+
+    - :class:`~commkit.recovery.CarrierPhaseEstimate` (``PLL``,
+      ``ConstantPhase``) and :class:`~commkit.recovery.BlockPhaseEstimate`
+      (BPS, Viterbi-Viterbi, Tikhonov): ``"trajectory"``, the phase of every
+      channel, with the block centers of a block method.
+    - :class:`~commkit.recovery.PilotInterpolationEstimate`: ``"pilots"``,
+      the unwrapped pilot phases with their linear fit, and
+      ``"trajectory"``, the interpolated phase with the pilots.
+    - :class:`~commkit.recovery.PilotToneEstimate`: ``"spectrum"``,
+      ``|FFT(samples)|`` in dB with the extraction window ``f_p ± B`` and the
+      measured tone peaks (needs ``samples``), and ``"phase"``.
+    - :class:`~commkit.recovery.PilotTonesEstimate`: ``"differential"``, the
+      tracked inter-tone phases (gated tones dashed), and ``"phase"``, the
+      combined phase.
+
+    Parameters
+    ----------
+    estimate : CarrierPhaseEstimate
+        From :func:`commkit.recovery.estimate_carrier_phase`.
+    samples : array_like or Signal, optional
+        The samples a ``PilotTone`` estimate was made from, for its spectrum
+        (a Signal must have the estimate's sampling rate); ignored for other
+        estimates.  Without them a ``PilotTone`` estimate draws its phase.
+    quantity : str, optional
+        Select one panel of those above; ``None`` draws all available.
+    label : str, optional
+        Label for the trace of a selected panel (the trajectory of a
+        one-panel estimate).
+    annotations : bool, default True
+        Draw the extraction window and tone markers of a ``PilotTone``
+        spectrum; ``False`` leaves the measured spectrum, for overlays.
+    legend : bool, optional
+        Show or hide legends; ``None`` preserves the default.
+    xlim, ylim : tuple of float, optional
+        Limits for a selected panel.
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        One axis per drawn panel (per channel and panel for pilot
+        interpolation); ``None`` creates a figure.
+    show : bool, default False
+        Call ``plt.show()`` and return ``None``.
+    title : str, optional
+        Title of the figure; ``None`` names the method.
+    max_points : int, default 4000
+        Points per trace; longer traces are drawn as their min/max envelope,
+        reduced on the data's device.  ``<= 0`` draws every point.
+
+    Returns
+    -------
+    (fig, ax) or (fig, axes) or None
+        The figure and its axes (an array for several panels); ``None`` with
+        ``show=True``, which shows the figure instead.
+
+    Raises
+    ------
+    TypeError
+        If ``estimate`` is not a ``CarrierPhaseEstimate``.
+    ValueError
+        For a ``quantity`` the estimate does not draw, or the spectrum of a
+        ``PilotTone`` estimate without ``samples``.
+    """
+    if not isinstance(estimate, CarrierPhaseEstimate):
+        raise TypeError(
+            "plot_carrier_phase_estimate(): estimate must be a CarrierPhaseEstimate, "
+            f"got {type(estimate).__name__}."
+        )
+    kind = next(k for k in _PANELS if isinstance(estimate, k))
+    if quantity is not None and quantity not in _PANELS[kind]:
+        raise ValueError(
+            f"plot_carrier_phase_estimate(): a {type(estimate).__name__} draws "
+            f"{', '.join(_PANELS[kind])}, got quantity={quantity!r}."
+        )
+    common = dict(
+        quantity=quantity,
+        label=label,
+        legend=legend,
+        xlim=xlim,
+        ylim=ylim,
+        ax=ax,
+        show=show,
+        max_points=max_points,
+    )
+    if kind is PilotTonesEstimate:
+        assert isinstance(estimate, PilotTonesEstimate)
+        return _plot_pilot_tones(
+            estimate, title=title or "CPR - Pilot Tones (MRC)", **common
+        )
+    if kind is PilotToneEstimate:
+        assert isinstance(estimate, PilotToneEstimate)
+        return _plot_pilot_tone(
+            estimate,
+            samples,
+            annotations=annotations,
+            title=title or "CPR - Pilot Tone",
+            **common,
+        )
+    if kind is PilotInterpolationEstimate:
+        assert isinstance(estimate, PilotInterpolationEstimate)
+        return _plot_pilot_phases(
+            estimate, title=title or "Pilot Phase Estimate", **common
+        )
+    centers = (
+        estimate.block_centers if isinstance(estimate, BlockPhaseEstimate) else None
+    )
+    del common["quantity"]
+    return _plot_trajectory(
+        estimate.value,
+        centers,
+        title=title or "Carrier Phase Trajectory",
+        **common,
+    )

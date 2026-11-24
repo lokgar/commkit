@@ -170,7 +170,6 @@ class TestPulseObjects:
             lambda: filtering.RRC(1.5),
             lambda: filtering.RC(-0.1),
             lambda: filtering.RRC(0.1, span=0),
-            lambda: filtering.RRC(0.1, span=2.5),
             lambda: filtering.Gaussian(0.0),
             lambda: filtering.Rect(0.0),
             lambda: filtering.Rect(1.2),
@@ -182,6 +181,10 @@ class TestPulseObjects:
     def test_validation(self, factory) -> None:
         with pytest.raises(ValueError):
             factory()
+
+    def test_span_must_be_an_integer(self) -> None:
+        with pytest.raises(TypeError, match="span"):
+            filtering.RRC(0.1, span=2.5)  # type: ignore[arg-type]
 
     def test_value_semantics(self) -> None:
         assert filtering.RRC(0.1) == filtering.RRC(0.1, span=32)

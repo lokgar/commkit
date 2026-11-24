@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from .._array import freeze_host, host_array
+from .._array import freeze_host, host_array, require_int
 from ..backend import ArrayType, _device_tables, dispatch
 from .base import (
     _CODECS,
@@ -116,10 +116,7 @@ class Shortened(_Code):
     def __post_init__(self) -> None:
         _info_positions(self.code, "Shortened()")
         s = self.num_bits
-        if isinstance(s, bool) or not isinstance(s, int) or not 1 <= s < self.code.k:
-            raise ValueError(
-                f"num_bits must be an integer in [1, {self.code.k}), got {s!r}."
-            )
+        require_int(s, "num_bits", low=1, high=self.code.k - 1)
 
     @property
     def n(self) -> int:

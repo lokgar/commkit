@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 
 from ... import _fft
-from ..._array import as_2d, warn_if_double
+from ..._array import as_2d, require_int, warn_if_double
 from ..._cuda.graphs import GraphRunner
 from ...backend import ArrayType, dispatch, to_device
 from ...logger import logger
@@ -188,10 +188,7 @@ def _prepare_block(
     with a non-zero ``pilot_gain_db`` de-boosts the pilot samples (on a
     copy) before the normalization.
     """
-    if not isinstance(block_size, int | np.integer) or block_size < 1:
-        raise ValueError(
-            f"{equalizer}(): block_size must be a positive integer, got {block_size!r}."
-        )
+    block_size = require_int(block_size, f"{equalizer}(): block_size", low=1)
     num_taps = int(num_taps)
     block_size = int(block_size)
     _validate_sps(sps, num_taps)

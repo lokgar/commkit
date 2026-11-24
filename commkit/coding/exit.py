@@ -62,7 +62,7 @@ from typing import Any
 import numpy as np
 
 from .. import _random
-from .._array import freeze_host, host_array
+from .._array import freeze_host, host_array, require_finite, require_int
 from ..backend import (
     ArrayType,
     _module_for,
@@ -382,10 +382,7 @@ def decoder_exit_curve(
     blocks = (
         max(1, math.ceil(_DEFAULT_BITS / code.n)) if num_blocks is None else num_blocks
     )
-    if isinstance(blocks, bool) or not isinstance(blocks, int) or blocks < 1:
-        raise ValueError(
-            f"decoder_exit_curve(): num_blocks must be an integer >= 1, got {blocks}."
-        )
+    blocks = require_int(blocks, "decoder_exit_curve(): num_blocks", low=1)
     gen = _random.as_generator(rng)
     info = gen.integers(0, 2, (blocks, code.k), dtype=np.int8)
     if _codec(code, "decoder_exit_curve()").host:
@@ -550,18 +547,11 @@ def demapper_exit_curve(
         n0 = es / 10 ** (float(esn0_db) / 10)  # type: ignore[arg-type]
         nv = n0 / 2 if real else n0
     else:
-        nv = float(noise_var)
+        nv = require_finite(noise_var, f"{name}: noise_var", low=0.0)
     if not nv > 0:
-        raise ValueError(f"{name}: noise_var must be positive, got {nv}.")
+        raise ValueError(f"{name}: esn0_db={esn0_db!r} leaves no noise.")
     _check_points(num_points, name)
-    if (
-        isinstance(num_symbols, bool)
-        or not isinstance(num_symbols, int)
-        or num_symbols < 1
-    ):
-        raise ValueError(
-            f"{name}: num_symbols must be an integer >= 1, got {num_symbols}."
-        )
+    num_symbols = require_int(num_symbols, f"{name}: num_symbols", low=1)
     if method not in ("exact", "maxlog"):
         raise ValueError(f'{name}: method must be "exact" or "maxlog", got {method!r}.')
     xp = _module_for(require_device(device, name))
@@ -704,14 +694,7 @@ def ldpc_exit_curves(
     mi = float(channel_mi)
     if not 0.0 < mi < 1.0:
         raise ValueError(f"{name}: channel_mi must be in (0, 1), got {mi}.")
-    if (
-        isinstance(num_points, bool)
-        or not isinstance(num_points, int)
-        or num_points < 2
-    ):
-        raise ValueError(
-            f"{name}: num_points must be an integer >= 2, got {num_points}."
-        )
+    num_points = require_int(num_points, f"{name}: num_points", low=2)
     var_groups, check_groups = _edge_degrees(code)
     grid = np.linspace(0.0, 1.0, num_points)
     logger.info(
@@ -982,11 +965,4 @@ def _reduce(metric: ArrayType, method: str, xp: Any) -> ArrayType:
 
 
 def _check_points(num_points: Any, name: str) -> None:
-    if (
-        isinstance(num_points, bool)
-        or not isinstance(num_points, int)
-        or num_points < 2
-    ):
-        raise ValueError(
-            f"{name}: num_points must be an integer >= 2, got {num_points}."
-        )
+    num_points = require_int(num_points, f"{name}: num_points", low=2)

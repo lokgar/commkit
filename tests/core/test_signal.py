@@ -406,7 +406,7 @@ class TestSignalCloningAndProvenance:
             ("center_frequency", -1.0, ValueError),
             ("domain", "baseband", ValueError),
             ("domain", 1, ValueError),
-            ("sampling_rate", "1e6", ValueError),
+            ("sampling_rate", "1e6", TypeError),
             ("constellation", "qam", TypeError),
             ("pulse", "rrc", TypeError),
             ("reference", np.ones(4), TypeError),

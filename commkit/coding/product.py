@@ -34,6 +34,7 @@ from typing import Any
 
 import numpy as np
 
+from .._array import require_int
 from ..backend import ArrayType, _device_tables, dispatch
 from ._galois import _Field
 from ._gf2 import matmul_mod2
@@ -184,8 +185,7 @@ class HardIterations:
 
     def __post_init__(self) -> None:
         it = self.max_iterations
-        if isinstance(it, bool) or not isinstance(it, int) or it < 1:
-            raise ValueError(f"max_iterations must be an integer >= 1, got {it!r}.")
+        require_int(it, "max_iterations", low=1)
 
 
 @dataclass(frozen=True, eq=False)
@@ -220,8 +220,7 @@ class StaircaseCode(_Code):
 
     def __post_init__(self) -> None:
         b = self.blocks_per_frame
-        if isinstance(b, bool) or not isinstance(b, int) or b < 1:
-            raise ValueError(f"blocks_per_frame must be an integer >= 1, got {b!r}.")
+        require_int(b, "blocks_per_frame", low=1)
 
     @property
     def n(self) -> int:

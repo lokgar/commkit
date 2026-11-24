@@ -1,10 +1,13 @@
 """Laser and carrier characterization plots (drift, Allan deviation, linewidth).
 
-Each plot takes the result it draws: a ``FrequencyDrift``, an
-``AllanDeviation`` or a ``LinewidthEstimate`` from :mod:`commkit.analysis`,
-or the phase and drift split of
-:func:`commkit.analysis.separate_drift_phase_noise`
-(:func:`plot_carrier_phase_decomposition`).
+Each plot takes the result it draws: a ``FrequencyDrift``
+(:func:`plot_frequency_drift`), an ``AllanDeviation``
+(:func:`plot_allan_deviation`) or a ``LinewidthEstimate``
+(:func:`plot_linewidth_estimate`, which draws the diagnostics of its
+method, chosen by the estimate's class), from :mod:`commkit.analysis`, or the
+phase and drift split of :func:`commkit.analysis.separate_drift_phase_noise`
+(:func:`plot_carrier_phase_decomposition`);
+:func:`plot_carrier_phase_characterization` puts four of them in one figure.
 """
 
 from typing import Any
@@ -20,6 +23,7 @@ from ..analysis import (
     FrequencyDrift,
     IncrementEstimate,
     IncrementSlopeEstimate,
+    LinewidthEstimate,
 )
 from ..backend import _to_host
 from .theme import (
@@ -39,10 +43,8 @@ __all__ = [
     "plot_allan_deviation",
     "plot_carrier_phase_characterization",
     "plot_carrier_phase_decomposition",
-    "plot_dsh_beat_psd",
     "plot_frequency_drift",
-    "plot_frequency_noise_psd",
-    "plot_increment_variance",
+    "plot_linewidth_estimate",
 ]
 
 
@@ -141,9 +143,8 @@ def plot_carrier_phase_decomposition(
 
 
 def plot_frequency_drift(
-    drift,
+    drift: FrequencyDrift,
     *,
-    sampling_rate: float,
     reference_amplitude: float | None = None,
     ax=None,
     label: str | None = None,
@@ -164,9 +165,7 @@ def plot_frequency_drift(
     ----------
     drift : FrequencyDrift
         From :func:`commkit.analysis.frequency_drift`; ``df`` is ``(M,)`` or
-        ``(C, M)``.
-    sampling_rate : float
-        Sampling rate of ``df`` in Hz, for the time axis.
+        ``(C, M)``, its ``sampling_rate`` sets the time axis.
     reference_amplitude : float, optional
         Draws dashed reference lines at ``±reference_amplitude`` (e.g. the wander
         amplitude injected in a simulation).
@@ -199,7 +198,7 @@ def plot_frequency_drift(
 
     fig, axi = _get_axis(ax)
 
-    dt = 1.0 / float(sampling_rate)
+    dt = 1.0 / float(drift.sampling_rate)
     for i in range(C):
         axi.plot(
             *_trace(df_c[i], max_points, dx=dt),
@@ -247,8 +246,8 @@ def _log_cell_median(f_pos, s, sel, points_per_octave=24):
     return centers[occupied], med[occupied]
 
 
-def plot_frequency_noise_psd(
-    estimate,
+def _plot_frequency_noise_psd(
+    estimate: FmNoiseFitEstimate,
     *,
     ax=None,
     label: str | None = None,
@@ -315,17 +314,14 @@ def plot_frequency_noise_psd(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    name = "plot_frequency_noise_psd()"
-    estimate = _require(
-        estimate, FmNoiseFitEstimate, name, "a BetaSeparation or DshFmFit estimate"
-    )
     S_f = estimate.fm_psd
     f, band, used = estimate.frequencies, estimate.band, estimate.used
     # BetaSeparation only: the β-line, its region and the white-FM floor.
-    beta = isinstance(estimate, BetaSeparationEstimate)
-    beta_line = estimate.beta_line if beta else None
-    above = estimate.above if beta else None
-    floor = estimate.linewidth_floor if beta else estimate.value
+    if isinstance(estimate, BetaSeparationEstimate):
+        beta_line, above = estimate.beta_line, estimate.above
+        floor = estimate.linewidth_floor
+    else:
+        beta_line, above, floor = None, None, estimate.value
     f_c = _to_host(f, np.float64)
     S_c = _as_channels(S_f)
     C = S_c.shape[0]
@@ -549,8 +545,8 @@ def plot_allan_deviation(
     return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
-def plot_increment_variance(
-    estimate,
+def _plot_increment_variance(
+    estimate: IncrementEstimate,
     *,
     ax=None,
     label: str | None = None,
@@ -595,17 +591,12 @@ def plot_increment_variance(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    estimate = _require(
-        estimate,
-        IncrementEstimate,
-        "plot_increment_variance()",
-        "an increment-method estimate",
-    )
     var = estimate.increment_var
     # IncrementSlope and DshIncrement only.
-    fit = isinstance(estimate, IncrementSlopeEstimate)
-    slope = estimate.slope if fit else None
-    intercept = estimate.intercept if fit else None
+    slope: Any = None
+    intercept: Any = None
+    if isinstance(estimate, IncrementSlopeEstimate):
+        slope, intercept = estimate.slope, estimate.intercept
     lag = _to_host(estimate.lag_s, np.float64)
     v = _as_channels(var)
     C = v.shape[0]
@@ -646,8 +637,8 @@ def plot_increment_variance(
     return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
-def plot_dsh_beat_psd(
-    estimate,
+def _plot_dsh_beat_psd(
+    estimate: DshLorentzianEstimate,
     *,
     ax=None,
     label: str | None = None,
@@ -694,12 +685,6 @@ def plot_dsh_beat_psd(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    estimate = _require(
-        estimate,
-        DshLorentzianEstimate,
-        "plot_dsh_beat_psd()",
-        "a DshLorentzian estimate",
-    )
     psd = estimate.psd
     f, f_peak = estimate.frequencies, estimate.peak_frequency
     linewidth, linewidth_3db = estimate.value, estimate.linewidth_3db
@@ -777,7 +762,7 @@ def plot_carrier_phase_characterization(
     """Plot the four panels of a carrier-phase characterization.
 
     :func:`plot_carrier_phase_decomposition`, :func:`plot_frequency_drift`,
-    :func:`plot_frequency_noise_psd` and :func:`plot_allan_deviation` in one
+    :func:`plot_linewidth_estimate` and :func:`plot_allan_deviation` in one
     2x2 figure (``examples/25-carrier-phase-characterization.ipynb`` shows
     the whole chain).
 
@@ -788,8 +773,10 @@ def plot_carrier_phase_characterization(
         :func:`commkit.analysis.carrier_phase_trajectory`).
     drift : FrequencyDrift
         From :func:`commkit.analysis.frequency_drift`.
-    linewidth : FmNoiseFitEstimate
-        A ``BetaSeparation`` or ``DshFmFit`` estimate (its PSD is drawn).
+    linewidth : LinewidthEstimate
+        Drawn by :func:`plot_linewidth_estimate`: the frequency-noise PSD of a
+        ``BetaSeparation`` or ``DshFmFit`` estimate, the most informative
+        panel here.
     allan : AllanDeviation
         From :func:`commkit.analysis.allan_deviation`.
     sampling_rate : float
@@ -831,15 +818,106 @@ def plot_carrier_phase_characterization(
         ax=axes[0, 0],
         title=f"Recovered carrier phase{lp}",
     )
-    plot_frequency_drift(
-        drift,
-        sampling_rate=sampling_rate,
-        reference_amplitude=reference_amplitude,
-        ax=axes[0, 1],
-    )
-    plot_frequency_noise_psd(linewidth, ax=axes[1, 0])
+    plot_frequency_drift(drift, reference_amplitude=reference_amplitude, ax=axes[0, 1])
+    plot_linewidth_estimate(linewidth, ax=axes[1, 0])
     plot_allan_deviation(allan, ax=axes[1, 1])
 
     if title:
         fig.suptitle(title)
     return _finish((fig, axes), show)
+
+
+_LINEWIDTH_PLOTS: dict[type, tuple[Any, str]] = {
+    FmNoiseFitEstimate: (_plot_frequency_noise_psd, "Frequency-noise PSD"),
+    IncrementEstimate: (_plot_increment_variance, "Phase-increment variance"),
+    DshLorentzianEstimate: (_plot_dsh_beat_psd, "DSH beat spectrum"),
+}
+
+
+def plot_linewidth_estimate(
+    estimate: LinewidthEstimate,
+    *,
+    ax=None,
+    label: str | None = None,
+    annotations: bool = True,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
+    show: bool = False,
+    title: str | None = None,
+) -> tuple[Any, Any] | None:
+    """Plot a linewidth estimate with the diagnostics of its method.
+
+    The panel follows the estimate's class:
+
+    - :class:`~commkit.analysis.FmNoiseFitEstimate` (``BetaSeparation``,
+      ``DshFmFit``): the frequency-noise PSD :math:`S_f` on log-log axes,
+      with the white-FM floor ``Δν/π``, the analysis band, the fit bins
+      (spurs removed), the fitted model with its white-FM plateau, and for
+      ``BetaSeparation`` the β-line and the integrated region where
+      :math:`S_f` exceeds it.  Dense spectra are drawn faint under a
+      log-binned median; the masks are those of channel 0.
+    - :class:`~commkit.analysis.IncrementEstimate` (``IncrementSlope``,
+      ``IncrementSubtract``, ``DshIncrement``): the variance of the phase
+      increments against the lag, with the fitted line
+      ``slope·lag + intercept`` and its intercept (the additive noise
+      ``2σ_φ²``) when the method fits one.
+    - :class:`~commkit.analysis.DshLorentzianEstimate`: the beat PSD in dB
+      relative to its peak, centered on it, with the half-power and
+      ``-level_db`` contours and the full widths the estimate implies
+      (``FWHM = 2Δν``, ``W_L = 2√(10^{L/10}-1)·Δν``); by default the axis
+      spans twice the ``-level_db`` width on each side.
+
+    Parameters
+    ----------
+    estimate : LinewidthEstimate
+        From :func:`commkit.analysis.estimate_linewidth`.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; ``None`` creates a figure.
+    label : str, optional
+        Label for measured data, prefixed to channel names when needed.
+    annotations : bool, default True
+        Draw the estimate's fit, guides and markers; ``False`` leaves only
+        the measured curves, for overlays.
+    xlim, ylim : tuple of float, optional
+        Limits for the displayed axes. ``None`` leaves the limits automatic.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
+    show : bool, default False
+        Call ``plt.show()`` and return ``None``.
+    title : str, optional
+        Title of the figure; ``None`` names the panel.
+
+    Returns
+    -------
+    (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
+
+    Raises
+    ------
+    TypeError
+        If ``estimate`` is not a ``LinewidthEstimate``.
+    ValueError
+        For an estimate of none of the families above.
+    """
+    name = "plot_linewidth_estimate()"
+    if not isinstance(estimate, LinewidthEstimate):
+        raise TypeError(
+            f"{name}: estimate must be a LinewidthEstimate, got "
+            f"{type(estimate).__name__}."
+        )
+    for kind, (draw, default_title) in _LINEWIDTH_PLOTS.items():
+        if isinstance(estimate, kind):
+            return draw(
+                estimate,
+                ax=ax,
+                label=label,
+                annotations=annotations,
+                xlim=xlim,
+                ylim=ylim,
+                legend=legend,
+                show=show,
+                title=title or default_title,
+            )
+    raise ValueError(f"{name}: a {type(estimate).__name__} has no diagnostics to draw.")

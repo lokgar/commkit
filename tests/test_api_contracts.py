@@ -47,10 +47,14 @@ from commkit.analysis import DshIncrement
 from commkit.backend import to_device
 from commkit.coding import DecodeResult, Interleaver, LinearBlockCode
 from commkit.core import Signal
-from commkit.equalization import EqualizerResult, PolarizationTones
-from commkit.filtering import ClockToneScan
+from commkit.equalization import (
+    ClockToneScan,
+    EqualizerResult,
+    Lowdin,
+    PolarizationTones,
+)
 from commkit.frequency import MthPower
-from commkit.impairments import Fiber, Lowdin
+from commkit.impairments import Fiber
 from commkit.mapping import Constellation
 from commkit.recovery import BPS
 from commkit.timing import Gardner
@@ -194,6 +198,14 @@ def _arr(x: Any) -> Any:
 def _ref(c: Inputs, x: Any) -> Any:
     """Known symbols with the channel count of ``x``."""
     return c.sym1 if _arr(x).ndim == 1 else c.sym2
+
+
+def _gain(c: Inputs, x: Any) -> Any:
+    """A gain estimate with the channel count of ``x``."""
+    from commkit.equalization import GainEstimate
+
+    value = 2.0 if _arr(x).ndim == 1 else [2.0, 0.5]
+    return GainEstimate(value=c.xp.asarray(value, dtype=c.xp.float64))
 
 
 def _bits(c: Inputs, x: Any) -> Any:
@@ -442,6 +454,20 @@ ROWS: list[Row] = [
         data=2,
         call=lambda c, x: _a(x, x, nfft=128),
     ),
+    Row("commkit.equalization.linear.GainEstimate", VALUE),
+    Row(
+        "commkit.equalization.linear.estimate_gain",
+        ESTIMATE,
+        data=2,
+        call=lambda c, x: _a(x, _ref(c, x)),
+        symbols=True,
+    ),
+    Row(
+        "commkit.equalization.linear.correct_gain",
+        TRANSFORM,
+        data=2,
+        call=lambda c, x: _a(x, _gain(c, x)),
+    ),
     Row(
         "commkit.equalization.linear.correct_channel",
         TRANSFORM,
@@ -509,27 +535,31 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, pulse=c.taps),
     ),
     Row(
-        "commkit.filtering.fiber.compensation.correct_chromatic_dispersion",
+        "commkit.equalization.fiber.compensation.correct_chromatic_dispersion",
         TRANSFORM,
         data=2,
         call=lambda c, x: _a(x, sampling_rate=FS, **CDC),
         conflict=FS_CONFLICT,
     ),
     Row(
-        "commkit.filtering.fiber.compensation.dispersion_compensation_taps",
+        "commkit.equalization.fiber.compensation.dispersion_compensation_taps",
         DESIGN,
         data=0,
     ),
-    Row("commkit.filtering.fiber.estimation.ClockToneScan", VALUE),
-    Row("commkit.filtering.fiber.estimation.FourthMomentScan", VALUE),
-    Row("commkit.filtering.fiber.estimation.QuadraticPhaseFit", VALUE),
+    Row("commkit.equalization.fiber.estimation.ClockToneScan", VALUE),
+    Row("commkit.equalization.fiber.estimation.FourthMomentScan", VALUE),
+    Row("commkit.equalization.fiber.estimation.QuadraticPhaseFit", VALUE),
     Row(
-        "commkit.filtering.fiber.estimation.ChromaticDispersionEstimate", VALUE, data=0
+        "commkit.equalization.fiber.estimation.ChromaticDispersionEstimate",
+        VALUE,
+        data=0,
     ),
-    Row("commkit.filtering.fiber.estimation.QuadraticPhaseFitEstimate", VALUE, data=0),
-    Row("commkit.filtering.fiber.estimation.DispersionScanEstimate", VALUE, data=0),
     Row(
-        "commkit.filtering.fiber.estimation.estimate_chromatic_dispersion",
+        "commkit.equalization.fiber.estimation.QuadraticPhaseFitEstimate", VALUE, data=0
+    ),
+    Row("commkit.equalization.fiber.estimation.DispersionScanEstimate", VALUE, data=0),
+    Row(
+        "commkit.equalization.fiber.estimation.estimate_chromatic_dispersion",
         ESTIMATE,
         data=2,
         call=lambda c, x: _a(
@@ -542,7 +572,7 @@ ROWS: list[Row] = [
         conflict=FS_CONFLICT,
     ),
     Row(
-        "commkit.filtering.fiber.compensation.correct_fiber_propagation",
+        "commkit.equalization.fiber.compensation.correct_fiber_propagation",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, **FIBER_LINK),
         conflict=FS_CONFLICT,
@@ -641,17 +671,17 @@ ROWS: list[Row] = [
         RATE_CHANGE,
         call=lambda c, x: _a(x, offset_ppm=200.0),
     ),
-    Row("commkit.impairments.frontend.GramSchmidt", VALUE),
-    Row("commkit.impairments.frontend.Lowdin", VALUE),
-    Row("commkit.impairments.frontend.IQImbalanceEstimate", VALUE),
+    Row("commkit.equalization.iq.GramSchmidt", VALUE),
+    Row("commkit.equalization.iq.Lowdin", VALUE),
+    Row("commkit.equalization.iq.IQImbalanceEstimate", VALUE),
     Row(
-        "commkit.impairments.frontend.correct_iq_imbalance",
+        "commkit.equalization.iq.correct_iq_imbalance",
         TRANSFORM,
         data=2,
         call=lambda c, x: _a(x, Lowdin()),
     ),
     Row(
-        "commkit.impairments.frontend.estimate_iq_imbalance",
+        "commkit.equalization.iq.estimate_iq_imbalance",
         MULTI,
         data=1,
         call=lambda c, x: _a(x),
@@ -803,10 +833,8 @@ ROWS: list[Row] = [
     # --- plotting (consume data; never produce it) ---------------------------
     Row("commkit.plotting.analysis.plot_allan_deviation", PLOT),
     Row("commkit.plotting.analysis.plot_carrier_phase_characterization", PLOT),
-    Row("commkit.plotting.analysis.plot_dsh_beat_psd", PLOT),
     Row("commkit.plotting.analysis.plot_frequency_drift", PLOT),
-    Row("commkit.plotting.analysis.plot_frequency_noise_psd", PLOT),
-    Row("commkit.plotting.analysis.plot_increment_variance", PLOT),
+    Row("commkit.plotting.analysis.plot_linewidth_estimate", PLOT),
     Row("commkit.plotting.coding.plot_error_rate", PLOT),
     Row("commkit.plotting.coding.plot_exit_chart", PLOT),
     Row("commkit.plotting.coding.plot_llr_distribution", PLOT, data=2),
@@ -821,13 +849,9 @@ ROWS: list[Row] = [
     Row("commkit.plotting.spectral.plot_spectrogram", PLOT),
     Row("commkit.plotting.analysis.plot_carrier_phase_decomposition", PLOT, data=2),
     Row("commkit.plotting.recovery.plot_carrier_phase_trajectory", PLOT),
-    Row("commkit.plotting.frequency.plot_frequency_offset_blockwise_result", PLOT),
-    Row("commkit.plotting.frequency.plot_frequency_offset_spectrum", PLOT),
-    Row("commkit.plotting.frequency.plot_mm_autocorrelation", PLOT),
-    Row("commkit.plotting.recovery.plot_pilot_phase_estimate", PLOT),
-    Row("commkit.plotting.recovery.plot_pilot_tone_phase_estimate", PLOT, data=2),
-    Row("commkit.plotting.recovery.plot_pilot_tones_phase_estimate", PLOT),
-    Row("commkit.plotting.timing.plot_timing_correlation", PLOT),
+    Row("commkit.plotting.frequency.plot_frequency_offset_estimate", PLOT),
+    Row("commkit.plotting.recovery.plot_carrier_phase_estimate", PLOT, data=2),
+    Row("commkit.plotting.timing.plot_timing_estimate", PLOT),
     Row("commkit.plotting.theme.apply_default_theme", PLOT, data=0),
     Row("commkit.plotting.waveform.plot_time_domain", PLOT),
     # --- recovery -----------------------------------------------------------
@@ -1058,6 +1082,27 @@ def test_signature_keyword_only(row: Row):
     ]
     positional = [p.name for p in params[row.data :] if p.kind != p.KEYWORD_ONLY]
     assert not positional, f"must be keyword-only: {positional}"
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        pytest.param(r, id=str(r))
+        for r in ROWS
+        if r.kind != VALUE and inspect.isfunction(r.obj)
+    ],
+)
+def test_data_count_matches_signature(row: Row):
+    """A row's ``data`` is the number of parameters that may be positional,
+    exactly: one too many would let the keyword-only check above pass on a
+    parameter that should be keyword-only (``estimate_iq_imbalance`` was
+    once recorded with two)."""
+    positional = [
+        p.name
+        for p in inspect.signature(row.obj).parameters.values()
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    ]
+    assert len(positional) == row.data, (positional, row.data)
 
 
 # -----------------------------------------------------------------------------

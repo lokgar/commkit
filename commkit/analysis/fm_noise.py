@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from .._array import as_2d, restore_1d
+from .._value import _Record
 from ..backend import ArrayType, dispatch
 from ..spectral import welch_psd
 from ._common import _resolve_nperseg
@@ -22,7 +23,7 @@ __all__ = ["DshFmNoisePsd", "dsh_fm_noise_psd", "fm_noise_psd"]
 
 
 @dataclass(frozen=True, eq=False)
-class DshFmNoisePsd:
+class DshFmNoisePsd(_Record):
     """Laser FM-noise PSD recovered from a DSH differential phase.
 
     All three stay on the input's device.

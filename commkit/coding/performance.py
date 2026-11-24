@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 
 from .. import _random
-from .._array import freeze_host, host_array
+from .._array import freeze_host, host_array, require_int
 from ..backend import _module_for, _to_host, require_device, to_device
 from ..logger import logger
 from ..mapping import Constellation
@@ -121,11 +121,9 @@ class ErrorRateCurve(_Value):
             raise ValueError("ErrorRateCurve: num_blocks must be >= 1 at every point.")
         for name in ("k", "n", "bits_per_symbol"):
             value = getattr(self, name)
-            if isinstance(value, bool) or not isinstance(value, int | np.integer):
-                raise ValueError(f"ErrorRateCurve: {name} must be an integer.")
-            if value < 1:
-                raise ValueError(f"ErrorRateCurve: {name} must be >= 1, got {value}.")
-            object.__setattr__(self, name, int(value))
+            object.__setattr__(
+                self, name, require_int(value, f"ErrorRateCurve: {name}", low=1)
+            )
         object.__setattr__(self, "checked", bool(self.checked))
 
     @property
@@ -279,10 +277,7 @@ def error_rate_curve(
         ("min_block_errors", min_block_errors),
         ("max_blocks", max_blocks),
     ):
-        if isinstance(value, bool) or not isinstance(value, int | np.integer):
-            raise ValueError(f"{name}: {arg} must be an integer, got {value!r}.")
-        if value < 1:
-            raise ValueError(f"{name}: {arg} must be >= 1, got {value}.")
+        require_int(value, f"{name}: {arg}", low=1)
     device = require_device(device, name)
     xp = _module_for(device)
     host_encode = _codec(code, name).host

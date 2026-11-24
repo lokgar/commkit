@@ -367,30 +367,30 @@ class TestUpfrontValidation:
                 decode(empty, code=code, method=bad)
 
     def test_strict_int_and_construction_validation(self) -> None:
-        with pytest.raises(ValueError, match="integer"):
+        with pytest.raises(TypeError, match="integer"):
             ReedSolomonCode(True, 1, m=3)
-        with pytest.raises(ValueError, match="integer"):
+        with pytest.raises(TypeError, match="integer"):
             ReedSolomonCode(7.0, 5, m=3)  # type: ignore[arg-type]
         with pytest.raises(ValueError):
             # Non-primitive polynomial must fail on construction via self.field.
             ReedSolomonCode(7, 5, m=3, primitive=0b1111)
-        with pytest.raises(ValueError, match="integer"):
+        with pytest.raises(TypeError, match="integer"):
             BCHCode(4, True)
-        with pytest.raises(ValueError, match="integer"):
+        with pytest.raises(TypeError, match="integer"):
             BCHCode(4.0, 1)  # type: ignore[arg-type]
-        with pytest.raises(ValueError, match="n must be"):
+        with pytest.raises(TypeError, match="n must be"):
             PolarCode.nr(k=16, n=32.0)  # type: ignore[arg-type]
-        with pytest.raises(ValueError, match="k must be"):
+        with pytest.raises(TypeError, match="k must be"):
             PolarCode.nr(k=True, n=32)
         with pytest.raises(ValueError, match="2-D"):
             LDPCCode.from_parity_check(np.array([1, 0, 1]))
-        with pytest.raises(ValueError, match="lifting"):
+        with pytest.raises(TypeError, match="lifting"):
             LDPCCode.quasi_cyclic(np.array([[0, 1], [1, 0]]), lifting=True)
         with pytest.raises(ValueError, match="integer"):
             LDPCCode.quasi_cyclic(np.array([[0.5, 1.0], [1.0, 0.0]]), lifting=4)
-        with pytest.raises(ValueError, match="polynomial"):
+        with pytest.raises(TypeError, match="polynomial"):
             CRC(True, 8, 16)
-        with pytest.raises(ValueError, match="generators"):
+        with pytest.raises(TypeError, match="generators"):
             ConvolutionalCode((0o5, True), 3, 10)
-        with pytest.raises(ValueError, match="generators"):
+        with pytest.raises(TypeError, match="generators"):
             ConvolutionalCode((5.5, 7), 3, 10)  # type: ignore[arg-type]

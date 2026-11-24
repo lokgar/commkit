@@ -27,7 +27,13 @@ from typing import Any
 
 import numpy as np
 
-from .._array import freeze_host, host_array, warn_if_double
+from .._array import (
+    freeze_host,
+    host_array,
+    require_finite,
+    require_int,
+    warn_if_double,
+)
 from .._bits import pack_bits, unpack_bits
 from ..backend import ArrayType, _device_tables, dispatch
 from ._demap import _llr, _llr_separable, _llr_separable_gpu
@@ -313,11 +319,7 @@ class Constellation:
         ``(..., N * k)``, on the symbols' device.
         """
         x, xp, _ = dispatch(symbols)
-        nv = float(noise_var)
-        if not np.isfinite(nv) or nv <= 0.0:
-            raise ValueError(
-                f"Constellation.llr(): noise_var must be finite and > 0, got {noise_var!r}."
-            )
+        nv = require_finite(noise_var, "Constellation.llr(): noise_var", low=0.0)
         warn_if_double(x, "compute_llr() / Constellation.llr()", "float32")
         if x.dtype.kind != "c":
             # Real noise of variance s2 has the likelihood of the in-phase
@@ -435,7 +437,6 @@ class Constellation:
 
 @cache
 def _named(family: str, order: int, unipolar: bool) -> Constellation:
-    if not isinstance(order, int | np.integer) or order < 2:
-        raise ValueError(f"order must be an integer >= 2, got {order!r}.")
-    points = _gray_points(family, int(order), unipolar=unipolar)
+    order = require_int(order, "order", low=2)
+    points = _gray_points(family, order, unipolar=unipolar)
     return Constellation(points, family=family)

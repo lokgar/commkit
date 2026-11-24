@@ -172,7 +172,7 @@ class TestErrorRateCurve:
             error_rate_curve(h, constellation=q, esn0_db=[])
         with pytest.raises(ValueError, match="min_block_errors"):
             error_rate_curve(h, constellation=q, esn0_db=[0], min_block_errors=0)
-        with pytest.raises(ValueError, match="max_blocks"):
+        with pytest.raises(TypeError, match="max_blocks"):
             error_rate_curve(h, constellation=q, esn0_db=[0], max_blocks=1.5)
         with pytest.raises(ValueError, match="device"):
             error_rate_curve(h, constellation=q, esn0_db=[0], device="tpu")

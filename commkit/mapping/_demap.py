@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .. import _cuda
+from .._array import require_finite
 from .._bits import pack_bits
 from .._cuda.llr import LLR_MAX_K
 from ..backend import ArrayType, _device_tables, dispatch
@@ -61,15 +62,8 @@ def _noise_variance(
     if (noise_var is None) == (esn0_db is None):
         raise ValueError(f"{function_name}: give one of noise_var and esn0_db.")
     if noise_var is not None:
-        nv = float(noise_var)
-        if not np.isfinite(nv) or nv <= 0.0:
-            raise ValueError(
-                f"{function_name}: noise_var must be finite and > 0, got {noise_var!r}."
-            )
-        return nv
-    snr = float(esn0_db)  # type: ignore[arg-type]
-    if not np.isfinite(snr):
-        raise ValueError(f"{function_name}: esn0_db must be finite, got {esn0_db!r}.")
+        return require_finite(noise_var, f"{function_name}: noise_var", low=0.0)
+    snr = require_finite(esn0_db, f"{function_name}: esn0_db")
     n0 = constellation.power() / 10 ** (snr / 10)
     return n0 / 2 if real else n0
 

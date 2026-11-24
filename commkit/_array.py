@@ -31,6 +31,57 @@ from .backend import (
 # ---------------------------------------------------------------------------
 
 
+def require_int(
+    value: Any, name: str, *, low: int | None = None, high: int | None = None
+) -> int:
+    """``value`` as a Python ``int``, checked to lie in ``[low, high]``.
+
+    ``name`` labels the argument in the message, with its function where the
+    caller gives one (``"allan_deviation(): num_taus"``).  A ``bool``, a
+    float (``2.0`` included) or any other non-integer raises ``TypeError``;
+    an integer outside the bounds (``None``: unbounded) raises
+    ``ValueError``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | np.integer):
+        raise TypeError(f"{name} must be an integer, got {value!r}.")
+    if (low is not None and value < low) or (high is not None and value > high):
+        if high is None:
+            bound = f">= {low}"
+        elif low is None:
+            bound = f"<= {high}"
+        else:
+            bound = f"in [{low}, {high}]"
+        raise ValueError(f"{name} must be an integer {bound}, got {value!r}.")
+    return int(value)
+
+
+def require_finite(
+    value: Any, name: str, *, low: float | None = None, inclusive: bool = False
+) -> float:
+    """``value`` as a Python ``float``, checked to be finite and above ``low``.
+
+    ``low=None`` checks finiteness only; otherwise the value must exceed
+    ``low`` (``inclusive=True``: be at least ``low``).  A ``bool`` or a
+    non-number raises ``TypeError``, a NaN, an infinity or a value out of
+    range ``ValueError``.  A 0-d array is accepted.
+    """
+    scalar = not isinstance(value, bool) and isinstance(
+        value, int | float | np.integer | np.floating
+    )
+    array = (isinstance(value, np.ndarray) or _is_cupy_array(value)) and (
+        value.ndim == 0 and value.dtype.kind in "iuf"
+    )
+    if not (scalar or array):
+        raise TypeError(f"{name} must be a real number, got {value!r}.")
+    v = float(value)
+    if not np.isfinite(v):
+        raise ValueError(f"{name} must be finite, got {value!r}.")
+    if low is not None and (v < low if inclusive else v <= low):
+        bound = f">= {low:g}" if inclusive else f"> {low:g}"
+        raise ValueError(f"{name} must be {bound}, got {value!r}.")
+    return v
+
+
 def validate_array(
     v: Any, name: str = "array", complex_only: bool = False
 ) -> ArrayType:

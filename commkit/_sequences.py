@@ -9,6 +9,7 @@ import math
 
 import numpy as np
 
+from ._array import require_int
 from .logger import logger
 
 # Standard Barker codes
@@ -94,8 +95,8 @@ def zadoff_chu_sequence(num_symbols: int, *, root: int = 1) -> np.ndarray:
     - For odd lengths: x[n] = exp(-j * pi * u * n * (n + 1) / N_ZC)
     - For even lengths: x[n] = exp(-j * pi * u * n^2 / N_ZC)
     """
-    if num_symbols < 1:
-        raise ValueError(f"num_symbols must be positive, got {num_symbols}.")
+    num_symbols = require_int(num_symbols, "num_symbols", low=1)
+    root = require_int(root, "root")
     if root < 1 or root >= num_symbols:
         raise ValueError(f"Root must be in [1, {num_symbols - 1}].")
     if math.gcd(root, num_symbols) != 1:

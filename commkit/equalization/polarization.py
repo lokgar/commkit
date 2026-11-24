@@ -17,7 +17,9 @@ from typing import Any, cast
 import numpy as np
 
 from .. import _fft
+from .._array import require_finite
 from .._peaks import refine_tones
+from .._value import _Record
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_input import S, SignalInput
 from ..core.signal import Signal
@@ -116,7 +118,7 @@ def _apply_interpolated_matrix(
 
 
 @dataclass(frozen=True, eq=False)
-class PolarizationEstimate:
+class PolarizationEstimate(_Record):
     """Unmixing (inverse Jones) matrices over time, applied by
     :func:`correct_polarization`.
 
@@ -524,10 +526,9 @@ class PolarizationTones:
                 "PolarizationTones: num_taps and grid_step shape the tracking "
                 "filter; give track_bandwidth too."
             )
-        if self.track_bandwidth is not None and not self.track_bandwidth > 0:
-            raise ValueError(
-                "PolarizationTones: track_bandwidth must be positive; got "
-                f"{self.track_bandwidth}."
+        if self.track_bandwidth is not None:
+            require_finite(
+                self.track_bandwidth, "PolarizationTones: track_bandwidth", low=0.0
             )
 
 

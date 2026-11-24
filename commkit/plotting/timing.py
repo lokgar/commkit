@@ -1,4 +1,4 @@
-"""Timing-synchronization plots: :func:`plot_timing_correlation`.
+"""Timing-synchronization plots: :func:`plot_timing_estimate`.
 
 Draws the correlation of a :class:`~commkit.timing.TimingEstimate`.
 """
@@ -19,12 +19,12 @@ from .theme import (
 )
 
 __all__ = [
-    "plot_timing_correlation",
+    "plot_timing_estimate",
 ]
 
 
-def plot_timing_correlation(
-    estimate: Any,
+def plot_timing_estimate(
+    estimate: TimingEstimate,
     *,
     threshold: float = 3.0,
     quantity: str | None = None,
@@ -76,7 +76,7 @@ def plot_timing_correlation(
     """
     panels = _select(quantity, ("full", "detail"), label=label, xlim=xlim, ylim=ylim)
     estimate = _require(
-        estimate, TimingEstimate, "plot_timing_correlation()", "a TimingEstimate"
+        estimate, TimingEstimate, "plot_timing_estimate()", "a TimingEstimate"
     )
     corr = _device_channels(estimate.correlation)
     xp = get_array_module(corr)

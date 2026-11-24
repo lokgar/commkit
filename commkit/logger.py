@@ -99,6 +99,13 @@ def set_log_level(level: int | str) -> None:
     ----------
     level : int or str
         A standard logging level, e.g. ``logging.DEBUG`` or ``"INFO"``.
+
+    Raises
+    ------
+    TypeError
+        If ``level`` is neither an int nor a str.
+    ValueError
+        On an unknown level name.
     """
     if isinstance(level, str):
         resolved = _LEVEL_NAMES.get(level.upper())
@@ -109,7 +116,7 @@ def set_log_level(level: int | str) -> None:
             )
         level = resolved
     elif isinstance(level, bool) or not isinstance(level, int):
-        raise ValueError(
+        raise TypeError(
             f"set_log_level(): level must be a logging level int or str, got {level!r}."
         )
     logger.setLevel(level)

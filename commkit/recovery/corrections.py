@@ -14,7 +14,15 @@ from typing import Any
 import numpy as np
 
 from .. import _fft
-from .._array import as_2d, broadcast_channels, freeze_host, restore_1d
+from .._array import (
+    as_2d,
+    broadcast_channels,
+    freeze_host,
+    require_finite,
+    require_int,
+    restore_1d,
+)
+from .._value import _Value
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_input import S, SignalInput
 from ..logger import logger
@@ -143,35 +151,34 @@ def smooth_phase(
     Raises
     ------
     ValueError
-        Without ``measurement_variance``, without ``process_variance`` or
-        both ``linewidth`` and ``sampling_rate``, or for a variance ``<= 0``.
+        Without ``measurement_variance``; without ``process_variance`` or
+        both ``linewidth`` and ``sampling_rate``, or with ``process_variance``
+        and either of them; for a variance, ``linewidth`` or
+        ``sampling_rate`` that is not finite and ``> 0``; or for an empty
+        ``phase``.
+    TypeError
+        If a variance, ``linewidth`` or ``sampling_rate`` is not a real
+        number.
     """
     if process_variance is None:
         if linewidth is None or sampling_rate is None:
             raise ValueError(
-                "Provide process_variance, or both linewidth and sampling_rate."
+                "smooth_phase(): provide process_variance, or both linewidth "
+                "and sampling_rate."
             )
-        lw, fs = float(linewidth), float(sampling_rate)
-        if not (np.isfinite(lw) and lw > 0.0):
-            raise ValueError(
-                f"smooth_phase(): linewidth must be finite and > 0, got {linewidth!r}."
-            )
-        if not (np.isfinite(fs) and fs > 0.0):
-            raise ValueError(
-                f"smooth_phase(): sampling_rate must be finite and > 0, got {sampling_rate!r}."
-            )
+        lw = require_finite(linewidth, "smooth_phase(): linewidth", low=0.0)
+        fs = require_finite(sampling_rate, "smooth_phase(): sampling_rate", low=0.0)
         process_variance = 2.0 * np.pi * lw / fs
     elif linewidth is not None or sampling_rate is not None:
         raise ValueError(
             "smooth_phase(): provide process_variance or linewidth/sampling_rate, not both."
         )
     if measurement_variance is None:
-        raise ValueError("Provide measurement_variance.")
-    q, r = float(process_variance), float(measurement_variance)
-    if not (np.isfinite(q) and q > 0.0 and np.isfinite(r) and r > 0.0):
-        raise ValueError(
-            f"process/measurement variance must be finite and > 0, got q={q}, r={r}."
-        )
+        raise ValueError("smooth_phase(): provide measurement_variance.")
+    q = require_finite(process_variance, "smooth_phase(): process_variance", low=0.0)
+    r = require_finite(
+        measurement_variance, "smooth_phase(): measurement_variance", low=0.0
+    )
 
     phase, xp, _ = dispatch(phase)
     phase, was_1d = as_2d(phase, name="phase")
@@ -271,26 +278,9 @@ def correct_cycle_slips(
     A sequential scan per row, Numba-compiled on the CPU; GPU input makes
     one host round trip for the whole array.
     """
-    if (
-        isinstance(symmetry, bool)
-        or not isinstance(symmetry, int | np.integer)
-        or symmetry < 1
-    ):
-        raise ValueError(
-            f"correct_cycle_slips(): symmetry must be an integer >= 1, got {symmetry!r}."
-        )
-    if (
-        isinstance(history, bool)
-        or not isinstance(history, int | np.integer)
-        or history < 1
-    ):
-        raise ValueError(
-            f"correct_cycle_slips(): history must be an integer >= 1, got {history!r}."
-        )
-    if not (np.isfinite(threshold) and threshold > 0):
-        raise ValueError(
-            f"correct_cycle_slips(): threshold must be finite and > 0, got {threshold!r}."
-        )
+    symmetry = require_int(symmetry, "correct_cycle_slips(): symmetry", low=1)
+    history = require_int(history, "correct_cycle_slips(): history", low=1)
+    require_finite(threshold, "correct_cycle_slips(): threshold", low=0.0)
     phase, xp, _ = dispatch(phase)
     if phase.ndim not in (1, 2):
         raise ValueError(f"phase must be (B,) or (C, B), got shape {phase.shape}.")
@@ -359,10 +349,9 @@ class CycleSlip:
     threshold: float = np.pi / 4
 
     def __post_init__(self) -> None:
-        if self.history is not None and self.history < 1:
-            raise ValueError(f"history must be >= 1, got {self.history}.")
-        if not self.threshold > 0:
-            raise ValueError(f"threshold must be > 0, got {self.threshold}.")
+        if self.history is not None:
+            require_int(self.history, "history", low=1)
+        require_finite(self.threshold, "threshold", low=0.0)
 
     def _history_values(self, spacing: float, default: int | None = None) -> int:
         """``history`` for a trajectory with ``spacing`` symbol periods per value.
@@ -409,7 +398,7 @@ def _repair_slips(
 
 
 @dataclass(frozen=True, eq=False)
-class ConstantPhase:
+class ConstantPhase(_Value):
     """One constant carrier phase per channel, fitted to known symbols.
 
     A rotationally invariant blind equalizer (CMA, RDE) leaves an arbitrary
@@ -438,10 +427,7 @@ class ConstantPhase:
     num_skip_symbols: int = 0
 
     def __post_init__(self) -> None:
-        if self.num_skip_symbols < 0:
-            raise ValueError(
-                f"num_skip_symbols must be >= 0, got {self.num_skip_symbols}."
-            )
+        require_int(self.num_skip_symbols, "num_skip_symbols", low=0)
         if self.symbols is not None:
             symbols = freeze_host(self, "symbols", self.symbols)
             if symbols.ndim not in (1, 2):
@@ -609,11 +595,9 @@ def _resolve_channel_permutation_array(
             f"resolve_channel_permutation(): metric must be 'coherence' or "
             f"'phase_increment', got {metric!r}."
         )
-    if num_skip_symbols < 0:
-        raise ValueError(
-            f"resolve_channel_permutation(): num_skip_symbols must be >= 0, "
-            f"got {num_skip_symbols!r}."
-        )
+    num_skip_symbols = require_int(
+        num_skip_symbols, "resolve_channel_permutation(): num_skip_symbols", low=0
+    )
     symbols, xp, _ = dispatch(symbols)
     was_1d = symbols.ndim == 1
     if was_1d:
@@ -746,24 +730,11 @@ def _resolve_phase_ambiguity_array(
     num_skip_symbols: int = 0,
 ) -> ArrayType:
     """Array-only rotational-ambiguity resolution."""
-    if symmetry is not None and (
-        isinstance(symmetry, bool)
-        or not isinstance(symmetry, int | np.integer)
-        or int(symmetry) < 1
-    ):
-        raise ValueError(
-            f"resolve_phase_ambiguity(): symmetry must be an integer >= 1, got {symmetry!r}."
-        )
-    if (
-        isinstance(num_skip_symbols, bool)
-        or not isinstance(num_skip_symbols, int | np.integer)
-        or int(num_skip_symbols) < 0
-    ):
-        raise ValueError(
-            f"resolve_phase_ambiguity(): num_skip_symbols must be an integer >= 0, "
-            f"got {num_skip_symbols!r}."
-        )
-    num_skip_symbols = int(num_skip_symbols)
+    if symmetry is not None:
+        symmetry = require_int(symmetry, "resolve_phase_ambiguity(): symmetry", low=1)
+    num_skip_symbols = require_int(
+        num_skip_symbols, "resolve_phase_ambiguity(): num_skip_symbols", low=0
+    )
     symbols, xp, _ = dispatch(symbols)
     symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape

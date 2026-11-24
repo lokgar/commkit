@@ -21,9 +21,10 @@ from typing import Any, Literal
 
 import numpy as np
 
-from .._array import as_2d, restore_1d, warn_if_double
+from .._array import as_2d, require_finite, restore_1d, warn_if_double
 from .._fft import fft
 from .._interpolation import interpolate_piecewise
+from .._value import _Record
 from ..backend import ArrayType, _to_host, dispatch, to_device
 from ..core._signal_input import S, SignalInput
 from ..core.signal import Signal
@@ -182,8 +183,8 @@ class Gardner:
             raise ValueError("Gardner: integral_gain requires proportional_gain.")
         for name in ("proportional_gain", "integral_gain"):
             value = getattr(self, name)
-            if value is not None and not value >= 0.0:
-                raise ValueError(f"Gardner: {name} must be non-negative, got {value}.")
+            if value is not None:
+                require_finite(value, f"Gardner: {name}", low=0.0, inclusive=True)
         if self.method not in ("classical", "power"):
             raise ValueError(
                 f"Gardner: method must be 'classical' or 'power', got {self.method!r}."
@@ -198,7 +199,7 @@ class Gardner:
 
 
 @dataclass(frozen=True, eq=False)
-class SamplingClockOffsetEstimate:
+class SamplingClockOffsetEstimate(_Record):
     """Result of :func:`estimate_sampling_clock_offset`; the constructor
     takes the same fields.
 
