@@ -4,9 +4,68 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-11-24
+
+Placement by role, one plot per estimate, value equality for every result, a public data-aided gain, and the review fixes of 3.10.1 and 3.10.2.
+
+### Changes that may need code updates
+
+- **Estimation and correction live with their quantity.** `impairments` now holds forward models only and `filtering` generic filters; the compensations moved to `commkit.equalization`, the inverses of channel and front-end responses. Change the import; the old names are gone.
+  - From `commkit.filtering`: `estimate_chromatic_dispersion`, `correct_chromatic_dispersion`, `dispersion_compensation_taps`, `correct_fiber_propagation`, `ClockToneScan`, `FourthMomentScan`, `QuadraticPhaseFit`, `ChromaticDispersionEstimate`, `DispersionScanEstimate`, `QuadraticPhaseFitEstimate`.
+  - From `commkit.impairments`: `estimate_iq_imbalance`, `correct_iq_imbalance`, `Lowdin`, `GramSchmidt`, `IQImbalanceEstimate`.
+- **One plot per estimated quantity**, drawing the diagnostics of the estimate's class. The estimate carries the sampling rate, record length and method its axes need, so these arguments are gone:
+
+  | Before | Now |
+  | --- | --- |
+  | `plot_pilot_phase_estimate(est, sampling_rate=)` (PilotInterpolation) | `plot_carrier_phase_estimate(est)` |
+  | `plot_pilot_tone_phase_estimate(est, x, method=, sampling_rate=)` | `plot_carrier_phase_estimate(est, x)` |
+  | `plot_pilot_tones_phase_estimate(est)` | `plot_carrier_phase_estimate(est)` |
+  | `plot_carrier_phase_trajectory(est)` with an estimate | `plot_carrier_phase_estimate(est)`; the trajectory plot takes arrays |
+  | `plot_frequency_offset_spectrum(est, search_range=)` | `plot_frequency_offset_estimate(est)` |
+  | `plot_mm_autocorrelation(est, sampling_rate=)` | `plot_frequency_offset_estimate(est)` |
+  | `plot_frequency_offset_blockwise_result(est, num_samples=, sampling_rate=)` | `plot_frequency_offset_estimate(est)` |
+  | `plot_pilot_phase_estimate(est, sampling_rate=)` (PilotSlope) | `plot_frequency_offset_estimate(est)` |
+  | `plot_frequency_noise_psd`, `plot_increment_variance`, `plot_dsh_beat_psd` | `plot_linewidth_estimate(est)` |
+  | `plot_timing_correlation(est)` | `plot_timing_estimate(est)` |
+  | `plot_frequency_drift(drift, sampling_rate=)` | `plot_frequency_drift(drift)` |
+
+- **New fields on estimates.** `FrequencyOffsetEstimate` and its subclasses hold `sampling_rate`, `BlockwiseFrequencyEstimate` also `num_samples`, `PilotToneEstimate` and `PilotTonesEstimate` `method` and `sampling_rate`, `FrequencyDrift` `sampling_rate`. Code building them by hand passes these.
+- **Results compare by value.** `Signal`, `Reference` and every estimate and result compare field by field (arrays by value, NaN equal to NaN, arrays on different devices unequal) and are unhashable; 3.10.2 compared them by identity. Algorithm objects with arrays (`PilotSlope`, `PilotInterpolation`, `ConstantPhase`, `IncrementSubtract`, `QuadraticPhaseFit`, `EqualizerPilots`) and `FrameStructure` now compare and hash by value instead of identity.
+- **`TypeError` for a wrong type.** An integer argument given a float (`2.0` included) or a `bool`, or a number given a string, raises `TypeError` instead of `ValueError`, across the library. `upsample` and the other rate changers no longer accept an integral float factor. The rest of the scalar checks (block sizes, test phases, `nfft`, bandwidths, responsivities, `noise_var`, ...) follow the same rule, and a non-string `device` or `set_log_level` level raises `TypeError` too.
+- **`plot_spectrogram` averages long spectrograms** in groups of segments on the device, to at most `max_rows=1000` rows (in power; every k-th row for the phase modes). Pass `max_rows=0` to draw every segment.
+
+### Added
+
+- `commkit.equalization.estimate_gain`, `correct_gain` and `GainEstimate`: the data-aided amplitude gain the metrics divide by, which puts symbols on the reference's scale before `compute_llr`. On 16-QAM at Es/N0 = 0 dB, LLRs of power-normalized symbols with `noise_variance` reach a GMI of 0.764 bit; after `correct_gain`, 0.866 bit, within 6e-4 bit of LLRs with the true gain and noise variance.
+
+### Fixed
+
+- `evm`, `snr` and `noise_variance` measure the error relative to the reference's power whatever the scale of either input; the 1e-3 tolerance around unit reference power, and the normalization behind it, are gone.
+- `carrier_phase_trajectory(channel_pairing="swap")` raises for a single channel instead of acting as `"identity"`.
+- `allan_deviation` raises when none of `taus` fits the record instead of returning an empty result; its documentation no longer promises NaN for averaging times that do not fit (they are left out).
+- `spectrogram` names `samples` when they are empty, instead of SciPy's message.
+- `plot_frequency_offset_estimate` draws every channel of a blockwise estimate, on a time axis in seconds; it drew the first channel only, against the sample index.
+- `cross_correlate` checks `mode` before computing the correlation.
+- `plot_spectrogram` copies at most `max_rows` x `nfft` values to the host; it copied about 1.14 times the record.
+- Raises sections added or completed for `correct_channel`, `welch_psd`, `spectrogram`, `smooth_phase`, `allan_deviation`, `frequency_drift` and `carrier_phase_trajectory`; `smooth_phase`'s messages name the function.
+- Duplicated validation replaced by two helpers, so integer and finite-number checks agree everywhere (`edge_trim` accepted `2.0` in the linewidth methods and rejected it in `frequency_drift`; `BPS(block_size=2.5)`, `Tikhonov(block_size=2.5)` and `estimate_channel(nfft=64.5)` passed validation).
+
+### Development
+
+- `tests/common/transfers.py` traces host-device copies at CuPy's level; the transfer audit and `TestDeviceReduction` share it. `TestDeviceReduction` no longer patches `to_device` (which hid its copies from the audit and missed direct `.get()` calls) and draws every plot at two record lengths, so a copy that grows with the record fails.
+- The contract registry checks that each row's data-argument count equals the signature's positional parameters.
+- Fiber and IQ compensation tests moved to `tests/equalization/test_fiber_compensation.py`, `test_fiber_estimation.py` and `test_iq.py`; the quality-metric test checks scale invariance against AWGN theory instead of the removed tolerance branch; the gain tests score against the true gain and oracle LLRs, each with a failing baseline.
+
 ## [3.10.2] - 2026-11-24
 
 Follow-up polish and fixes from the alignment review: unified value-object host copying and equality semantics, persistent BPS anchor state across sequential equalizer resumes, upfront composite-code validation, GPU IIR support beyond 16 sections, consistent real-input optical transforms, zero-copy frequency-offset framing, unbiased quality metrics, and stricter contract/theme/transfer audits. No public signatures changed.
+
+### Changes that may need code updates
+
+- `welch_psd` raises `ValueError` for empty samples instead of returning an empty PSD.
+- `smooth_phase` raises when `process_variance` is given together with `linewidth` or `sampling_rate`; it ignored them before.
+- An invalid type in `Signal`, `Reference` or `SingleCarrierFrame` raises `TypeError` instead of `ValueError`.
+- Estimates and results no longer raise on `==`; they compare by identity (replaced by value equality in the next release).
 
 ### Fixed
 
@@ -738,7 +797,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.10.2...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.11.0...HEAD
+[3.11.0]: https://github.com/lokgar/commkit/compare/v3.10.2...v3.11.0
 [3.10.2]: https://github.com/lokgar/commkit/compare/v3.10.1...v3.10.2
 [3.10.1]: https://github.com/lokgar/commkit/compare/v3.10.0...v3.10.1
 [3.10.0]: https://github.com/lokgar/commkit/compare/v3.9.0...v3.10.0
