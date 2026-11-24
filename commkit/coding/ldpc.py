@@ -33,8 +33,8 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from .. import _cuda
-from .._array import freeze_host
-from ..backend import ArrayType, _device_tables, _to_host, dispatch
+from .._array import freeze_host, host_array
+from ..backend import ArrayType, _device_tables, dispatch
 from ..logger import logger
 from ._gf2 import inverse, matmul_mod2, rank, row_reduce
 from ._ldpc_tables import DVBS2, PON_BASE
@@ -81,8 +81,8 @@ class LDPCCode(_Code):
     punctured: int = 0
 
     def __post_init__(self) -> None:
-        rows = _to_host(self.checks)
-        cols = _to_host(self.variables)
+        rows = host_array(self.checks)
+        cols = host_array(self.variables)
         for name in ("num_checks", "num_variables", "punctured"):
             v = getattr(self, name)
             if isinstance(v, bool) or not isinstance(v, int | np.integer):
@@ -167,6 +167,8 @@ class LDPCCode(_Code):
         """
         import scipy.sparse
 
+        if not scipy.sparse.issparse(parity_check):
+            parity_check = host_array(parity_check)
         h = scipy.sparse.coo_array(parity_check)
         h.sum_duplicates()
         h.eliminate_zeros()
@@ -196,7 +198,7 @@ class LDPCCode(_Code):
         LDPCCode
             Logs a warning on 4-cycles, as :meth:`from_parity_check`.
         """
-        b = np.asarray(base)
+        b = host_array(base)
         z = int(lifting)
         if b.ndim != 2 or z < 1:
             raise ValueError("base must be a matrix and lifting >= 1.")

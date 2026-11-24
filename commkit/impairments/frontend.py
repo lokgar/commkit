@@ -411,7 +411,7 @@ def apply_sampling_jitter(
 # -----------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class IQImbalanceEstimate:
     """Result of :func:`estimate_iq_imbalance`, in the units of
     :func:`apply_iq_imbalance`.

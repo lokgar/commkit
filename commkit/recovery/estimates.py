@@ -24,7 +24,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class CarrierPhaseEstimate:
     """Result of :func:`estimate_carrier_phase`: the result of ``PLL`` and
     ``ConstantPhase``, and the field every method gives.
@@ -47,7 +47,7 @@ class CarrierPhaseEstimate:
     value: ArrayType
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class BlockPhaseEstimate(CarrierPhaseEstimate):
     """Result of the block methods: BPS, Viterbi-Viterbi, Tikhonov.
 
@@ -68,7 +68,7 @@ class BlockPhaseEstimate(CarrierPhaseEstimate):
     block_phase: ArrayType
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PilotInterpolationEstimate(CarrierPhaseEstimate):
     """Result of ``PilotInterpolation``.
 
@@ -88,7 +88,7 @@ class PilotInterpolationEstimate(CarrierPhaseEstimate):
     pilot_phase: ArrayType
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PilotToneEstimate(CarrierPhaseEstimate):
     """Result of ``PilotTone``.
 
@@ -107,7 +107,7 @@ class PilotToneEstimate(CarrierPhaseEstimate):
     tone_frequencies: np.ndarray
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PilotTonesEstimate(PilotToneEstimate):
     """Result of ``PilotTones``.
 

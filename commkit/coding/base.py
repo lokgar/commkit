@@ -43,7 +43,7 @@ __all__ = ["DecodeResult", "decode", "encode"]
 _HARD_LLR = 1.0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class DecodeResult:
     """Output of :func:`decode`, arrays on the input's device.
 

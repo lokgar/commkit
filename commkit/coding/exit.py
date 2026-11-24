@@ -62,11 +62,17 @@ from typing import Any
 import numpy as np
 
 from .. import _random
-from .._array import freeze_host
-from ..backend import ArrayType, _module_for, _to_host, dispatch, to_device
+from .._array import freeze_host, host_array
+from ..backend import (
+    ArrayType,
+    _module_for,
+    dispatch,
+    require_device,
+    to_device,
+)
 from ..logger import logger
 from ..mapping import Constellation
-from .base import _decode_blocks, _encode_blocks, _resolve_method
+from .base import _decode_blocks, _encode_blocks, _resolve_method, _Value
 from .ldpc import LDPCCode
 
 __all__ = [
@@ -103,7 +109,7 @@ _DEMAP_CHUNK = 1 << 22
 
 
 @dataclass(frozen=True, eq=False)
-class ExitCurve:
+class ExitCurve(_Value):
     """The transfer curve of one soft-in soft-out component.
 
     Returned by the curve sources of this module; the constructor takes the
@@ -133,7 +139,7 @@ class ExitCurve:
 
     def __post_init__(self) -> None:
         a = freeze_host(self, "a_priori", self.a_priori, np.float64)
-        e = _to_host(self.extrinsic, np.float64)
+        e = host_array(self.extrinsic, np.float64)
         if a.ndim != 1 or a.shape != e.shape or a.size < 2:
             raise ValueError(
                 "ExitCurve: a_priori and extrinsic must be 1-D of one length >= 2, "
@@ -149,7 +155,7 @@ class ExitCurve:
 
 
 @dataclass(frozen=True, eq=False)
-class ExitChart:
+class ExitChart(_Value):
     """Two EXIT curves and the decoding trajectory between them.
 
     Attributes
@@ -371,7 +377,7 @@ def decoder_exit_curve(
     """
     method = _resolve_method(code, method, "decoder_exit_curve()")
     _check_points(num_points, "decoder_exit_curve()")
-    xp = _module_for(_check_device(device, "decoder_exit_curve()"))
+    xp = _module_for(require_device(device, "decoder_exit_curve()"))
     blocks = (
         max(1, math.ceil(_DEFAULT_BITS / code.n)) if num_blocks is None else num_blocks
     )
@@ -554,7 +560,7 @@ def demapper_exit_curve(
         )
     if method not in ("exact", "maxlog"):
         raise ValueError(f'{name}: method must be "exact" or "maxlog", got {method!r}.')
-    xp = _module_for(_check_device(device, name))
+    xp = _module_for(require_device(device, name))
 
     gen = _random.as_generator(rng)
     index = to_device(gen.integers(0, constellation.order, num_symbols), device)
@@ -980,10 +986,3 @@ def _check_points(num_points: Any, name: str) -> None:
         raise ValueError(
             f"{name}: num_points must be an integer >= 2, got {num_points}."
         )
-
-
-def _check_device(device: Any, name: str) -> str:
-    """Validate ``device`` as the factories do (``core`` is above this layer)."""
-    if isinstance(device, str) and device.lower() in ("cpu", "gpu"):
-        return device.lower()
-    raise ValueError(f'{name} requires device to be "cpu" or "gpu"; got {device!r}.')

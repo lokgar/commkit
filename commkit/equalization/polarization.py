@@ -115,7 +115,7 @@ def _apply_interpolated_matrix(
 # -----------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PolarizationEstimate:
     """Unmixing (inverse Jones) matrices over time, applied by
     :func:`correct_polarization`.
@@ -164,7 +164,7 @@ class PolarizationEstimate:
         return self.matrix_grid[0]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PolarizationTonesEstimate(PolarizationEstimate):
     """Result of :class:`PolarizationTones`.
 

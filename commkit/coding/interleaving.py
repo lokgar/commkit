@@ -19,8 +19,8 @@ from typing import Any
 
 import numpy as np
 
-from .._array import freeze_host, validate_array
-from ..backend import ArrayType, _device_tables, _to_host, get_array_module
+from .._array import freeze_host, host_array, validate_array
+from ..backend import ArrayType, _device_tables, get_array_module
 from .base import _Value
 
 __all__ = ["Interleaver", "deinterleave", "interleave"]
@@ -40,7 +40,7 @@ class Interleaver(_Value):
     permutation: np.ndarray
 
     def __post_init__(self) -> None:
-        p = _to_host(self.permutation)
+        p = host_array(self.permutation)
         if p.ndim != 1 or p.size == 0 or p.dtype.kind not in "iu":
             raise ValueError("permutation must be a non-empty 1-D integer array.")
         if not np.array_equal(np.sort(p), np.arange(p.size)):

@@ -47,7 +47,7 @@ _PAYLOAD = "transmitted payload drawn on the host"
 
 # "path/to/module.py::qualname" -> why the transfer is deliberate.
 _DOCUMENTED: dict[str, str] = {
-    "_array.py::freeze_host": "value object: host copy of an array field",
+    "_array.py::host_array": "value object: host copy of an array field",
     "analysis/linewidth/phase.py::_beta_separation": _REPORT,
     "analysis/linewidth/phase.py::_increment_subtract": _HOST_VALUE
     + " (reference symbols)",

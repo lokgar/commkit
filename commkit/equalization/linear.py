@@ -31,7 +31,7 @@ __all__ = ["ChannelEstimate", "apply_taps", "correct_channel", "estimate_channel
 # -----------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class ChannelEstimate:
     """A (MIMO) channel estimated from a known reference, from
     :func:`estimate_channel`, inverted by :func:`correct_channel`.

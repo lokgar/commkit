@@ -108,6 +108,19 @@ def _module_for(device: str) -> types.ModuleType:
     return _cupy()
 
 
+def require_device(device: str, function_name: str) -> str:
+    """Validate a factory's ``device`` and return it lower-cased.
+
+    Factories have no input data whose device they could follow, so they are
+    the only functions that take ``device=``.
+    """
+    if isinstance(device, str) and device.lower() in ("cpu", "gpu"):
+        return device.lower()
+    raise ValueError(
+        f'{function_name} requires device to be "cpu" or "gpu"; got {device!r}.'
+    )
+
+
 def get_array_module(data: Any) -> types.ModuleType:
     """Return the array module (NumPy or CuPy) of the data.
 

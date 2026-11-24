@@ -22,7 +22,7 @@ from .linear import iir_filter
 __all__ = ["FilterResponse", "filter_response", "impulse_response", "step_response"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class FilterResponse:
     """Frequency response and group delay of a digital filter.
 

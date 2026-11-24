@@ -258,12 +258,38 @@ class TestCodeValue:
         "build",
         [
             lambda a: LinearBlockCode(generator=a(H74.generator)),
+            lambda a: LinearBlockCode.from_parity_check(a(H74.parity_check)),
             lambda a: LDPCCode(a(LDPC74.checks), a(LDPC74.variables), 3, 7),
+            lambda a: LDPCCode.from_parity_check(
+                a(
+                    np.array(
+                        [[1, 1, 1, 0, 0, 0], [0, 0, 1, 1, 1, 0], [1, 0, 0, 0, 1, 1]]
+                    )
+                )
+            ),
+            lambda a: LDPCCode.quasi_cyclic(
+                a(np.array([[0, 0, 1, -1], [-1, 1, 0, 0]])), lifting=5
+            ),
             lambda a: PolarCode(8, a(np.array([3, 5, 6, 7]))),
+            lambda a: PolarCode.from_frozen(
+                a(np.array([True, True, True, False, True, False, False, False]))
+            ),
             lambda a: Punctured(H74, a(np.array([6]))),
             lambda a: Interleaver(a(np.array([2, 0, 3, 1]))),
+            lambda a: Interleaver(a(np.arange(512)[::-1])),
         ],
-        ids=["linear", "ldpc", "polar", "punctured", "interleaver"],
+        ids=[
+            "linear",
+            "linear-from-h",
+            "ldpc",
+            "ldpc-from-h",
+            "ldpc-qc",
+            "polar",
+            "polar-from-frozen",
+            "punctured",
+            "interleaver",
+            "interleaver-512",
+        ],
     )
     def test_device_arrays_become_host_copies(self, xp: Any, build: Any) -> None:
         """Array fields given on the device equal the host-built object and

@@ -137,7 +137,7 @@ class Reference:
 
         code = self.code
         if not isinstance(code, _Code):
-            raise ValueError(
+            raise TypeError(
                 f"code must be a code object from commkit.coding, got "
                 f"{type(code).__name__}."
             )
@@ -603,17 +603,17 @@ def _validate_field(name: str, value: Any) -> Any:
         from ..mapping import Constellation
 
         if not isinstance(value, Constellation):
-            raise ValueError(
+            raise TypeError(
                 f"constellation must be a Constellation, got {type(value).__name__}."
             )
     elif name == "pulse":
         from ..filtering.pulses import Pulse
 
         if not isinstance(value, Pulse):
-            raise ValueError(f"pulse must be a Pulse, got {type(value).__name__}.")
+            raise TypeError(f"pulse must be a Pulse, got {type(value).__name__}.")
     elif name == "reference":
         if not isinstance(value, Reference):
-            raise ValueError(
+            raise TypeError(
                 f"reference must be a Reference, got {type(value).__name__}."
             )
     return value

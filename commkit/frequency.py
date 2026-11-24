@@ -309,7 +309,7 @@ FrequencyMethod = MthPower | MengaliMorelli | PilotSlope | SpectralPeak
 # -----------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class FrequencyOffsetEstimate:
     """Result of :func:`estimate_frequency_offset`: the result of
     ``SpectralPeak``, and the fields every method gives.
@@ -351,7 +351,7 @@ class FrequencyOffsetEstimate:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class MthPowerEstimate(FrequencyOffsetEstimate):
     """Result of :class:`MthPower`.
 
@@ -375,7 +375,7 @@ class MthPowerEstimate(FrequencyOffsetEstimate):
     spectrum_frequencies: np.ndarray
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class MengaliMorelliEstimate(FrequencyOffsetEstimate):
     """Result of :class:`MengaliMorelli`.
 
@@ -394,7 +394,7 @@ class MengaliMorelliEstimate(FrequencyOffsetEstimate):
     autocorrelation: ArrayType
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PilotSlopeEstimate(FrequencyOffsetEstimate):
     """Result of :class:`PilotSlope`.
 
@@ -413,7 +413,7 @@ class PilotSlopeEstimate(FrequencyOffsetEstimate):
     pilot_indices: np.ndarray
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class BlockwiseFrequencyEstimate(FrequencyOffsetEstimate):
     """Result of a method with a ``block_size``: a time-varying offset.
 

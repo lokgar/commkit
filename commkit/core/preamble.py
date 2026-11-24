@@ -14,9 +14,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .._sequences import barker_sequence, zadoff_chu_sequence, zc_mimo_root
-from ..backend import ArrayType, to_device
+from ..backend import ArrayType, require_device, to_device
 from . import generation
-from ._signal_input import require_device, require_integer_sps
+from ._signal_input import require_integer_sps
 from .signal import Signal
 
 if TYPE_CHECKING:

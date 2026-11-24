@@ -314,3 +314,17 @@ def test_decoder_exit_curve_handles_infinite_llrs() -> None:
     # 1/6 + 1/2 * log2(3/2) ~= 0.45915 bits.
     expected = 1.0 / 6.0 + 0.5 * math.log2(1.5)
     np.testing.assert_allclose(curve.extrinsic, expected, atol=0.03)
+
+
+def test_exit_curve_and_chart_value_equality() -> None:
+    """ExitCurve and ExitChart compare by value and hash consistently."""
+    x = np.linspace(0.0, 1.0, 11)
+    c1 = ExitCurve(x, x**0.5, label="a")
+    c2 = ExitCurve(x.copy(), (x**0.5).copy(), label="a")
+    c3 = ExitCurve(x, x**0.5, label="b")
+    assert c1 == c2 and hash(c1) == hash(c2)
+    assert c1 != c3
+    d = ExitCurve(x, x**2, label="d")
+    ch1 = ExitChart(c1, d)
+    ch2 = ExitChart(c2, ExitCurve(x.copy(), (x**2).copy(), label="d"))
+    assert ch1 == ch2 and hash(ch1) == hash(ch2)

@@ -407,7 +407,7 @@ def apply_delay(samples: S, *, delay: float | ArrayType) -> S:
     return inp.wrap(restore_1d(was_1d, result))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class TimingEstimate:
     """Result of :func:`estimate_timing`.
 

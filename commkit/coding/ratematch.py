@@ -19,8 +19,8 @@ from typing import Any
 
 import numpy as np
 
-from .._array import freeze_host
-from ..backend import ArrayType, _device_tables, _to_host, dispatch
+from .._array import freeze_host, host_array
+from ..backend import ArrayType, _device_tables, dispatch
 from .base import (
     _CODECS,
     _checked,
@@ -64,7 +64,7 @@ class Punctured(_Code):
 
     def __post_init__(self) -> None:
         _codec(self.code, "Punctured()")
-        raw = _to_host(self.positions)
+        raw = host_array(self.positions)
         p = np.unique(raw)
         if p.size != raw.size or p.size == 0:
             raise ValueError("positions must be distinct and not empty.")

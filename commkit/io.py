@@ -53,8 +53,8 @@ import numpy as np
 
 from . import backend as _backend
 from . import core as _core
+from .backend import require_device
 from .core import Reference, Signal
-from .core._signal_input import require_device
 from .logger import logger
 from .mapping.constellation import Constellation
 

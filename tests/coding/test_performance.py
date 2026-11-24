@@ -212,3 +212,48 @@ class TestErrorRateCurve:
             ErrorRateCurve(
                 [1.0], [1], [-1], [0], [0], [0], [0], [1], k=1, n=1, bits_per_symbol=1
             )
+
+    def test_value_equality(self) -> None:
+        a = ErrorRateCurve(
+            [1.0, 2.0],
+            [10, 20],
+            [5, 1],
+            [2, 1],
+            [7, 3],
+            [1, 1],
+            [1, 0],
+            [10, 12],
+            k=4,
+            n=7,
+            bits_per_symbol=2,
+            label="hamming",
+        )
+        b = ErrorRateCurve(
+            np.array([1.0, 2.0]),
+            np.array([10, 20]),
+            np.array([5, 1]),
+            np.array([2, 1]),
+            np.array([7, 3]),
+            np.array([1, 1]),
+            np.array([1, 0]),
+            np.array([10, 12]),
+            k=4,
+            n=7,
+            bits_per_symbol=2,
+            label="hamming",
+        )
+        assert a == b and hash(a) == hash(b)
+        assert a != ErrorRateCurve(
+            [1.0, 3.0],
+            [10, 20],
+            [5, 1],
+            [2, 1],
+            [7, 3],
+            [1, 1],
+            [1, 0],
+            [10, 12],
+            k=4,
+            n=7,
+            bits_per_symbol=2,
+            label="hamming",
+        )

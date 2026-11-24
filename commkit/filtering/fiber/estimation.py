@@ -230,7 +230,7 @@ class QuadraticPhaseFit:
                 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class ChromaticDispersionEstimate:
     """Result of :func:`estimate_chromatic_dispersion`, the fields every
     method gives.
@@ -253,7 +253,7 @@ class ChromaticDispersionEstimate:
     method: ClockToneScan | FourthMomentScan | QuadraticPhaseFit
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class DispersionScanEstimate(ChromaticDispersionEstimate):
     """Result of a scan, :class:`ClockToneScan` or :class:`FourthMomentScan`.
 
@@ -278,7 +278,7 @@ class DispersionScanEstimate(ChromaticDispersionEstimate):
     metric: np.ndarray
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class QuadraticPhaseFitEstimate(ChromaticDispersionEstimate):
     """Result of :class:`QuadraticPhaseFit`.
 

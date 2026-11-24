@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 
 from .._circular import convolve_periodic
-from ..backend import ArrayType, dispatch, to_device
+from ..backend import ArrayType, dispatch, require_device, to_device
 from ..logger import logger
 from ..mapping.constellation import Constellation
 from ..math import db_to_linear, normalize
 from . import generation
-from ._signal_input import _same_value, require_device, require_integer_sps
+from ._signal_input import _same_value, require_integer_sps
 from .preamble import Preamble, _check_int
 from .signal import Reference, Signal
 
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 __all__ = ["FrameStructure", "SingleCarrierFrame", "extract_payload"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class FrameStructure:
     """Boolean masks of a frame's segments, from
     :meth:`SingleCarrierFrame.get_structure_map`.
@@ -209,7 +209,7 @@ class SingleCarrierFrame:
         _check_int("num_channels", self.num_channels, 1)
         for name in ("payload_constellation", "pilot_constellation"):
             if not isinstance(getattr(self, name), Constellation):
-                raise ValueError(
+                raise TypeError(
                     f"{name} must be a Constellation, e.g. Constellation.qam(16)."
                 )
         if self.pilot_constellation.pmf is not None:
@@ -224,7 +224,7 @@ class SingleCarrierFrame:
                 f"guard_type must be 'zero' or 'cp', got {self.guard_type!r}."
             )
         if self.preamble is not None and not isinstance(self.preamble, Preamble):
-            raise ValueError("preamble must be a Preamble or None.")
+            raise TypeError("preamble must be a Preamble or None.")
         if self.preamble is not None and self.preamble.num_channels > 1:
             if self.preamble.num_channels != self.num_channels:
                 raise ValueError(

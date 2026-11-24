@@ -28,8 +28,8 @@ from typing import Any
 
 import numpy as np
 
-from .._array import freeze_host
-from ..backend import ArrayType, _device_tables, _to_host, dispatch, to_device
+from .._array import freeze_host, host_array
+from ..backend import ArrayType, _device_tables, dispatch, to_device
 from .base import _CODECS, _Code, _Codec, _Decoded, _encode_blocks, _numba
 from .crc import CRC
 
@@ -141,7 +141,7 @@ class PolarCode(_Code):
         n = self.length
         if isinstance(n, bool) or not isinstance(n, int) or n < 2 or n & (n - 1):
             raise ValueError(f"length must be a power of two >= 2, got {n!r}.")
-        raw = _to_host(self.info_positions)
+        raw = host_array(self.info_positions)
         p = np.unique(raw)
         if p.size != raw.size or p.size == 0:
             raise ValueError("info_positions must be distinct and not empty.")
@@ -224,7 +224,7 @@ class PolarCode(_Code):
         -------
         PolarCode
         """
-        mask = np.asarray(frozen, dtype=bool)
+        mask = host_array(frozen, dtype=bool)
         if mask.ndim != 1:
             raise ValueError("frozen must be a 1-D mask.")
         return cls(int(mask.size), np.flatnonzero(~mask), crc)

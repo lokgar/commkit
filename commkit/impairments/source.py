@@ -17,8 +17,8 @@ import numpy as np
 from .. import _fft
 from .._array import as_2d, restore_1d
 from .._random import RNG, as_generator, standard_normal
-from ..backend import ArrayType, _module_for, dispatch, to_device
-from ..core._signal_input import S, SignalInput, require_device
+from ..backend import ArrayType, _module_for, dispatch, require_device, to_device
+from ..core._signal_input import S, SignalInput
 from ..logger import logger
 from ..math import _derotate
 

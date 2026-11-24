@@ -24,9 +24,9 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
-from .._array import freeze_host
+from .._array import freeze_host, host_array
 from .._bits import pack_bits, unpack_bits
-from ..backend import ArrayType, _device_tables, _to_host, dispatch
+from ..backend import ArrayType, _device_tables, dispatch
 from ._gf2 import matmul_mod2, null_space, row_reduce
 from .base import (
     _CODECS,
@@ -77,7 +77,7 @@ class LinearBlockCode(_Code):
     generator: np.ndarray
 
     def __post_init__(self) -> None:
-        g = _to_host(self.generator)
+        g = host_array(self.generator)
         if g.ndim != 2 or g.shape[0] < 1 or g.shape[1] < g.shape[0]:
             raise ValueError(
                 f"generator must have shape (k, n) with 1 <= k <= n, got {g.shape}."
@@ -136,7 +136,7 @@ class LinearBlockCode(_Code):
             leftmost positions that are independent of the parity checks
             (the first ``k`` when ``H = [A | I]``).
         """
-        h = np.asarray(parity_check)
+        h = host_array(parity_check)
         if h.ndim != 2 or not np.all((h == 0) | (h == 1)):
             raise ValueError("parity_check must be a binary matrix (m, n).")
         g = null_space(h.astype(np.int8), reverse=True)[0]

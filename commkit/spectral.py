@@ -592,7 +592,7 @@ def _median_bias(n: int) -> float:
     return float(1 + np.sum(1.0 / (ii_2 + 1) - 1.0 / ii_2))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Spectrogram:
     """Result of :func:`spectrogram`.
 

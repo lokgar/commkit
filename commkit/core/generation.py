@@ -21,11 +21,11 @@ import numpy as np
 
 from .._circular import convolve_periodic
 from .._random import as_generator
-from ..backend import ArrayType, dispatch, to_device
+from ..backend import ArrayType, dispatch, require_device, to_device
 from ..logger import logger
 from ..mapping.constellation import Constellation
 from ..math import normalize
-from ._signal_input import require_device, require_integer_sps
+from ._signal_input import require_integer_sps
 from .signal import Reference, Signal
 
 if TYPE_CHECKING:

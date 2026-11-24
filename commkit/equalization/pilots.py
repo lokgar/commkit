@@ -7,13 +7,12 @@ from typing import Any
 
 import numpy as np
 
-from .._array import broadcast_channels, freeze_host
-from ..backend import _to_host
+from .._array import broadcast_channels, freeze_host, host_array
 
 __all__ = ["EqualizerPilots"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class EqualizerPilots:
     """Known pilot symbols at known positions, for ``cma``, ``rde``,
     ``block_cma`` and ``block_rde``.
@@ -49,7 +48,7 @@ class EqualizerPilots:
 
     def __post_init__(self) -> None:
         values = freeze_host(self, "values", self.values, np.complex64)
-        mask = _to_host(self.mask)
+        mask = host_array(self.mask)
         if mask.ndim != 1 or mask.dtype.kind not in "bui":
             raise ValueError(f"mask must be a 1-D boolean array, got {mask.shape}.")
         mask = freeze_host(self, "mask", mask, bool)

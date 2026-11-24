@@ -7,8 +7,7 @@ Signal through one typed method per field, and returns results through
 :meth:`SignalInput.wrap`.  :data:`S` is the TypeVar of a transform's
 argument and result.  Also :func:`reference_of` (the :class:`Reference` of
 a Signal passed as a reference argument), :func:`require_value` (a value
-that must be there), :func:`require_device` and
-:func:`require_integer_sps`.
+that must be there) and :func:`require_integer_sps`.
 
 Two rules, the same for every field.  A **property** of the samples
 (``sampling_rate``, ``symbol_rate``, ``sps``, ``center_frequency``,
@@ -384,19 +383,6 @@ def require_value(
             f"{type(value).__name__}."
         )
     return value
-
-
-def require_device(device: str, function_name: str) -> str:
-    """Validate a factory's ``device`` and return it lower-cased.
-
-    Factories have no input data whose device they could follow, so they are
-    the only functions that take ``device=``.
-    """
-    if isinstance(device, str) and device.lower() in ("cpu", "gpu"):
-        return device.lower()
-    raise ValueError(
-        f'{function_name} requires device to be "cpu" or "gpu"; got {device!r}.'
-    )
 
 
 def require_integer_sps(value: float, function_name: str) -> int:

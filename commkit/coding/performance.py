@@ -19,12 +19,11 @@ from typing import Any
 import numpy as np
 
 from .. import _random
-from .._array import freeze_host
-from ..backend import _module_for, _to_host, to_device
+from .._array import freeze_host, host_array
+from ..backend import _module_for, _to_host, require_device, to_device
 from ..logger import logger
 from ..mapping import Constellation
-from .base import _checked, _decode_blocks, _encode_blocks, _resolve_method
-from .exit import _check_device
+from .base import _checked, _decode_blocks, _encode_blocks, _resolve_method, _Value
 
 __all__ = ["ErrorRateCurve", "error_rate_curve"]
 
@@ -34,7 +33,7 @@ _BATCH_BITS = 1 << 18
 
 
 @dataclass(frozen=True, eq=False)
-class ErrorRateCurve:
+class ErrorRateCurve(_Value):
     """Decoding error counts of a code against Es/N0, one entry per point.
 
     Built by :func:`error_rate_curve`, or from the counts of your own
@@ -102,7 +101,7 @@ class ErrorRateCurve:
                 f"shape {esn0.shape}."
             )
         for name in _COUNT_FIELDS:
-            value = _to_host(getattr(self, name))
+            value = host_array(getattr(self, name))
             if value.shape != esn0.shape:
                 raise ValueError(
                     f"ErrorRateCurve: {name} must have the shape of esn0_db "
@@ -277,7 +276,7 @@ def error_rate_curve(
             raise ValueError(f"{name}: {arg} must be an integer, got {value!r}.")
         if value < 1:
             raise ValueError(f"{name}: {arg} must be >= 1, got {value}.")
-    device = _check_device(device, name)
+    device = require_device(device, name)
     xp = _module_for(device)
     gen = _random.as_generator(rng)
     k, n, m = int(code.k), int(code.n), constellation.bits_per_symbol

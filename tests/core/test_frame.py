@@ -480,8 +480,10 @@ class TestFrameConstellations:
         np.testing.assert_array_equal(sig.frame.payload_constellation.pmf, c.pmf)
 
     def test_invalid_constellations(self) -> None:
-        with pytest.raises(ValueError, match="payload_constellation"):
+        with pytest.raises(TypeError, match="payload_constellation"):
             SingleCarrierFrame(payload_constellation="qam")
+        with pytest.raises(TypeError, match="preamble"):
+            SingleCarrierFrame(payload_num_symbols=10, preamble="barker")
         with pytest.raises(ValueError, match="must not be shaped"):
             SingleCarrierFrame(pilot_constellation=Constellation.qam(16).shaped(nu=0.1))
 

@@ -197,7 +197,7 @@ class Gardner:
         return 4.0 * bt / detector_gain, 4.0 * bt * bt / detector_gain
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class SamplingClockOffsetEstimate:
     """Result of :func:`estimate_sampling_clock_offset`; the constructor
     takes the same fields.

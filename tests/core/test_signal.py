@@ -139,7 +139,7 @@ class TestSignalCreation:
             )
         with pytest.raises(ValueError, match="needs info_bits"):
             Reference(symbols=sym, bits=bits, code=code)
-        with pytest.raises(ValueError, match="code object"):
+        with pytest.raises(TypeError, match="code object"):
             Reference(symbols=sym, bits=bits, info_bits=info, code=(7, 4))
 
     def test_reference_to_keeps_sharing(self, xp):
@@ -400,24 +400,24 @@ class TestSignalCloningAndProvenance:
             s.replace(sample_rate=4.0)
 
     @pytest.mark.parametrize(
-        "field, value",
+        "field, value, exc",
         [
-            ("symbol_rate", -1.0),
-            ("center_frequency", -1.0),
-            ("domain", "baseband"),
-            ("domain", 1),
-            ("sampling_rate", "1e6"),
-            ("constellation", "qam"),
-            ("pulse", "rrc"),
-            ("reference", np.ones(4)),
+            ("symbol_rate", -1.0, ValueError),
+            ("center_frequency", -1.0, ValueError),
+            ("domain", "baseband", ValueError),
+            ("domain", 1, ValueError),
+            ("sampling_rate", "1e6", ValueError),
+            ("constellation", "qam", TypeError),
+            ("pulse", "rrc", TypeError),
+            ("reference", np.ones(4), TypeError),
         ],
     )
-    def test_signal_field_validation(self, xp, field, value):
+    def test_signal_field_validation(self, xp, field, value, exc):
         s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
-        with pytest.raises(ValueError, match=field):
+        with pytest.raises(exc, match=field):
             s.replace(**{field: value})
         kwargs = dict(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
-        with pytest.raises(ValueError, match=field):
+        with pytest.raises(exc, match=field):
             Signal(**{**kwargs, field: value})
 
     def test_signal_numeric_fields_are_coerced(self, xp):
@@ -604,7 +604,7 @@ class TestSignalWaveformsAndModulation:
         data = xp.zeros(10)
         s = Signal(samples=data, sampling_rate=100.0, symbol_rate=10.0)
 
-        with pytest.raises(ValueError, match="pulse must be a Pulse"):
+        with pytest.raises(TypeError, match="pulse must be a Pulse"):
             s.replace(pulse="invalid_shape")
 
     def test_rzpam_odd_sps(self, xp):

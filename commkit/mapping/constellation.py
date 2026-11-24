@@ -27,9 +27,9 @@ from typing import Any
 
 import numpy as np
 
-from .._array import freeze_host, warn_if_double
+from .._array import freeze_host, host_array, warn_if_double
 from .._bits import pack_bits, unpack_bits
-from ..backend import ArrayType, _device_tables, _to_host, dispatch
+from ..backend import ArrayType, _device_tables, dispatch
 from ._demap import _llr, _llr_separable, _llr_separable_gpu
 from ._lattice import Axis, find_separable_axes, find_square_grid
 from .gray import _gray_points, _nearest_index
@@ -83,7 +83,7 @@ class Constellation:
     family: str | None = None
 
     def __post_init__(self) -> None:
-        points = _to_host(self.points)
+        points = host_array(self.points)
         if points.ndim != 1 or points.size < 2:
             raise ValueError(
                 f"points must have shape (M,) with M >= 2, got {points.shape}."
@@ -105,7 +105,7 @@ class Constellation:
         if self.bit_labels is None:
             labels = unpack_bits(np.arange(order, dtype=np.int32), k)
         else:
-            labels = _to_host(self.bit_labels)
+            labels = host_array(self.bit_labels)
             if labels.shape != (order, k):
                 raise ValueError(
                     f"bit_labels must have shape ({order}, {k}), got {labels.shape}."
@@ -118,7 +118,7 @@ class Constellation:
 
         pmf = None
         if self.pmf is not None:
-            pmf = _to_host(self.pmf, np.float64)
+            pmf = host_array(self.pmf, np.float64)
             if pmf.shape != (order,):
                 raise ValueError(f"pmf must have shape ({order},), got {pmf.shape}.")
             if not np.all(np.isfinite(pmf)) or np.any(pmf < 0):
