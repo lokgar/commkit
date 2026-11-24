@@ -197,25 +197,30 @@ class TestSignalToNoiseRatio:
         assert res[0] == float("inf")
         assert res[1] == float("-inf")
 
-    def test_ref_power_within_unit_tolerance_is_unbiased(self, xp: Any) -> None:
-        """When |mean(|tx|^2) - 1| <= 1e-3, evm, snr and noise_variance all divide by ref_pwr."""
-        # Scale unit-power QPSK by sqrt(1.0008) so _unit_reference keeps tx unnormalized.
-        scale = np.sqrt(1.0008)
+    @pytest.mark.parametrize("ref_scale", [1.0, 1.0004, 3.0, 1e-3])
+    def test_quality_metrics_ignore_both_scales(
+        self, xp: Any, ref_scale: float
+    ) -> None:
+        """EVM, SNR and noise variance read the error relative to the
+        reference's power, so scaling the symbols (by 0.4 e^{j0}) or the
+        reference (by any factor, one just inside the former 1e-3 shortcut
+        included) changes nothing beyond rounding.
+
+        At Es/N0 = 15 dB on 20 000 QPSK symbols the SNR is 15 dB within
+        0.15 dB (relative spread of the noise power sqrt(1/N) = 0.7 %, 0.03
+        dB; measured 14.99 dB), and the three agree exactly:
+        ``(EVM/100)^2 = sigma^2 = 10^(-SNR/10)``.
+        """
         rng = np.random.default_rng(11)
-        tx = xp.asarray(
-            (Constellation.qam(4).points[rng.integers(0, 4, 2000)] * scale).astype(
-                np.complex64
-            )
-        )
-        # Deterministic zero-correlation noise of exact power 0.01 * scale^2 -> exact SNR = 20 dB.
-        sign = xp.where(xp.arange(2000) % 2 == 0, 1.0, -1.0).astype(np.float32)
-        noise = (0.1 * sign) * tx
-        rx = tx + noise
-        e = metrics.evm(rx, tx)
-        s = metrics.snr(rx, tx)
-        nv = metrics.noise_variance(rx, tx)
-        assert e == pytest.approx(10.0, rel=1e-5)
-        assert s == pytest.approx(20.0, abs=1e-4)
-        assert nv == pytest.approx(0.01, rel=1e-5)
+        tx = Constellation.qam(4).points[rng.integers(0, 4, 20000)].astype(np.complex64)
+        rx = apply_awgn(xp.asarray(tx), esn0_db=15.0, sps=1, rng=5)
+        reference = metrics.snr(rx, xp.asarray(tx))
+        assert reference == pytest.approx(15.0, abs=0.15)
+        scaled_tx = xp.asarray((tx * ref_scale).astype(np.complex64))
+        scaled_rx = rx * np.float32(0.4)
+        s = metrics.snr(scaled_rx, scaled_tx)
+        e = metrics.evm(scaled_rx, scaled_tx)
+        nv = metrics.noise_variance(scaled_rx, scaled_tx)
+        assert s == pytest.approx(reference, abs=1e-5)
         assert nv == pytest.approx(10.0 ** (-s / 10.0), rel=1e-9)
         assert (e / 100.0) ** 2 == pytest.approx(nv, rel=1e-9)

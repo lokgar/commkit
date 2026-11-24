@@ -17,20 +17,7 @@ from ..core._signal_input import SignalInput, reference_of
 from ..core.signal import Reference
 from ..logger import logger
 from ..mapping import Constellation
-from ..math import normalize
-
-
-def _unit_reference(tx: ArrayType, xp: Any) -> tuple[ArrayType, ArrayType]:
-    """``tx`` at unit average power per channel, and its power ``(..., 1)``.
-
-    A reference already at unit power (within 1e-3) is kept as it is; the
-    power is measured once and remeasured only after normalizing.
-    """
-    pwr = xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True, dtype=xp.float64)
-    if not xp.allclose(pwr, 1.0, atol=1e-3):
-        tx = normalize(tx, axis=-1, mode="average_power")
-        pwr = xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True, dtype=xp.float64)
-    return tx, pwr
+from ..math import _data_aided_gain
 
 
 def _log_per_channel(
@@ -164,29 +151,6 @@ def _paired(
     return rx, ref
 
 
-def _gain(
-    rx: ArrayType, tx: ArrayType, xp: Any, tx_power: ArrayType | None = None
-) -> ArrayType:
-    """The data-aided gain ``g = |<r s*>| / <|s|^2>`` per channel, ``(..., 1)``.
-
-    ``g`` is the amplitude of the symbols in ``rx`` (the transmittance), so
-    ``rx / g`` is on the scale of ``tx`` whatever the noise; normalizing to
-    unit total power instead shrinks the symbols by ``1/sqrt(1 + 1/SNR)``.
-    Only the magnitude is used: a rotation, ``pi`` included, stays visible.
-    A channel without reference power or correlation gets ``g = 1``.
-    ``tx_power`` is ``<|s|^2>`` ``(..., 1)`` when the caller has it.
-    """
-    num = xp.abs(xp.mean(rx * xp.conj(tx), axis=-1, keepdims=True, dtype=xp.complex128))
-    den = (
-        xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True, dtype=xp.float64)
-        if tx_power is None
-        else tx_power
-    )
-    with np.errstate(divide="ignore", invalid="ignore"):
-        g = num / den
-    return xp.where((den > 0) & (g > 0), g, 1.0).astype(rx.real.dtype)
-
-
 def _reference_scaled(
     inp: SignalInput[Any], rx: ArrayType, xp: Any, name: str, num_skip: int
 ) -> ArrayType:
@@ -201,7 +165,7 @@ def _reference_scaled(
         return rx
     _, ref = _paired(rx, reference, xp, name)
     measured = _skip(rx, num_skip, name)
-    return rx / _gain(measured, _skip(ref, num_skip, name), xp)
+    return rx / _data_aided_gain(measured, _skip(ref, num_skip, name), xp)
 
 
 def _skip(x: ArrayType, n: int, name: str) -> ArrayType:

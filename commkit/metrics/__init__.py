@@ -97,12 +97,14 @@ measures a code's error rates against Es/N0 by Monte Carlo.
 
 Which scale each metric reads:
 
-* ``evm`` and ``snr`` normalize the reference to unit average power and
-  divide the received symbols by the data-aided gain
-  ``g = |<r s*>| / <|s|^2>`` (per channel, after ``num_skip_symbols``).
-  Unlike normalizing to unit total power, which shrinks the symbols by
-  ``1/sqrt(1 + 1/SNR)``, this is unbiased at any SNR.  Only the magnitude
-  is used, so a rotation stays an error.
+* ``evm``, ``snr`` and ``noise_variance`` divide the received symbols by
+  the data-aided gain ``g = |<r s*>| / <|s|^2>`` (per channel, after
+  ``num_skip_symbols``) and measure the error power relative to the
+  reference's power, so neither scale matters.  Unlike normalizing to unit
+  total power, which shrinks the symbols by ``1/sqrt(1 + 1/SNR)``, this is
+  unbiased at any SNR.  Only the magnitude is used, so a rotation stays an
+  error.  :func:`commkit.equalization.correct_gain` applies the same gain
+  to symbols before computing LLRs.
 * ``mi`` and ``gmi`` of a Signal with a reference divide by the same gain,
   which puts the symbols on the constellation's scale whatever their
   normalization; ``noise_var`` is then on that scale.  Arrays are read as
